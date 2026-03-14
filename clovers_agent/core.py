@@ -14,8 +14,8 @@ from .typing import Event, ChatMessage, ToolMessage, Payload, FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 from .config import Config
 
-type AgentFunction[**P] = Callable[Concatenate["CloversAgent", Any, P], Coroutine[Any, Any, str | None]]
-type WrappedAgentFunction[**P] = Callable[Concatenate[str, "CloversAgent", Any, P], Coroutine[Any, Any, tuple[ToolMessage, str] | None]]
+type AgentFunction[**P] = Callable[Concatenate["CloversAgent", Any, P], Coroutine[Any, Any, str]]
+type WrappedAgentFunction[**P] = Callable[Concatenate[str, "CloversAgent", Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
 
 
 class ToolManager:
@@ -29,6 +29,7 @@ class ToolManager:
         self.name = name
         self.intro_tools: list[FunctionToolInfo] = []
         self.skill_keywords: set[str] = set()
+        self.skill_hooks: dict[str, AgentFunction] = {}
         self.extra_tools: list[ToolManager.ExtraToolsType] = []
         self.functions: dict[str, WrappedAgentFunction] = {}
 
@@ -57,14 +58,20 @@ class ToolManager:
 
         def decorator(func: AgentFunction) -> WrappedAgentFunction:
             async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs):
-                logger.debug(f"[{agent.name}][TOOL CALL][{name}] called with {kwargs}")
+                logger.debug(f"[{agent.name}][TOOL CALL][{name}] called")
                 content = await func(agent, event, **kwargs)
-                if content is not None:
-                    message: ToolMessage = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
-                    return message, name
+                message: ToolMessage = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+                return message, name
 
             self.functions[name] = wrapper
             return wrapper
+
+        return decorator
+
+    def on_skill(self, category: str):
+        def decorator(func: AgentFunction) -> AgentFunction:
+            self.skill_hooks[category] = func
+            return func
 
         return decorator
 
@@ -76,6 +83,7 @@ class ToolManager:
         self.skill_keywords.update(plugin.skill_keywords)
         self.extra_tools.extend(plugin.extra_tools)
         self.functions.update(plugin.functions)
+        self.skill_hooks.update(plugin.skill_hooks)
 
     def load_plugin(self, name: str | Path, is_path=False):
         """加载 clovers-ai 插件
@@ -191,8 +199,15 @@ class CloversAgent(ToolManager):
             self.toolmap[tool["info"]["function"]["name"]] = tool["info"]
 
     @staticmethod
-    async def skill_menu(_, event: Event, category: str):
+    async def skill_menu(agent: "CloversAgent", event: Event, category: str):
+        tip = f"已获取技能：{category}"
         event.properties["skill_menu"] = category
+        hook = agent.skill_hooks.get(category)
+        if hook:
+            info = await hook(agent, event)
+            if info:
+                tip += f"，{info}"
+        return tip
 
     @staticmethod
     def build_content(text: str, image_list: list[str] | None):
@@ -208,15 +223,17 @@ class CloversAgent(ToolManager):
 
     async def call_api(self, payload: Payload):
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except:
+            logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
+            raise
         return resp.json()["choices"][0]["message"]
 
-    async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str] | None]:
+    async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
         task_queue = []
         for call_info in call_infos:
-            func = self.functions.get(call_info["function"]["name"])
-            if not func:
-                continue
+            func = self.functions[call_info["function"]["name"]]
             kwargs = json.loads(call_info["function"]["arguments"])
             task_queue.append(func(call_info["id"], self, event, **kwargs))
         return await asyncio.gather(*task_queue)
@@ -271,15 +288,12 @@ class CloversAgent(ToolManager):
         if not (tool_calls := resp.get("tool_calls")):
             return resp["content"].strip()
         event.properties["skill_menu"] = ""
-        intro_prompt = "".join(msg[0]["content"] for msg in await self.function_call(event, tool_calls) if msg)
+        intro_prompt = "".join(msg[0]["content"] for msg in await self.function_call(event, tool_calls) if msg[1])
         # 退出条件：不需要额外技能
         if event.skill_menu:
             used_tools = {"skill_menu"}
-            if intro_prompt:
-                system_message["content"] = f"{self.call_prompt}\n\n{intro_prompt}"
-            else:
-                system_message["content"] = self.call_prompt
-            for i in range(30):
+            system_message["content"] = f"{self.call_prompt}\n\n{intro_prompt}"
+            for _ in range(30):
                 payload["tools"] = [self.toolmap[k] for k in used_tools]
                 if event.skill_menu:
                     select_tools = self.select_tools(event.skill_menu)
@@ -289,17 +303,11 @@ class CloversAgent(ToolManager):
                     break
                 payload["messages"].append(message)
                 event.properties["skill_menu"] = ""
-                for data in await self.function_call(event, tool_calls):
-                    if not data:
-                        continue
-                    msg, key = data
+                for msg, key in await self.function_call(event, tool_calls):
                     used_tools.add(key)
                     payload["messages"].append(msg)
         del payload["tools"]
-        if intro_prompt:
-            system_message["content"] = f"{system_prompt}\n\n{intro_prompt}"
-        else:
-            system_message["content"] = system_prompt
+        system_message["content"] = f"{system_prompt}\n\n{intro_prompt}"
         return (await self.call_api(payload))["content"].strip()
 
     async def chat(self, event: Event):
