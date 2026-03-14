@@ -86,7 +86,7 @@ class ToolManager:
         self.skill_hooks.update(plugin.skill_hooks)
 
     def load_plugin(self, name: str | Path, is_path=False):
-        """加载 clovers-ai 插件
+        """加载 clovers-agent 插件
 
         Args:
             name (str | Path): 插件的包名或路径
