@@ -9,8 +9,8 @@ from clovers.utils import import_name, list_modules
 from clovers.logger import logger
 from collections import deque
 from collections.abc import Iterable, Callable, Coroutine
-from typing import Literal, TypedDict, Any, Concatenate
-from .typing import Event, ChatMessage, ToolMessage, Payload, FunctionToolInfo
+from typing import TypedDict, Any, Concatenate
+from .typing import Event, Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage, Payload, FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 from .config import Config
 
@@ -131,8 +131,6 @@ class ToolManager:
 
 
 class Session:
-    type UserMessage = ChatMessage[Literal["user"]]
-    type AssistantMessage = ChatMessage[Literal["assistant"]]
     type Timestamp = int | float
 
     records: deque[tuple[UserMessage, AssistantMessage, Timestamp]]
@@ -181,7 +179,7 @@ class CloversAgent(ToolManager):
         self.memory_timeout = config.memory_timeout
         self.topic_coldown = config.topic_coldown
         self.sessions: dict[str, Session] = {}
-        self.current_input: Session.UserMessage | None = None
+        self.current_input: UserMessage | None = None
         self.load_plugins_from_list(config.plugins)
         self.load_plugins_from_dirs(config.plugin_dirs)
         self.toolmap: dict[str, FunctionToolInfo] = {}
@@ -221,7 +219,7 @@ class CloversAgent(ToolManager):
                 content.extend({"type": "image_url", "image_url": {"url": image_url}} for image_url in image_list)
             return content
 
-    async def call_api(self, payload: Payload):
+    async def call_api(self, payload: Payload) -> AssistantMessage:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
         try:
             resp.raise_for_status()
@@ -238,7 +236,7 @@ class CloversAgent(ToolManager):
             task_queue.append(func(call_info["id"], self, event, **kwargs))
         return await asyncio.gather(*task_queue)
 
-    def build_payload(self, context: Iterable[ChatMessage] | None = None, system_prompt: str | None = None) -> Payload:
+    def build_payload(self, context: Iterable[Message] | None = None, system_prompt: str | None = None) -> Payload:
         payload: Payload = {"model": self.model, "messages": []}
         if system_prompt:
             payload["messages"].append({"role": "system", "content": system_prompt})
@@ -280,8 +278,9 @@ class CloversAgent(ToolManager):
 
     async def call_unit(self, event: Event, payload: Payload):
         system_prompt = f"{self.style_prompt}\nDate:{datetime.now().strftime('%m-%d')}"
-        system_message: ChatMessage = {"role": "system", "content": system_prompt}
+        system_message: SystemMessage = {"role": "system", "content": system_prompt}
         payload["messages"].insert(0, system_message)
+        mark = len(payload["messages"])
         payload["tools"] = self.intro_tools
         resp = await self.call_api(payload)
         # 退出条件：不需要额外技能
@@ -300,6 +299,8 @@ class CloversAgent(ToolManager):
                     payload["tools"].extend(tool for tool in select_tools if tool["function"]["name"] not in used_tools)
                 message = await self.call_api(payload)
                 if not (tool_calls := message.get("tool_calls")):
+                    payload["messages"] = payload["messages"][:mark]
+                    intro_prompt = f"接下来你的回复是用你的语气复述这段文字：{message["content"]}"
                     break
                 payload["messages"].append(message)
                 event.properties["skill_menu"] = ""

@@ -13,7 +13,7 @@ agent: CloversAgent
 @__plugin__.startup
 async def _():
     global agent
-    agent = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=60))
+    agent = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300))
 
 
 @__plugin__.handle(None, ["user_id", "group_id", "nickname", "image_list", "to_me"], priority=2, block=False)

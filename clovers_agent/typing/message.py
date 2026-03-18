@@ -14,11 +14,25 @@ class ImageSegment(TypedDict):
 type ContentSegment = TextSegment | ImageSegment
 
 
-class ChatMessage[Role: Literal["system", "user", "assistant"]](TypedDict):
-    """对话消息"""
+class SystemMessage(TypedDict):
+    """系统消息"""
 
-    role: Role
+    role: Literal["system"]
+    content: str
+
+
+class UserMessage(TypedDict):
+    """用户消息"""
+
+    role: Literal["user"]
     content: str | list[ContentSegment]
+
+
+class AssistantMessage(TypedDict):
+    """助手消息"""
+
+    role: Literal["assistant"]
+    content: str
     tools: NotRequired[list[dict]]
 
 
@@ -30,4 +44,4 @@ class ToolMessage(TypedDict):
     tool_call_id: str
 
 
-type Message = ChatMessage | ToolMessage
+type Message = UserMessage | AssistantMessage | SystemMessage | ToolMessage
