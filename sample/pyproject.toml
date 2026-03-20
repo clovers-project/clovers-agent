@@ -1,0 +1,18 @@
+[project]
+name = "sample"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "clovers-agent",
+    "clovers-agent-toolkit",
+    "clovers-client[console]>=0.1.3",
+]
+
+[tool.uv.sources]
+clovers-agent = { workspace = true }
+clovers-agent-toolkit = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
