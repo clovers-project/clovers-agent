@@ -34,7 +34,6 @@ class Shell:
                 container_name = f"CloversAgentSandbox-{self.session_id}"
                 try:
                     self.container = await asyncio.to_thread(self.client.containers.get, container_name)
-
                 except NotFound:
                     self.container = await asyncio.to_thread(
                         self.client.containers.run,
@@ -47,6 +46,7 @@ class Shell:
                         device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])],
                     )
             else:
+                self.container
                 self.container.reload()
             if self.container.status != "running":
                 await asyncio.to_thread(self.container.start)
@@ -78,9 +78,12 @@ class Shell:
                 buffer.append(byte)
                 if byte == 10:
                     line = buffer.decode("utf-8")
+                    # print(line)
                     outputs.append(line)
                     buffer.clear()
                 elif byte == 13:
+                    # sys.stdout.buffer.write(buffer)
+                    # sys.stdout.flush()
                     buffer.clear()
         if buffer:
             outputs.append(buffer.decode("utf-8"))

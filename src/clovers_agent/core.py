@@ -277,7 +277,7 @@ class CloversAgent(ToolManager):
         return json.loads((await self.call_api(payload))["content"])["summary"].strip()
 
     async def call_unit(self, event: Event, payload: Payload):
-        system_prompt = f"{self.style_prompt}\nDate:{datetime.now().strftime('%m-%d')}"
+        system_prompt = f"{self.style_prompt}\nDate:{datetime.now().strftime('%Y-%m-%d')}"
         system_message: SystemMessage = {"role": "system", "content": system_prompt}
         payload["messages"].insert(0, system_message)
         mark = len(payload["messages"])

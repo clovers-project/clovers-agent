@@ -1,0 +1,126 @@
+@import url("./base.css");
+@import url("./chat.css");
+
+.input-area {
+  flex-shrink: 0;
+  padding: 15px;
+  background: transparent;
+  background-color: var(--standard-bg);
+}
+
+/* 工具栏 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-btn {
+  display: flex;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.3em;
+  color: var(--text-secondary);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  padding: 0, 0;
+  margin: 0, 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-btn:hover {
+  background-color: rgba(67, 97, 238, 0.1);
+}
+
+/* 图片预览区 */
+.image-preview-area {
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  margin-bottom: 10px;
+  display: flex;
+  gap: 8px;
+  padding-top: 0;
+  transition: padding-top 0.1s ease-in-out;
+}
+
+.image-preview-area.active {
+  padding-top: 10px;
+}
+
+.preview-item {
+  position: relative;
+  padding: 0;
+  margin: 0;
+}
+
+.preview-image {
+  height: 16vh;
+  width: auto;
+  object-fit: cover;
+  border-radius: var(--radius-small);
+  box-shadow: var(--shadow-small);
+}
+
+#deleteImageBtn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  padding: 0;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 0.8em;
+  cursor: pointer;
+  box-shadow: var(--shadow-normal);
+}
+
+.input-send-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+#messageInput {
+  flex-grow: 1;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-large);
+  padding: 12px 20px;
+  resize: none;
+  font-size: 1em;
+  line-height: 1.4;
+  box-sizing: border-box;
+  background: transparent;
+  background-color: #ffffffcc;
+  color: var(--text-primary);
+  transition: all 0.3s;
+}
+#messageInput::-webkit-scrollbar {
+  display: none;
+}
+
+#messageInput:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-normal);
+}
+
+#sendBtn {
+  border: none;
+  border-radius: 24px;
+  padding: 12px 20px;
+  cursor: pointer;
+  font-size: 1em;
+  align-self: center;
+  height: 100%;
+  min-height: 44px;
+  transition: all 0.2s;
+  font-weight: 600;
+}

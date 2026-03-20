@@ -1,5 +1,5 @@
 from clovers import EventProtocol
-from typing import Protocol
+from typing import Protocol, Literal
 
 
 class Event(EventProtocol, Protocol):
@@ -8,4 +8,8 @@ class Event(EventProtocol, Protocol):
     nickname: str
     to_me: bool
     image_list: list[str]
+    permission: int
     skill_menu: str
+
+    # @overload
+    async def call(self, key: Literal["text"], message: str): ...

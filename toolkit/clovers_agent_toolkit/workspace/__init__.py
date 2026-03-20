@@ -1,3 +1,4 @@
+from pathlib import Path
 from clovers_agent import Event, CloversAgent
 from clovers.logger import logger
 from .docker import WORKSPACE, Shell
@@ -5,6 +6,7 @@ from ..toolkit import toolkit
 
 
 README = WORKSPACE / "README.md"
+GITIGNORE = WORKSPACE / ".gitignore"
 shell_dict: dict[str, Shell] = {}
 
 
@@ -14,6 +16,8 @@ async def _(agent: CloversAgent, event: Event):
         WORKSPACE.mkdir(parents=True, exist_ok=True)
     if not README.exists():
         README.write_text("Clovers Agent Workspace")
+    if not GITIGNORE.exists():
+        GITIGNORE.write_text((Path(__file__).parent / "GITIGNORE").read_text())
     session_id = agent.session_id(event)
     if session_id in shell_dict:
         shell_dict[session_id].workdir = "/workspace"
@@ -37,55 +41,66 @@ async def _(agent: CloversAgent, event: Event, command: str):
     if session_id not in shell_dict:
         return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
     shell = shell_dict[session_id]
-    logger.info(f"[CloversAgentTookit][{session_id}]执行命令: {command}")
+    logger.info(f"[CloversAgentShell][{session_id}]> {command if (idx := command.find("\n")) == -1 else f"{command[:idx]}..."}")
     output = await shell.execute(command)
     return f"{output}\n当前工作目录: {shell.workdir}"
 
 
 @toolkit.tool(
-    "read_file",
-    "读取文件",
-    {"file_path": {"type": "string", "description": "需要读取的文件名"}},
+    "read_multiple_files",
+    "查看多个文件内容。当需要查看多个文件时，优先使用此工具。",
+    {
+        "file_list": {
+            "type": "array",
+            "description": "需要读取的文件路径列表，例如 ['src/main.py', 'config.json']",
+            "items": {"type": "string"},
+        }
+    },
     ["工作区工具"],
 )
-async def _(agent: CloversAgent, event: Event, file_path: str):
+async def _(agent: CloversAgent, event: Event, file_list: str):
+    print(file_list)
     session_id = agent.session_id(event)
-    if session_id in shell_dict:
-        workdir = shell_dict[session_id].workdir.lstrip("/")
-    else:
-        workdir = "workspace"
     workspace = WORKSPACE / session_id
-    file = workspace / workdir / file_path
-    if not file.is_relative_to(workspace):
-        return """status:error
-message:不可访问工作区外文件"""
-    try:
-        return f"""status:success
-file:\n{file.read_text()}"""
-    except Exception as e:
-        return f"""status:error
-message:{e}"""
+    md = []
+    for file_path in file_list:
+        if file_path.startswith("/workspace"):
+            file = workspace / f"./{file_path[10:]}"
+        else:
+            file = workspace / file_path
+        if not file.exists():
+            md.append(f"{file_path} 文件不存在")
+            continue
+        try:
+            content = file.read_text()
+        except Exception as e:
+            logger.error(f"{file_path} 文件读取失败:{e}")
+            md.append(f"{file_path} 文件读取失败")
+            continue
+        md.append(f"```{file_path}\n{content}\n```")
+    print("\n\n".join(md))
+    return "\n\n".join(md)
 
 
 @toolkit.tool(
     "write_file",
     "写入文件",
     {
-        "file_path": {"type": "string", "description": "需要写入的文件名"},
+        "file_path": {"type": "string", "description": "需要写入的文件路径"},
         "file_content": {"type": "string", "description": "需要写入到文件的内容"},
     },
     ["工作区工具"],
 )
 async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str):
     session_id = agent.session_id(event)
-    if session_id in shell_dict:
-        workdir = shell_dict[session_id].workdir.lstrip("/")
-    else:
-        workdir = "workspace"
     workspace = WORKSPACE / session_id
-    file = workspace / workdir / file_path
+    if file_path.startswith("/workspace"):
+        file = workspace / f"./{file_path[10:]}"
+    else:
+        file = workspace / file_path
     try:
         file.write_text(file_content, encoding="utf-8")
         return f"文件写入成功。"
     except Exception as e:
+        logger.error(e)
         return f"文件写入失败：{e}"

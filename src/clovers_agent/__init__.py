@@ -1,4 +1,5 @@
 import httpx
+import asyncio
 from datetime import datetime
 from clovers import Plugin, Result
 from .core import ToolManager, CloversAgent
@@ -31,6 +32,23 @@ async def _(event: Event):
     result = await agent.chat(event)
     session.running = False
     return result
+
+
+type Rule = Plugin.Rule.Checker[Event]
+
+permission_check: Rule = lambda e: e.permission > 0
+to_me_check: Rule = lambda e: e.to_me
+
+
+@__plugin__.handle(["记忆清除"], ["user_id", "group_id", "to_me", "permission"], rule=[permission_check, to_me_check], block=True)
+async def _(event: Event):
+    session = agent.current_session(event)
+    if session.running:
+        await event.call("text", "请稍等，正在处理中...")
+        while session.running:
+            await asyncio.sleep(0.1)
+    session.clear()
+    return "记忆已清除"
 
 
 __version__ = "0.1.0"

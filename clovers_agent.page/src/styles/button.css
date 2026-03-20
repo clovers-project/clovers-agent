@@ -1,0 +1,45 @@
+.confirm-button {
+  background: linear-gradient(135deg, #4361ee 0%, #3a56d4 100%);
+  color: white;
+}
+
+.confirm-button:hover {
+  background: linear-gradient(135deg, #3a56d4 0%, #2f4ac9 100%);
+}
+
+.cancle-button {
+  background: #e9ecef;
+  color: black;
+}
+
+.cancle-button:hover {
+  background: #dee2e6;
+}
+
+.delete-button {
+  background: linear-gradient(135deg, #dc3545 0%, #bd2130 100%);
+  color: white;
+}
+
+.delete-button:hover {
+  background: linear-gradient(135deg, #bd2130 0%, #a71e2a 100%);
+}
+
+.confirm-button,
+.cancle-button,
+.delete-button {
+  cursor: pointer;
+  transition: transform var(--bezier-responsive);
+}
+
+.confirm-button:hover,
+.cancle-button:hover,
+.delete-button:hover {
+  transform: translateY(-2px);
+}
+
+.confirm-button:active,
+.cancle-button:active,
+.delete-button:active {
+  transform: translateY(0);
+}

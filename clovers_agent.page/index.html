@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>欢迎来到 clovers 终端！</title>
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+    <link rel="stylesheet" href="/src/styles/ui.css" />
+    <link rel="stylesheet" href="/src/styles/chat.css" />
+    <link rel="stylesheet" href="/src/styles/input_area.css" />
+    <link rel="stylesheet" href="/src/styles/button.css" />
+    <link rel="stylesheet" href="/src/styles/modal.css" />
+    <link rel="stylesheet" href="/src/styles/itemlist.css" />
+  </head>
+  <body>
+    <div class="ui">
+      <div class="sidebar" id="sideBarArea">
+        <div id="sideBarTitle" class="itemlist-title"></div>
+        <div id="sideBarContent"></div>
+      </div>
+      <div class="sidebar-empty"></div>
+      <div class="chat-container">
+        <div class="chat-window" id="chatWindow"></div>
+        <div class="input-area">
+          <div class="toolbar">
+            <button class="tool-btn" id="groupListBtn" title="群组列表">
+              <i class="fa-solid fa-user-group"></i>
+            </button>
+            <button class="tool-btn" id="userListBtn" title="用户列表">
+              <i class="fas fa-user"></i>
+            </button>
+            <label for="imageUpload" class="tool-btn" title="上传图片">
+              <i class="fas fa-image"></i>
+            </label>
+            <input type="file" id="imageUpload" accept="image/*" multiple class="hidden" aria-label="选择图片文件上传" />
+            <button class="tool-btn" id="cloversBtn" title="clovers服务器">
+              <i class="fa-solid fa-server"></i>
+            </button>
+            <button class="tool-btn" id="clearBtn" title="清除聊天记录">
+              <i class="fa-solid fa-eraser"></i>
+            </button>
+          </div>
+          <div class="image-preview-area" id="imagePreviewArea"></div>
+          <div class="input-send-row">
+            <textarea id="messageInput" placeholder="输入消息..." rows="3"></textarea>
+            <button id="sendBtn" class="confirm-button">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
