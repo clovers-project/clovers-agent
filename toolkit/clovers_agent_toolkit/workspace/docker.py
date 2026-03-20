@@ -77,14 +77,11 @@ class Shell:
             for byte in chunk:
                 buffer.append(byte)
                 if byte == 10:
-                    sys.stdout.buffer.write(buffer)
                     line = buffer.decode("utf-8")
                     outputs.append(line)
                     buffer.clear()
                 elif byte == 13:
-                    sys.stdout.buffer.write(buffer)
                     buffer.clear()
         if buffer:
             outputs.append(buffer.decode("utf-8"))
-            sys.stdout.buffer.write(buffer)
         return "\n".join(outputs)

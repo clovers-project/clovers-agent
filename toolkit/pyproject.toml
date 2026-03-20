@@ -5,13 +5,12 @@ description = ""
 authors = [{ name = "KarisAya", email = "karisaya@foxmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<4.0.0"
+dependencies = ["clovers-agent", "docker>=7.1.0"]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.poetry.dependencies]
-clovers-agent = { path = "../", develop = true }
-chardet = "^7.1.0"
-docker = "^7.1.0"
+[tool.uv.sources]
+clovers-agent = { workspace = true }
