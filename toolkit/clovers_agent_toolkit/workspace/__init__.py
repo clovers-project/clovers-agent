@@ -3,11 +3,20 @@ from clovers_agent import Event, CloversAgent
 from clovers.logger import logger
 from .docker import WORKSPACE, Shell
 from ..toolkit import toolkit
-
+from ..config import __config__
 
 README = WORKSPACE / "README.md"
 GITIGNORE = WORKSPACE / ".gitignore"
 shell_dict: dict[str, Shell] = {}
+
+
+def get_session_id(agent: CloversAgent, event: Event) -> str: ...
+
+
+if __config__.session_workspace:
+    get_session_id = lambda agent, event: agent.session_id(event)
+else:
+    get_session_id = lambda agent, event: "public"
 
 
 @toolkit.on_skill("工作区工具")
@@ -18,32 +27,37 @@ async def _(agent: CloversAgent, event: Event):
         README.write_text("Clovers Agent Workspace")
     if not GITIGNORE.exists():
         GITIGNORE.write_text((Path(__file__).parent / "GITIGNORE").read_text())
-    session_id = agent.session_id(event)
-    if session_id in shell_dict:
-        shell_dict[session_id].workdir = "/workspace"
+    if __config__.use_shell:
+        session_id = get_session_id(agent, event)
+        if session_id in shell_dict:
+            shell_dict[session_id].workdir = "/workspace"
+        else:
+            try:
+                shell_dict[session_id] = Shell(session_id)
+            except Exception as e:
+                logger.error(e)
+                return f"workspace 已初始化, shell 初始化失败:{e}\n当前工作目录: /workspace"
+        return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
     else:
-        try:
-            shell_dict[session_id] = Shell(session_id)
-        except Exception as e:
-            logger.error(e)
-            return f"workspace 已初始化, shell 初始化失败:{e}\n当前工作目录: /workspace"
-    return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
+        return f"workspace 已初始化\n当前工作目录: /workspace"
 
 
-@toolkit.tool(
-    "shell",
-    "在工作区环境下执行命令",
-    {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
-    ["工作区工具"],
-)
-async def _(agent: CloversAgent, event: Event, command: str):
-    session_id = agent.session_id(event)
-    if session_id not in shell_dict:
-        return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
-    shell = shell_dict[session_id]
-    logger.info(f"[CloversAgentShell][{session_id}]> {command if (idx := command.find("\n")) == -1 else f"{command[:idx]}..."}")
-    output = await shell.execute(command)
-    return f"{output}\n当前工作目录: {shell.workdir}"
+if __config__.use_shell:
+
+    @toolkit.tool(
+        "shell",
+        "在工作区环境下执行命令",
+        {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
+        ["工作区工具"],
+    )
+    async def _(agent: CloversAgent, event: Event, command: str):
+        session_id = get_session_id(agent, event)
+        if session_id not in shell_dict:
+            return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
+        shell = shell_dict[session_id]
+        logger.info(f"[CloversAgentShell][{session_id}]> {command if (idx := command.find("\n")) == -1 else f"{command[:idx]}..."}")
+        output = await shell.execute(command)
+        return f"{output}\n当前工作目录: {shell.workdir}"
 
 
 @toolkit.tool(
@@ -54,8 +68,7 @@ async def _(agent: CloversAgent, event: Event, command: str):
     ["工作区工具"],
 )
 async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
-    print(filepaths)
-    session_id = agent.session_id(event)
+    session_id = get_session_id(agent, event)
     workspace = WORKSPACE / session_id
     md = []
     for file_path in filepaths:
@@ -88,7 +101,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
     ["工作区工具"],
 )
 async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str):
-    session_id = agent.session_id(event)
+    session_id = get_session_id(agent, event)
     workspace = WORKSPACE / session_id
     if file_path.startswith("/workspace"):
         file = workspace / f"./{file_path[10:]}"

@@ -30,7 +30,6 @@ async def _(agent: CloversAgent, event: Event, query: list[str]):
         link = item.get("url", "#")
         snippet = item.get("description", "无摘要")
         md_output.append(f"{idx}. **[{title}]({link})**\n   摘要: {snippet}\n")
-    print("\n".join(md_output))
     return "\n".join(md_output)
 
 

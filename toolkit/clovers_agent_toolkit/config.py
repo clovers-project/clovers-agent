@@ -4,6 +4,10 @@ from clovers.config import Config as CloversConfig
 
 class Config(BaseModel):
     BRAVE_API_KEY: str
+    use_shell: bool = True
+    """是否使用shell"""
+    session_workspace: bool = True
+    """为每个会话创建一个工作空间"""
 
     @classmethod
     def sync_config(cls):
