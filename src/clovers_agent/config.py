@@ -44,10 +44,14 @@ class Config(BaseModel):
 - 结束调用：当你已经获取了足够的信息来回答用户，或无法通过现有工具获得更多信息时，请给出详细且高质量的信息汇总。
 - 直奔主题：汇总信息时不要说“很高兴为你服务”之类的AI客套话，不需要维持特定的说话语气，保持客观专业。"""
     """调用提示 这是助手执行任务时的提示"""
-    console_mode: bool = False
-    """控制台模式"""
     extra_body: dict[str, Any] = {}
     """额外请求体"""
+    console_mode: bool = False
+    """控制台模式"""
+    whitelist: list[str] = []
+    """白名单"""
+    blacklist: list[str] = []
+    """黑名单"""
 
     @classmethod
     def sync_config(cls):
