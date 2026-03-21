@@ -1,7 +1,0 @@
-__pycache__/
-.vs
-.vscode
-.venv
-*.lock
-clovers.toml
-workspace/
