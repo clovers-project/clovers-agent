@@ -59,7 +59,11 @@ class ToolManager:
         def decorator(func: AgentFunction) -> WrappedAgentFunction:
             async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs):
                 logger.debug(f"[{agent.name}][TOOL CALL][{name}] called")
-                content = await func(agent, event, **kwargs)
+                try:
+                    content = await func(agent, event, **kwargs)
+                except Exception as e:
+                    logger.exception(e)
+                    content = "Error"
                 message: ToolMessage = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
                 return message, name
 

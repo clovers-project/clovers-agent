@@ -47,27 +47,24 @@ async def _(agent: CloversAgent, event: Event, command: str):
 
 
 @toolkit.tool(
-    "read_multiple_files",
-    "查看多个文件内容。当需要查看多个文件时，优先使用此工具。",
-    {
-        "file_list": {
-            "type": "array",
-            "description": "需要读取的文件路径列表，例如 ['src/main.py', 'config.json']",
-            "items": {"type": "string"},
-        }
-    },
+    "read_files",
+    "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件上下文。"
+    "在需要分析代码、检查配置文件时，尤其是需要查看多个文件时，应优先使用此工具以提高效率。",
+    {"filepaths": {"type": "array", "description": "包含一个或多个文件路径的数组", "items": {"type": "string"}}},
     ["工作区工具"],
 )
-async def _(agent: CloversAgent, event: Event, file_list: str):
-    print(file_list)
+async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
+    print(filepaths)
     session_id = agent.session_id(event)
     workspace = WORKSPACE / session_id
     md = []
-    for file_path in file_list:
+    for file_path in filepaths:
         if file_path.startswith("/workspace"):
             file = workspace / f"./{file_path[10:]}"
         else:
             file = workspace / file_path
+        if not file.is_relative_to(workspace):
+            md.append(f"{file_path} 非工作区文件")
         if not file.exists():
             md.append(f"{file_path} 文件不存在")
             continue
@@ -78,7 +75,6 @@ async def _(agent: CloversAgent, event: Event, file_list: str):
             md.append(f"{file_path} 文件读取失败")
             continue
         md.append(f"```{file_path}\n{content}\n```")
-    print("\n\n".join(md))
     return "\n\n".join(md)
 
 
