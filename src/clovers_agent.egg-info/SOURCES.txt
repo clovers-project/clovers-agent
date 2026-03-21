@@ -4,6 +4,7 @@ pyproject.toml
 src/clovers_agent/__init__.py
 src/clovers_agent/config.py
 src/clovers_agent/core.py
+src/clovers_agent.egg-info/.gitignore
 src/clovers_agent.egg-info/PKG-INFO
 src/clovers_agent.egg-info/SOURCES.txt
 src/clovers_agent.egg-info/dependency_links.txt

@@ -11,4 +11,5 @@ export interface GroupInfo {
     groupId: string;
     groupName: string;
     avatar: string;
+    flag: boolean;
 }

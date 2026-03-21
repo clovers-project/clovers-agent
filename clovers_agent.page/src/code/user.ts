@@ -1,6 +1,6 @@
 import type { UserInfo, } from './types';
 import { userList, setCurrentUser, defaultUserInfo, currentUser } from "./core";
-import { sendSystemMessage } from './chat'
+import { systemMessage } from './chat'
 import { creatModal } from "./modal";
 import { cropImageToSquare } from "./tools";
 function userInfoTemplate({ backdrop, modal } = creatModal(), user: UserInfo) {
@@ -102,7 +102,7 @@ export function renderUserList({ backdrop, modal } = creatModal()) {
             document.body.removeChild(backdrop);
             if (currentUser.userId === user.userId) return;
             setCurrentUser(user.userId);
-            sendSystemMessage(`已切换到用户「${user.userName}」`);
+            systemMessage(`已切换到用户「${user.userName}」`);
         });
         setting.addEventListener("click", (e) => {
             e.stopPropagation();

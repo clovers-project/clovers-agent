@@ -157,14 +157,10 @@ requires-dist = [
 
 [[package]]
 name = "clovers-client"
-version = "0.1.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.4"
+source = { editable = "D:/CLOVERS/clovers-client" }
 dependencies = [
     { name = "clovers" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/26/40/bdd26b063914df7b4d8b3f234bcedbe31e24cd3bd119c2fc19664afc1903/clovers_client-0.1.3.tar.gz", hash = "sha256:0105ee6ca7e3fbb77d94fa1cfe1ef8ed56dae9b4e6af715a0e4fed94092f8f58", size = 19894, upload-time = "2026-03-15T06:43:27.071Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/29/68decb61c97fb93bef9c9ec938b5cff4c0fbbc4308f32347d9b495021c5e/clovers_client-0.1.3-py3-none-any.whl", hash = "sha256:7d63b103f7b09382439913aeb8c6cc026989e958f140adb850ee9d3ebf6c6484", size = 28456, upload-time = "2026-03-15T06:43:25.316Z" },
 ]
 
 [package.optional-dependencies]
@@ -173,6 +169,20 @@ console = [
     { name = "pydantic" },
     { name = "websockets" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "clovers", specifier = ">=0.4.8,<1.0.0" },
+    { name = "httpx", marker = "extra == 'onebot'", specifier = ">=0.23.1,<1.0.0" },
+    { name = "pillow", marker = "extra == 'console'", specifier = ">=11.1.0,<12.0.0" },
+    { name = "pydantic", marker = "extra == 'console'", specifier = ">=2.10.6,<3.0.0" },
+    { name = "pydantic", marker = "extra == 'onebot'", specifier = ">=2.10.6,<3.0.0" },
+    { name = "pydantic", marker = "extra == 'qq'", specifier = ">=2.10.6,<3.0.0" },
+    { name = "qq-botpy", marker = "extra == 'qq'", specifier = ">=1.2.1,<2.0.0" },
+    { name = "websockets", marker = "extra == 'console'", specifier = ">=15.0.0,<16.0.0" },
+    { name = "websockets", marker = "extra == 'onebot'", specifier = ">=15.0.0,<16.0.0" },
+]
+provides-extras = ["console", "onebot", "qq"]
 
 [[package]]
 name = "docker"
@@ -431,7 +441,7 @@ dependencies = [
 requires-dist = [
     { name = "clovers-agent", editable = "." },
     { name = "clovers-agent-toolkit", editable = "toolkit" },
-    { name = "clovers-client", extras = ["console"], specifier = ">=0.1.3" },
+    { name = "clovers-client", extras = ["console"], editable = "D:/CLOVERS/clovers-client" },
 ]
 
 [[package]]

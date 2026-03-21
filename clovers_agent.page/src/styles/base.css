@@ -1,10 +1,12 @@
 :root {
   --main-bg: linear-gradient(45deg, #dde8ff 0%, #ddfeff 100%);
   --standard-bg: rgba(255, 255, 255, 0.5);
+  --heavier-bg: rgba(255, 255, 255, 0.8);
   --border-color: rgba(200, 200, 200, 0.6);
   --border-focus: #4895ef;
   --text-primary: #212529;
   --text-secondary: #6c757d;
+  --text-blue: #0057ba;
   /* 阴影和圆角 */
   --shadow-small: 0 2px 8px rgba(0, 0, 0, 0.1);
   --shadow-normal: 0 4px 16px rgba(0, 0, 0, 0.2);
@@ -23,8 +25,9 @@ html {
   color: var(--text-primary);
 }
 body {
-  margin: 2vh;
-  height: 96vh;
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 body,
 html {
@@ -46,11 +49,32 @@ html {
   }
 }
 
+.loading {
+  width: 16px;
+  height: 16px;
+  border-top: 2px solid var(--text-blue);
+  border-radius: 50%;
+  display: inline-block;
+  vertical-align: middle;
+  animation: spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
 .grow-flex {
   display: flex;
   flex-grow: 1;
   flex-direction: row;
   align-items: center;
+  overflow: hidden;
 }
 
 .avatar {

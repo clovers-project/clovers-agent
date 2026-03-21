@@ -58,10 +58,7 @@ body::after {
   display: flex;
   flex-direction: row;
   height: 100%;
-  max-width: 150vh;
-  margin: 0 auto;
-  box-shadow: var(--shadow-large);
-  border-radius: var(--radius-normal);
+  width: 100%;
   overflow: hidden;
   -webkit-backdrop-filter: blur(20px) saturate(120%);
   backdrop-filter: blur(20px) saturate(120%);

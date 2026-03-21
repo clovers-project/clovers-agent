@@ -1,6 +1,6 @@
 import type { GroupInfo, } from '../types';
 import { groupList, setCurrentGroup, defaultGroupInfo, currentGroup } from "../core";
-import { chatWindow, sendSystemMessage } from "../chat";
+import { chatWindow, systemMessage } from "../chat";
 import { creatModal } from "../modal";
 import { sideBarContent, sideBarTitle } from ".";
 import { cropImageToSquare, chatHistoryStorage } from "../tools";
@@ -10,7 +10,7 @@ import { cropImageToSquare, chatHistoryStorage } from "../tools";
 export function showGroupChatHistory(groupId: string) {
     chatHistoryStorage.get(groupId).then((history) => {
         chatWindow.innerHTML = "";
-        sendSystemMessage(`当前会话「${currentGroup.groupName}」`);
+        systemMessage(`当前会话「${currentGroup.groupName}」`);
         chatWindow.innerHTML += history;
     });
 }
@@ -19,6 +19,7 @@ export function showGroupChatHistory(groupId: string) {
 function renderGroupItem(group: GroupInfo) {
     const groupItem = document.createElement("div");
     groupItem.className = "itemlist-item";
+    groupItem.id = `groupItem${group.groupId}`;
     const avatar = group.avatar ? `<img src="${group.avatar}" class="avatar left">` : '<div class="avatar left"></div>';
     groupItem.innerHTML = `<div class="grow-flex">${avatar}<strong>${group.groupName}</strong></div>`;
     const setting = document.createElement("button");

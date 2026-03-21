@@ -17,6 +17,7 @@
 
 .tool-btn {
   display: flex;
+  flex-shrink: 0;
   background: none;
   border: none;
   cursor: pointer;
@@ -90,6 +91,9 @@
 
 #messageInput {
   flex-grow: 1;
+  min-height: 10vh;
+  max-height: 40vh;
+  overflow-y: auto; /* 关键：超出高度后显示滚动条 */
   border: 1px solid var(--border-color);
   border-radius: var(--radius-large);
   padding: 12px 20px;

@@ -10,6 +10,7 @@ export const defaultGroupInfo: GroupInfo = {
     groupId: "1",
     groupName: "会话",
     avatar: "",
+    flag: true,
 };
 
 export let currentUser: UserInfo;

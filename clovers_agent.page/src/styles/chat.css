@@ -12,7 +12,7 @@
   flex: 1 1 0;
   background: transparent;
   overflow-y: auto;
-  padding: 20px;
+  padding: 12px;
   gap: 8px;
 }
 /* 自定义滚动条样式 */
@@ -121,12 +121,14 @@
   margin: 0;
   font-size: 0.95em;
   line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message-image-item {
   max-height: 32vh;
   max-width: 16vw;
-  border-radius: var(--radius-normal);
+  border-radius: var(--radius-small);
   transition: transform 0.2s;
   box-shadow: var(--shadow-normal);
   object-fit: cover;

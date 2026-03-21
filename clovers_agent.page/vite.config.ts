@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
     build: {
-        outDir: '../clovers_client/console/client/page',
+        outDir: '../page',
         emptyOutDir: true
     }
 })

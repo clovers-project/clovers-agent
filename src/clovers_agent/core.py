@@ -260,21 +260,10 @@ class CloversAgent(ToolManager):
     async def summary_context(self, event: Event) -> str:
         session = self.current_session(event)
         payload = self.build_payload(context=session.context)
-        payload["messages"].append({"role": "user", "content": "请对以上对话进行深度总结。"})
-        payload["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "topic_summary",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {"summary": {"type": "string", "description": "对话内容的精炼总结，保留核心内容和结论。"}},
-                    "required": ["summary"],
-                    "additionalProperties": False,
-                },
-            },
-        }
-        return json.loads((await self.call_api(payload))["content"])["summary"].strip()
+        payload["messages"].append(
+            {"role": "user", "content": "对以上对话进行深度详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"}
+        )
+        return (await self.call_api(payload))["content"].strip()
 
     async def call_unit(self, event: Event, payload: Payload):
         system_prompt = f"{self.style_prompt}\nDate:{datetime.now().strftime('%Y-%m-%d')}"
