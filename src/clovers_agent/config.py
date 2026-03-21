@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from clovers.config import Config as CloversConfig
+from typing import Any
 
 
 class Config(BaseModel):
@@ -42,6 +43,10 @@ class Config(BaseModel):
 - 直奔主题：汇总信息时不要说“很高兴为你服务”之类的AI客套话，不需要维持特定的说话语气，保持客观专业即可。
 """
     """调用提示"""
+    console_mode: bool = False
+    """控制台模式"""
+    extra_body: dict[str, Any] = {}
+    """额外请求体"""
 
     @classmethod
     def sync_config(cls):

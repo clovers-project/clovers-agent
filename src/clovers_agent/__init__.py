@@ -2,12 +2,13 @@ import httpx
 import asyncio
 from datetime import datetime
 from clovers import Plugin, Result
-from clovers.core import EventHandler
 from .core import ToolManager, CloversAgent
 from .typing import Event
+from .config import Config
 
 __plugin__ = Plugin(priority=100)
 __plugin__.set_protocol("properties", Event)
+__config__ = Config.sync_config()
 
 agent: CloversAgent
 
@@ -15,7 +16,7 @@ agent: CloversAgent
 @__plugin__.startup
 async def _():
     global agent
-    agent = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300))
+    agent = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), __config__)
 
 
 @__plugin__.handle(None, ["user_id", "group_id", "nickname", "image_list", "to_me"], priority=2, block=False)
@@ -53,25 +54,25 @@ async def _(event: Event):
     return Result("text", "记忆已清除")
 
 
-console_protocol = b"\x05\x03\x01".decode()
+if __config__.console_mode:
+    console_protocol = b"\x05\x03\x01".decode()
 
-
-@__plugin__.handle([f"{console_protocol}"], ["user_id", "group_id"], rule=args_check, block=True)
-async def _(event: Event):
-    match event.args[0]:
-        case "cleanup":
-            session = agent.current_session(event)
-            if session.running:
-                while session.running:
-                    await asyncio.sleep(0.1)
-            session.clear()
-            return Result("console", ["log", "记忆已清除"])
-        case "title":
-            prompt = f"给这句话生成一个标题，长度不超过20个字。禁止输出标题以外的内容。\n{event.message[9:]}"
-            payload = agent.build_payload([{"role": "user", "content": prompt}])
-            return Result("console", ["title", await agent.call_unit(event, payload)])
-        case _:
-            return
+    @__plugin__.handle([f"{console_protocol}"], ["user_id", "group_id"], rule=args_check, block=True)
+    async def _(event: Event):
+        match event.args[0]:
+            case "cleanup":
+                session = agent.current_session(event)
+                if session.running:
+                    while session.running:
+                        await asyncio.sleep(0.1)
+                session.clear()
+                return Result("console", ["log", "记忆已清除"])
+            case "title":
+                prompt = f"给这句话生成一个标题，长度不超过20个字。禁止输出标题以外的内容。\n{event.message[9:]}"
+                payload = agent.build_payload([{"role": "user", "content": prompt}])
+                return Result("console", ["title", await agent.call_unit(event, payload)])
+            case _:
+                return
 
 
 __version__ = "0.1.0"

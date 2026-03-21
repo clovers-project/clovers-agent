@@ -166,10 +166,9 @@ class Session:
 class CloversAgent(ToolManager):
     """OpenAI API"""
 
-    def __init__(self, name: str, async_client: httpx.AsyncClient) -> None:
+    def __init__(self, name: str, async_client: httpx.AsyncClient, config: Config) -> None:
         super().__init__(name)
         self.async_client = async_client
-        config = Config.sync_config()
         self.model = config.model
         self.url = f"{config.url.rstrip("/")}/chat/completions"
         self.headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
@@ -183,6 +182,7 @@ class CloversAgent(ToolManager):
         self.load_plugins_from_list(config.plugins)
         self.load_plugins_from_dirs(config.plugin_dirs)
         self.toolmap: dict[str, FunctionToolInfo] = {}
+        self.extra_body = config.extra_body
         if self.skill_keywords:
             skill_keywords = list(self.skill_keywords)
             self.tool(
@@ -237,7 +237,7 @@ class CloversAgent(ToolManager):
         return await asyncio.gather(*task_queue)
 
     def build_payload(self, context: Iterable[Message] | None = None, system_prompt: str | None = None) -> Payload:
-        payload: Payload = {"model": self.model, "messages": []}
+        payload: Payload = {"model": self.model, "messages": [], **self.extra_body}  # type: ignore 这里允许额外请求体
         if system_prompt:
             payload["messages"].append({"role": "system", "content": system_prompt})
         if context:

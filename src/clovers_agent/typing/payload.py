@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict, NotRequired
+from typing import Literal, TypedDict, NotRequired, Any
 from .message import Message
 from .json_schema import JSONSchemaType
 
@@ -28,7 +28,7 @@ class ResponseFormat(TypedDict):
     json_schema: JsonSchemaFormat
 
 
-class Payload(TypedDict):
+class Payload(TypedDict, extra_items=Any):
     model: str
     messages: list[Message]
     tools: NotRequired[list[FunctionToolInfo]]
