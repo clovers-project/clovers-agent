@@ -177,6 +177,7 @@ class CloversAgent(ToolManager):
         self.url = f"{config.url.rstrip("/")}/chat/completions"
         self.headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
         self.style_prompt = config.style_prompt
+        self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
         self._memory_size = config.memory_size
         self.memory_timeout = config.memory_timeout
@@ -270,7 +271,8 @@ class CloversAgent(ToolManager):
         return (await self.call_api(payload))["content"].strip()
 
     async def call_unit(self, event: Event, payload: Payload):
-        system_prompt = f"{self.style_prompt}\nDate:{datetime.now().strftime('%Y-%m-%d')}"
+        date_prompt = f"今天的日期是:{datetime.now().strftime('%Y年%m月%d日')}"
+        system_prompt = f"{self.style_prompt}\n{self.chat_prompt}\n{date_prompt}"
         system_message: SystemMessage = {"role": "system", "content": system_prompt}
         payload["messages"].insert(0, system_message)
         mark = len(payload["messages"])
@@ -284,7 +286,7 @@ class CloversAgent(ToolManager):
         # 退出条件：不需要额外技能
         if event.skill_menu:
             used_tools = {"skill_menu"}
-            system_message["content"] = f"{self.call_prompt}\n\n{intro_prompt}"
+            system_message["content"] = f"{self.call_prompt}\n{date_prompt}\n\n{intro_prompt}"
             for _ in range(30):
                 payload["tools"] = [self.toolmap[k] for k in used_tools]
                 if event.skill_menu:
@@ -293,7 +295,7 @@ class CloversAgent(ToolManager):
                 message = await self.call_api(payload)
                 if not (tool_calls := message.get("tool_calls")):
                     payload["messages"] = payload["messages"][:mark]
-                    intro_prompt = f"接下来你的回复是用你的语气复述这段文字：{message["content"]}"
+                    intro_prompt = f"接下来你的回复是用你的语气复述如下内容：\n{message["content"]}"
                     break
                 payload["messages"].append(message)
                 event.properties["skill_menu"] = ""
@@ -301,7 +303,7 @@ class CloversAgent(ToolManager):
                     used_tools.add(key)
                     payload["messages"].append(msg)
         del payload["tools"]
-        system_message["content"] = f"{system_prompt}\n\n{intro_prompt}"
+        system_message["content"] = f"{self.style_prompt}\n\n{intro_prompt}"
         return (await self.call_api(payload))["content"].strip()
 
     async def chat(self, event: Event):
