@@ -1,5 +1,6 @@
 from clovers import EventProtocol
-from typing import TypedDict, Protocol, Literal, overload
+from typing import TypedDict, Protocol, Literal, Any, overload
+from collections.abc import Coroutine
 
 
 class FlatContextUnit(TypedDict):
@@ -26,4 +27,4 @@ class Event(EventProtocol, Protocol):
     async def call(self, key: Literal["console"], message: list[str]): ...
 
     @overload
-    async def call(self, key: Literal["flat_context"]) -> list[FlatContextUnit] | None: ...
+    def call(self, key: Literal["flat_context"]) -> Coroutine[Any, Any, list[FlatContextUnit]] | None: ...

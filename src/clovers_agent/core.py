@@ -341,7 +341,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
             content = self.build_content("\n".join(message), event.image_list)
             self.current_input = {"role": "user", "content": content}  # 注入输入（可修改）
             payload: Payload = {"model": self.model, "messages": [*session.context, self.current_input]}
-            if flat_context := await event.call("flat_context"):
+            if (call := event.call("flat_context")) and (flat_context := await call):
                 if isinstance(content, str):
                     self.current_input["content"] = [{"type": "text", "text": content}]
                 assert isinstance(self.current_input["content"], list)
