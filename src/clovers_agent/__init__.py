@@ -19,6 +19,8 @@ console_mode = __config__.console_mode
 
 switch_check: Rule
 if console_mode:
+    switch_check = lambda e: True
+else:
     if whitelist:
         logger.info(f"[CloversAgent] 检查规则设置为白名单模式：{whitelist}")
         switch_check = lambda e: (e.group_id is not None) and (e.group_id in whitelist)
@@ -28,8 +30,6 @@ if console_mode:
     else:
         logger.info(f"[CloversAgent] 检查规则设置为 False 模式")
         switch_check = lambda e: False
-else:
-    switch_check = lambda e: True
 
 permission_check: Rule = lambda e: e.permission > 0
 to_me_check: Rule = lambda e: e.to_me
@@ -86,7 +86,7 @@ if console_mode:
             case "title":
                 prompt = f"给这句话生成一个标题，长度不超过20个字。禁止输出标题以外的内容。\n{event.message[9:]}"
                 payload = agent.auxiliary.build_payload([{"role": "user", "content": prompt}])
-                return Result("console", ["title", await agent.auxiliary.call_api(payload)])
+                return Result("console", ["title", (await agent.auxiliary.call_api(payload))["content"].strip()])
             case _:
                 return
 
