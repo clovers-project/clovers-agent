@@ -315,21 +315,17 @@ class CloversAgent(ToolManager, OpenAIAPI):
                 message = await self.call_api(payload)
                 if not (tool_calls := message.get("tool_calls")):
                     payload["messages"] = payload["messages"][:mark]
-                    session = self.current_session(event)
-                    if session.temp:
-                        intro_prompt = f"""在你处理任务时的对话如下：
-                                        {"\n".join(cast(str,msg["content"]) for msg in session.temp )}
-                                        接下来你需要用你的语气复述如下内容：
-                                        {message["content"]}"""
-                    else:
-                        intro_prompt = f"接下来你需要用你的语气复述如下内容：\n{message['content']}"
-
+                    intro_prompt = f"接下来你需要用你的语气复述如下内容：\n{message['content']}"
                     break
                 payload["messages"].append(message)
                 event.properties["skill_menu"] = ""
                 for msg, key in await self.function_call(event, tool_calls):
                     used_tools.add(key)
                     payload["messages"].append(msg)
+            session = self.current_session(event)
+        if session.temp:
+            intro_prompt = f"在你处理任务时的对话如下：{"\n".join(cast(str,msg["content"]) for msg in session.temp )}\n{intro_prompt}"
+            session.temp.clear()
         system_message["content"] = f"{self.style_prompt}\n\n{intro_prompt}"
         payload = self.auxiliary.build_payload(context=payload["messages"])
         return (await self.auxiliary.call_api(payload))["content"].strip()
