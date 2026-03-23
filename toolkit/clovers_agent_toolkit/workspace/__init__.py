@@ -107,6 +107,7 @@ async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str
         file = workspace / f"./{file_path[10:]}"
     else:
         file = workspace / file_path
+    file.parent.mkdir(parents=True, exist_ok=True)
     try:
         file.write_text(file_content, encoding="utf-8")
         return f"文件写入成功。"
