@@ -1,4 +1,3 @@
-from pathlib import Path
 from clovers_agent import Event, CloversAgent
 from clovers.logger import logger
 from .docker import WORKSPACE, Shell
@@ -6,7 +5,6 @@ from ..toolkit import toolkit
 from ..config import __config__
 
 README = WORKSPACE / "README.md"
-GITIGNORE = WORKSPACE / ".gitignore"
 shell_dict: dict[str, Shell] = {}
 
 
@@ -25,8 +23,6 @@ async def _(agent: CloversAgent, event: Event):
         WORKSPACE.mkdir(parents=True, exist_ok=True)
     if not README.exists():
         README.write_text("Clovers Agent Workspace")
-    if not GITIGNORE.exists():
-        GITIGNORE.write_text((Path(__file__).parent / "GITIGNORE").read_text())
     if __config__.use_shell:
         session_id = get_session_id(agent, event)
         if session_id in shell_dict:
