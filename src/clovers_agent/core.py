@@ -8,7 +8,7 @@ from clovers.utils import import_name, list_modules
 from clovers.logger import logger
 from collections import deque
 from collections.abc import Iterable, Callable, Coroutine
-from typing import TypedDict, Any, Concatenate
+from typing import TypedDict, Any, Concatenate, cast
 from .typing import Event, Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage, Payload, FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 from .config import OpenAIConfig, Config
@@ -169,16 +169,36 @@ class OpenAIAPI:
         return resp.json()["choices"][0]["message"]
 
 
-class Session:
-    type Timestamp = int | float
+class ContextRecoder:
+    """会话上下文管理器"""
 
-    records: deque[tuple[UserMessage, AssistantMessage, Timestamp]]
-    silence: deque[tuple[str, Timestamp]]
+    records: deque[tuple[UserMessage, AssistantMessage]]
 
     def __init__(self, size: int) -> None:
         self.records = deque(maxlen=size)
-        self.silence = deque()
         self.lock = asyncio.Lock()
+
+    def __iter__(self):
+        for record in self.records:
+            yield record[0]
+            yield record[1]
+
+    def __bool__(self):
+        return bool(self.records)
+
+    def clear(self):
+        self.records.clear()
+
+
+class Session(ContextRecoder):
+    records: deque[tuple[UserMessage, AssistantMessage, int | float]]
+    silence: deque[tuple[str, int | float]]
+    temp: ContextRecoder
+
+    def __init__(self, size: int) -> None:
+        super().__init__(size)
+        self.silence = deque()
+        self.temp = ContextRecoder(size)
 
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
@@ -189,12 +209,6 @@ class Session:
         """过滤静默记录群聊上下文"""
         while self.silence and (self.silence[0][1] <= timeout):
             self.silence.popleft()
-
-    @property
-    def context(self):
-        for request, reply, _ in self.records:
-            yield request
-            yield reply
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
         self.records.append((request, reply, timestamp))
@@ -255,8 +269,12 @@ class CloversAgent(ToolManager, OpenAIAPI):
             task_queue.append(func(call_info["id"], self, event, **kwargs))
         return await asyncio.gather(*task_queue)
 
+    @staticmethod
+    def session_id(event: Event) -> str:
+        return event.group_id or f"private-{event.user_id}"
+
     def current_session(self, event: Event):
-        session_id = event.group_id or f"private-{event.user_id}"
+        session_id = self.session_id(event)
         if session_id not in self.sessions:
             self.sessions[session_id] = Session(self.memory_size)
         return self.sessions[session_id]
@@ -266,7 +284,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
 
     async def summary_context(self, event: Event) -> str:
         session = self.current_session(event)
-        payload = self.build_payload(context=session.context)
+        payload = self.build_payload(context=session)
         payload["messages"].append(
             {"role": "user", "content": "对以上对话进行深度详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"}
         )
@@ -297,7 +315,15 @@ class CloversAgent(ToolManager, OpenAIAPI):
                 message = await self.call_api(payload)
                 if not (tool_calls := message.get("tool_calls")):
                     payload["messages"] = payload["messages"][:mark]
-                    intro_prompt = f"接下来你需要用你的语气复述如下内容：\n{message["content"]}"
+                    session = self.current_session(event)
+                    if session.temp:
+                        intro_prompt = f"""在你处理任务时的对话如下：
+                                        {"\n".join(cast(str,msg["content"]) for msg in session.temp )}
+                                        接下来你需要用你的语气复述如下内容：
+                                        {message["content"]}"""
+                    else:
+                        intro_prompt = f"接下来你需要用你的语气复述如下内容：\n{message['content']}"
+
                     break
                 payload["messages"].append(message)
                 event.properties["skill_menu"] = ""
@@ -308,6 +334,25 @@ class CloversAgent(ToolManager, OpenAIAPI):
         payload = self.auxiliary.build_payload(context=payload["messages"])
         return (await self.auxiliary.call_api(payload))["content"].strip()
 
+    async def aux_reply(self, session: Session, message: str):
+        if not session.silence:
+            return
+        async with session.temp.lock:
+            if not session.lock.locked():
+                return
+            user_msg: UserMessage = {"role": "user", "content": message}
+            payload = self.auxiliary.build_payload(
+                (*session.temp, user_msg),
+                f"{self.style_prompt}\n{self.chat_prompt}\n"
+                f"**特别提示**\n你正在处理上一个指令：{session.silence[-1][0]}\n"
+                "如果用户进行了简单的提问或不依赖上下文的聊天，请正常回复。\n"
+                "如果用户提出了新任务、追问或依赖上下文的聊天，请告知用户你在忙，请稍等。",
+            )
+            reply = (await self.auxiliary.call_api(payload))["content"].strip()
+            assistant_msg: AssistantMessage = {"role": "assistant", "content": reply}
+            session.temp.records.append((user_msg, assistant_msg))
+            return reply
+
     async def chat(self, event: Event):
         now = datetime.now()
         timestamp = int(now.timestamp())
@@ -315,21 +360,14 @@ class CloversAgent(ToolManager, OpenAIAPI):
         if not event.to_me:
             session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]{event.message}", timestamp))
             return
+        request = f"{event.nickname}[{now.strftime("%I:%M %p")}]@me {event.message}"
         if session.lock.locked():
-            if not session.silence:
-                return
-            payload = self.auxiliary.build_payload(
-                ({"role": "user", "content": event.message},),
-                f"{self.style_prompt}\n{self.chat_prompt}\n"
-                f"**特别提示**\n你正在处理上一个指令：{session.silence[-1][0]}\n"
-                "如果用户进行了简单的提问或不依赖上下文的聊天，请正常回复。\n"
-                "如果用户提出了新任务、追问或依赖上下文的聊天，请告知用户你在忙，请稍等。",
-            )
-            return (await self.auxiliary.call_api(payload))["content"].strip()
+            if reply := await self.aux_reply(session, request):
+                return reply
         async with session.lock:
             session.memory_filter(timestamp - self.memory_timeout)
             session.silence_filter(topic_timeout := (timestamp - self.topic_coldown))
-            session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]@me {event.message}", timestamp))
+            session.silence.append((request, timestamp))
             if len(session.records) >= 5 and session.records[-1][2] < topic_timeout:
                 summary = await self.summary_context(event)
                 logger.debug(f"[{self.name}][SUMMARY] {summary}")
@@ -340,7 +378,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
                 message.extend(event.extra_context)
             content = self.build_content("\n".join(message), event.image_list)
             self.current_input = {"role": "user", "content": content}  # 注入输入（可修改）
-            payload: Payload = {"model": self.model, "messages": [*session.context, self.current_input]}
+            payload: Payload = {"model": self.model, "messages": [*session, self.current_input]}
             if (call := event.call("flat_context")) and (flat_context := await call):
                 if isinstance(content, str):
                     self.current_input["content"] = [{"type": "text", "text": content}]
