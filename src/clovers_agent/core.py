@@ -357,7 +357,8 @@ class CloversAgent(ToolManager, OpenAIAPI):
         now = datetime.now()
         timestamp = int(now.timestamp())
         session = self.current_session(event)
-        if not event.to_me:
+        to_me = event.to_me or "extra_context" in event.properties
+        if not to_me:
             session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]{event.message}", timestamp))
             return
         request = f"{event.nickname}[{now.strftime("%I:%M %p")}]@me {event.message}"
@@ -374,7 +375,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
                 session.records.clear()
                 session.silence.appendleft((summary, topic_timeout))
             message = list(x[0] for x in session.silence)
-            if "extra_context" in event.properties and event.extra_context:
+            if "extra_context" in event.properties:
                 message.extend(event.extra_context)
             content = self.build_content("\n".join(message), event.image_list)
             self.current_input = {"role": "user", "content": content}  # 注入输入（可修改）

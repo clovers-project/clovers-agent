@@ -18,7 +18,7 @@ class Event(EventProtocol, Protocol):
     image_list: list[str]
     permission: int
     skill_menu: str
-    extra_context: list[str] | None
+    extra_context: list[str]
 
     @overload
     async def call(self, key: Literal["text"], message: str): ...

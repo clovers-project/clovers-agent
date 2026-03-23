@@ -32,7 +32,7 @@ else:
         switch_check = lambda e: False
 
 permission_check: Rule = lambda e: e.permission > 0
-to_me_check: Rule = lambda e: e.to_me or "extra_context" in e.properties
+to_me_check: Rule = lambda e: e.to_me
 args_check: Rule = lambda e: bool(e.args)
 
 
