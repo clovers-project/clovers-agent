@@ -341,12 +341,12 @@ class CloversAgent(ToolManager, OpenAIAPI):
             content = self.build_content("\n".join(message), event.image_list)
             self.current_input = {"role": "user", "content": content}  # 注入输入（可修改）
             payload: Payload = {"model": self.model, "messages": [*session.context, self.current_input]}
-            if event.flat_context:
+            if flat_context := await event.call("flat_context"):
                 if isinstance(content, str):
                     self.current_input["content"] = [{"type": "text", "text": content}]
                 assert isinstance(self.current_input["content"], list)
                 self.current_input["content"].append({"type": "text", "text": "<引用上下文>"})
-                for unit in event.flat_context:
+                for unit in flat_context:
                     self.current_input["content"].append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
                     if unit["images"]:
                         self.current_input["content"].extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
