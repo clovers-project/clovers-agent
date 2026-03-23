@@ -1,11 +1,11 @@
 [project]
 name = "clovers-agent-toolkit"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = [{ name = "KarisAya", email = "karisaya@foxmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<4.0.0"
-dependencies = ["clovers-agent>=0.0.4", "docker>=7.1.0"]
+dependencies = ["clovers-agent>=0.1.0", "docker>=7.1.0"]
 
 [tool.uv.sources]
 clovers-agent = { workspace = true, editable = true }
