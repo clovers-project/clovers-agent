@@ -18,19 +18,20 @@ blacklist = set(__config__.blacklist)
 console_mode = __config__.console_mode
 
 switch_check: Rule
-if whitelist:
-    logger.info(f"[CloversAgent] 检查规则设置为白名单模式：{whitelist}")
-    switch_check = lambda e: (e.group_id is not None) and (e.group_id in whitelist)
-elif blacklist:
-    logger.info(f"[CloversAgent] 检查规则设置为黑名单模式：{blacklist}")
-    switch_check = lambda e: (e.group_id is not None) and (e.group_id not in blacklist)
+if console_mode:
+    if whitelist:
+        logger.info(f"[CloversAgent] 检查规则设置为白名单模式：{whitelist}")
+        switch_check = lambda e: (e.group_id is not None) and (e.group_id in whitelist)
+    elif blacklist:
+        logger.info(f"[CloversAgent] 检查规则设置为黑名单模式：{blacklist}")
+        switch_check = lambda e: (e.group_id is not None) and (e.group_id not in blacklist)
+    else:
+        logger.info(f"[CloversAgent] 检查规则设置为 False 模式")
+        switch_check = lambda e: False
 else:
-    logger.info(f"[CloversAgent] 检查规则设置为 {console_mode} 模式")
-    switch_check = lambda e: console_mode
+    switch_check = lambda e: True
 
 permission_check: Rule = lambda e: e.permission > 0
-
-
 to_me_check: Rule = lambda e: e.to_me
 args_check: Rule = lambda e: bool(e.args)
 

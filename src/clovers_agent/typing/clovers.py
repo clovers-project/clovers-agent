@@ -17,7 +17,6 @@ class Event(EventProtocol, Protocol):
     image_list: list[str]
     permission: int
     skill_menu: str
-    flat_context: list[FlatContextUnit] | None
     extra_context: list[str] | None
 
     @overload
@@ -27,4 +26,4 @@ class Event(EventProtocol, Protocol):
     async def call(self, key: Literal["console"], message: list[str]): ...
 
     @overload
-    async def call(self, key: Literal["flat_context"]) -> list[FlatContextUnit]: ...
+    async def call(self, key: Literal["flat_context"]) -> list[FlatContextUnit] | None: ...
