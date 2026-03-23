@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict, NotRequired, Any
+from typing import Literal, TypedDict, NotRequired
 from .message import Message
 from .json_schema import JSONSchemaType
 

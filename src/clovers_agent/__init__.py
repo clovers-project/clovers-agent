@@ -1,6 +1,4 @@
 import httpx
-import asyncio
-from datetime import datetime
 from clovers import Plugin, Result
 from clovers.logger import logger
 from .core import ToolManager, CloversAgent
@@ -45,24 +43,13 @@ async def _():
 
 @__plugin__.handle(
     None,
-    ["user_id", "group_id", "nickname", "image_list", "to_me"],
+    ["user_id", "group_id", "nickname", "to_me", "image_list"],
     rule=switch_check,
     priority=2,
     block=False,
 )
 async def _(event: Event):
-    session = agent.current_session(event)
-    now = datetime.now()
-    if event.to_me:
-        if session.running:
-            return
-        session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]@me {event.message}", now.timestamp()))
-    else:
-        session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]{event.message}", now.timestamp()))
-        return
-    session.running = True
     result = await agent.chat(event)
-    session.running = False
     return Result("text", result) if result else None
 
 
@@ -74,11 +61,8 @@ async def _(event: Event):
 )
 async def _(event: Event):
     session = agent.current_session(event)
-    if session.running:
-        await event.call("text", "请稍等，正在处理中...")
-        while session.running:
-            await asyncio.sleep(0.1)
-    session.clear()
+    async with session.lock:
+        session.clear()
     return Result("text", "记忆已清除")
 
 
@@ -95,15 +79,13 @@ if console_mode:
         match event.args[0]:
             case "cleanup":
                 session = agent.current_session(event)
-                if session.running:
-                    while session.running:
-                        await asyncio.sleep(0.1)
-                session.clear()
+                async with session.lock:
+                    session.clear()
                 return Result("console", ["log", "记忆已清除"])
             case "title":
                 prompt = f"给这句话生成一个标题，长度不超过20个字。禁止输出标题以外的内容。\n{event.message[9:]}"
-                payload = agent.build_payload([{"role": "user", "content": prompt}])
-                return Result("console", ["title", await agent.call_unit(event, payload)])
+                payload = agent.auxiliary.build_payload([{"role": "user", "content": prompt}])
+                return Result("console", ["title", await agent.auxiliary.call_api(payload)])
             case _:
                 return
 

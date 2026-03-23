@@ -1,7 +1,6 @@
 import json
 import asyncio
 import httpx
-import time
 from datetime import datetime
 from pathlib import Path
 from importlib import import_module
@@ -12,7 +11,7 @@ from collections.abc import Iterable, Callable, Coroutine
 from typing import TypedDict, Any, Concatenate
 from .typing import Event, Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage, Payload, FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
-from .config import Config
+from .config import OpenAIConfig, Config
 
 type AgentFunction[**P] = Callable[Concatenate["CloversAgent", Any, P], Coroutine[Any, Any, str]]
 type WrappedAgentFunction[**P] = Callable[Concatenate[str, "CloversAgent", Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
@@ -134,6 +133,42 @@ class ToolManager:
                 self.load_plugin(plugin)
 
 
+class OpenAIAPI:
+    def __init__(self, async_client: httpx.AsyncClient, config: OpenAIConfig) -> None:
+        self.async_client = async_client
+        self.url = f"{config.url.rstrip("/")}/chat/completions"
+        self.model = config.model
+        self.headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+        self.extra_body = config.extra_body
+
+    @staticmethod
+    def build_content(text: str, image_list: list[str] | None):
+        if not image_list:
+            return text
+        else:
+            content = []
+            if text:
+                content.append({"type": "text", "text": text})
+            if image_list:
+                content.extend({"type": "image_url", "image_url": {"url": image_url}} for image_url in image_list)
+            return content
+
+    def build_payload(self, context: Iterable[Message] | None = None, system_prompt: str | None = None) -> Payload:
+        payload: Payload = {"model": self.model, "messages": [], **self.extra_body}  # type: ignore 这里允许额外请求体
+        if system_prompt:
+            payload["messages"].append({"role": "system", "content": system_prompt})
+        if context:
+            payload["messages"].extend(context)
+        return payload
+
+    async def call_api(self, payload: Payload) -> AssistantMessage:
+        resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
+        if resp.status_code != 200:
+            logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
+            resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]
+
+
 class Session:
     type Timestamp = int | float
 
@@ -143,12 +178,15 @@ class Session:
     def __init__(self, size: int) -> None:
         self.records = deque(maxlen=size)
         self.silence = deque()
-        self.running: bool = False
+        self.lock = asyncio.Lock()
 
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
         while self.records and (self.records[0][2] <= timeout):
             self.records.popleft()
+
+    def silence_filter(self, timeout: int | float):
+        """过滤静默记录群聊上下文"""
         while self.silence and (self.silence[0][1] <= timeout):
             self.silence.popleft()
 
@@ -167,27 +205,23 @@ class Session:
         self.silence.clear()
 
 
-class CloversAgent(ToolManager):
+class CloversAgent(ToolManager, OpenAIAPI):
     """OpenAI API"""
 
     def __init__(self, name: str, async_client: httpx.AsyncClient, config: Config) -> None:
-        super().__init__(name)
-        self.async_client = async_client
-        self.model = config.model
-        self.url = f"{config.url.rstrip("/")}/chat/completions"
-        self.headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+        ToolManager.__init__(self, name)
+        OpenAIAPI.__init__(self, async_client, config.primary)
+        self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.style_prompt = config.style_prompt
         self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
-        self._memory_size = config.memory_size
+        self.memory_size = config.memory_size
         self.memory_timeout = config.memory_timeout
         self.topic_coldown = config.topic_coldown
         self.sessions: dict[str, Session] = {}
         self.current_input: UserMessage | None = None
         self.load_plugins_from_list(config.plugins)
         self.load_plugins_from_dirs(config.plugin_dirs)
-        self.toolmap: dict[str, FunctionToolInfo] = {}
-        self.extra_body = config.extra_body
         if self.skill_keywords:
             skill_keywords = list(self.skill_keywords)
             self.tool(
@@ -196,6 +230,7 @@ class CloversAgent(ToolManager):
                 {"category": {"type": "string", "description": "选择需要的技能关键词", "enum": skill_keywords}},
             )(self.skill_menu)
             logger.info(f"[{self.name}][LOAD SKILLS] {skill_keywords}")
+        self.toolmap: dict[str, FunctionToolInfo] = {}
         for tool in self.intro_tools:
             self.toolmap[tool["function"]["name"]] = tool
         for tool in self.extra_tools:
@@ -209,29 +244,8 @@ class CloversAgent(ToolManager):
         if hook:
             info = await hook(agent, event)
             if info:
-                tip += f"，{info}"
+                tip += f"\n{info}"
         return tip
-
-    @staticmethod
-    def build_content(text: str, image_list: list[str] | None):
-        if not image_list:
-            return text
-        else:
-            content = []
-            if text:
-                content.append({"type": "text", "text": text})
-            if image_list:
-                content.extend({"type": "image_url", "image_url": {"url": image_url}} for image_url in image_list)
-            return content
-
-    async def call_api(self, payload: Payload) -> AssistantMessage:
-        resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
-        try:
-            resp.raise_for_status()
-        except:
-            logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
-            raise
-        return resp.json()["choices"][0]["message"]
 
     async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
         task_queue = []
@@ -241,22 +255,10 @@ class CloversAgent(ToolManager):
             task_queue.append(func(call_info["id"], self, event, **kwargs))
         return await asyncio.gather(*task_queue)
 
-    def build_payload(self, context: Iterable[Message] | None = None, system_prompt: str | None = None) -> Payload:
-        payload: Payload = {"model": self.model, "messages": [], **self.extra_body}  # type: ignore 这里允许额外请求体
-        if system_prompt:
-            payload["messages"].append({"role": "system", "content": system_prompt})
-        if context:
-            payload["messages"].extend(context)
-        return payload
-
-    @staticmethod
-    def session_id(event: Event):
-        return event.group_id or f"private-{event.user_id}"
-
     def current_session(self, event: Event):
-        session_id = self.session_id(event)
+        session_id = event.group_id or f"private-{event.user_id}"
         if session_id not in self.sessions:
-            self.sessions[session_id] = Session(self._memory_size)
+            self.sessions[session_id] = Session(self.memory_size)
         return self.sessions[session_id]
 
     def select_tools(self, keyword: str):
@@ -268,7 +270,7 @@ class CloversAgent(ToolManager):
         payload["messages"].append(
             {"role": "user", "content": "对以上对话进行深度详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"}
         )
-        return (await self.call_api(payload))["content"].strip()
+        return (await self.auxiliary.call_api(payload))["content"].strip()
 
     async def call_unit(self, event: Event, payload: Payload):
         date_prompt = f"今天的日期是:{datetime.now().strftime('%Y年%m月%d日')}"
@@ -287,7 +289,7 @@ class CloversAgent(ToolManager):
         if event.skill_menu:
             used_tools = {"skill_menu"}
             system_message["content"] = f"{self.call_prompt}\n{date_prompt}\n\n{intro_prompt}"
-            for _ in range(30):
+            for _ in range(100):
                 payload["tools"] = [self.toolmap[k] for k in used_tools]
                 if event.skill_menu:
                     select_tools = self.select_tools(event.skill_menu)
@@ -295,36 +297,65 @@ class CloversAgent(ToolManager):
                 message = await self.call_api(payload)
                 if not (tool_calls := message.get("tool_calls")):
                     payload["messages"] = payload["messages"][:mark]
-                    intro_prompt = f"接下来你的回复是用你的语气复述如下内容：\n{message["content"]}"
+                    intro_prompt = f"接下来你需要用你的语气复述如下内容：\n{message["content"]}"
                     break
                 payload["messages"].append(message)
                 event.properties["skill_menu"] = ""
                 for msg, key in await self.function_call(event, tool_calls):
                     used_tools.add(key)
                     payload["messages"].append(msg)
-        del payload["tools"]
         system_message["content"] = f"{self.style_prompt}\n\n{intro_prompt}"
-        return (await self.call_api(payload))["content"].strip()
+        payload = self.auxiliary.build_payload(context=payload["messages"])
+        return (await self.auxiliary.call_api(payload))["content"].strip()
 
     async def chat(self, event: Event):
+        now = datetime.now()
+        timestamp = int(now.timestamp())
         session = self.current_session(event)
-        payload: Payload = {"model": self.model, "messages": []}
-        now = int(time.time())
-        session.memory_filter(now - self.memory_timeout)
-        if len(session.records) >= 5 and session.records[0][2] < now - self.memory_timeout:
-            summary = await self.summary_context(event)
-            logger.debug(f"[{self.name}][SUMMARY] {summary}")
-            session.clear()
-            session.silence.append((summary, now))
-        payload["messages"].extend(session.context)
-        content = self.build_content("\n".join(x[0] for x in session.silence), event.image_list)
-        self.current_input = {"role": "user", "content": content}
-        payload["messages"].append(self.current_input)
-        try:
-            resp = await self.call_unit(event, payload)
-        except Exception as e:
-            logger.exception(e, exc_info=e)
+        if not event.to_me:
+            session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]{event.message}", timestamp))
             return
-        session.over(self.current_input, {"role": "assistant", "content": resp}, now)
-        self.current_input = None
-        return resp
+        if session.lock.locked():
+            if not session.silence:
+                return
+            payload = self.auxiliary.build_payload(
+                ({"role": "user", "content": event.message},),
+                f"{self.style_prompt}\n{self.chat_prompt}\n"
+                f"**特别提示**\n你正在处理上一个指令：{session.silence[-1][0]}\n"
+                "如果用户进行了简单的提问或不依赖上下文的聊天，请正常回复。\n"
+                "如果用户提出了新任务、追问或依赖上下文的聊天，请告知用户你在忙，请稍等。",
+            )
+            return (await self.auxiliary.call_api(payload))["content"].strip()
+        async with session.lock:
+            session.memory_filter(timestamp - self.memory_timeout)
+            session.silence_filter(topic_timeout := (timestamp - self.topic_coldown))
+            session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]@me {event.message}", timestamp))
+            if len(session.records) >= 5 and session.records[-1][2] < topic_timeout:
+                summary = await self.summary_context(event)
+                logger.debug(f"[{self.name}][SUMMARY] {summary}")
+                session.records.clear()
+                session.silence.appendleft((summary, topic_timeout))
+            message = list(x[0] for x in session.silence)
+            if "extra_context" in event.properties and event.extra_context:
+                message.extend(event.extra_context)
+            content = self.build_content("\n".join(message), event.image_list)
+            self.current_input = {"role": "user", "content": content}  # 注入输入（可修改）
+            payload: Payload = {"model": self.model, "messages": [*session.context, self.current_input]}
+            if event.flat_context:
+                if isinstance(content, str):
+                    self.current_input["content"] = [{"type": "text", "text": content}]
+                assert isinstance(self.current_input["content"], list)
+                self.current_input["content"].append({"type": "text", "text": "<引用上下文>"})
+                for unit in event.flat_context:
+                    self.current_input["content"].append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
+                    if unit["images"]:
+                        self.current_input["content"].extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
+                self.current_input["content"].append({"type": "text", "text": "</引用上下文>"})
+            try:
+                resp = await self.call_unit(event, payload)
+            except Exception as e:
+                logger.exception(e)
+                return
+            session.over({"role": "user", "content": content}, {"role": "assistant", "content": resp}, timestamp)
+            self.current_input = None
+            return resp
