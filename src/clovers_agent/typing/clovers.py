@@ -17,7 +17,6 @@ class Event(EventProtocol, Protocol):
     to_me: bool
     image_list: list[str]
     permission: int
-    skill_menu: str
     extra_context: list[str]
 
     @overload

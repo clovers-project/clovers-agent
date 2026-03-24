@@ -73,8 +73,15 @@ class ToolManager:
 
     def on_skill(self, category: str):
         def decorator(func: AgentFunction) -> AgentFunction:
-            self.skill_hooks[category] = func
-            return func
+            async def wrapper(*args, **kwargs):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    logger.exception(e)
+                    return f"{category} 初始化失败"
+
+            self.skill_hooks[category] = wrapper
+            return wrapper
 
         return decorator
 
@@ -199,6 +206,8 @@ class Session(ContextRecoder):
         super().__init__(size)
         self.silence = deque()
         self.temp = ContextRecoder(size)
+        self.summary: str | None = None
+        self.skill_menu: str | None = None
 
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
@@ -211,6 +220,12 @@ class Session(ContextRecoder):
             self.silence.popleft()
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
+        if self.summary:
+            if isinstance(request["content"], str):
+                request["content"] = f"{self.summary}\n***\n{request}"
+            else:
+                request["content"] = [{"type": "text", "text": f"{self.summary}\n***"}, *request["content"]]
+            self.summary = None
         self.records.append((request, reply, timestamp))
         self.silence.clear()
 
@@ -234,6 +249,15 @@ class CloversAgent(ToolManager, OpenAIAPI):
         self.topic_coldown = config.topic_coldown
         self.sessions: dict[str, Session] = {}
         self.current_input: UserMessage | None = None
+        self.tool(
+            "summary_context",
+            "当上下文有足够多（值得总结）的内容，且满足下列条件之一时，请 **主动调用此方法** 以整理上下文。\n"
+            "1. 当从闲聊进入到具体主题时"
+            "2. 当话题某个具体主题讨论结束，回归到闲聊时"
+            "3. 当讨论的主题发生了切换时"
+            "4. 当你认为上下文过于冗余、重复内容过多，需要整理时，即使话题没有切换也应调用此方法",
+            None,
+        )(self.summary_context)
         self.load_plugins_from_list(config.plugins)
         self.load_plugins_from_dirs(config.plugin_dirs)
         if self.skill_keywords:
@@ -253,13 +277,25 @@ class CloversAgent(ToolManager, OpenAIAPI):
     @staticmethod
     async def skill_menu(agent: "CloversAgent", event: Event, category: str):
         tip = f"已获取技能：{category}"
-        event.properties["skill_menu"] = category
+        agent.current_session(event).skill_menu = category
         hook = agent.skill_hooks.get(category)
         if hook:
             info = await hook(agent, event)
             if info:
                 tip += f"\n{info}"
         return tip
+
+    @staticmethod
+    async def summary_context(agent: "CloversAgent", event: Event) -> str:
+        session = agent.current_session(event)
+        payload = agent.auxiliary.build_payload(context=session)
+        payload["messages"].append(
+            {"role": "user", "content": "对以上对话进行深度详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"}
+        )
+        session.records.clear()
+        session.summary = (await agent.auxiliary.call_api(payload))["content"].strip()
+        logger.debug(f"[{agent.name}][SUMMARY] {session.summary}")
+        return ""
 
     async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
         task_queue = []
@@ -282,15 +318,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
     def select_tools(self, keyword: str):
         return [d["info"] for d in self.extra_tools if keyword in d["keywords"]]
 
-    async def summary_context(self, event: Event) -> str:
-        session = self.current_session(event)
-        payload = self.build_payload(context=session)
-        payload["messages"].append(
-            {"role": "user", "content": "对以上对话进行深度详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"}
-        )
-        return (await self.auxiliary.call_api(payload))["content"].strip()
-
-    async def call_unit(self, event: Event, payload: Payload):
+    async def call_unit(self, session: Session, event: Event, payload: Payload):
         date_prompt = f"今天的日期是:{datetime.now().strftime('%Y年%m月%d日')}"
         system_prompt = f"{self.style_prompt}\n{self.chat_prompt}\n{date_prompt}"
         system_message: SystemMessage = {"role": "system", "content": system_prompt}
@@ -301,16 +329,16 @@ class CloversAgent(ToolManager, OpenAIAPI):
         # 退出条件：不需要额外技能
         if not (tool_calls := resp.get("tool_calls")):
             return resp["content"].strip()
-        event.properties["skill_menu"] = ""
+        session.skill_menu = None
         intro_prompt = "".join(msg[0]["content"] for msg in await self.function_call(event, tool_calls) if msg[1])
         # 退出条件：不需要额外技能
-        if event.skill_menu:
+        if session.skill_menu:
             used_tools = {"skill_menu"}
             system_message["content"] = f"{self.call_prompt}\n{date_prompt}\n\n{intro_prompt}"
             for _ in range(100):
                 payload["tools"] = [self.toolmap[k] for k in used_tools]
-                if event.skill_menu:
-                    select_tools = self.select_tools(event.skill_menu)
+                if session.skill_menu:
+                    select_tools = self.select_tools(session.skill_menu)
                     payload["tools"].extend(tool for tool in select_tools if tool["function"]["name"] not in used_tools)
                 message = await self.call_api(payload)
                 if not (tool_calls := message.get("tool_calls")):
@@ -318,11 +346,10 @@ class CloversAgent(ToolManager, OpenAIAPI):
                     intro_prompt = f"接下来你需要用你的语气复述如下内容：\n{message['content']}"
                     break
                 payload["messages"].append(message)
-                event.properties["skill_menu"] = ""
+                session.skill_menu = None
                 for msg, key in await self.function_call(event, tool_calls):
                     used_tools.add(key)
                     payload["messages"].append(msg)
-            session = self.current_session(event)
         if session.temp:
             intro_prompt = f"在你处理任务时的对话如下：{"\n".join(cast(str,msg["content"]) for msg in session.temp )}\n{intro_prompt}"
             session.temp.clear()
@@ -363,13 +390,8 @@ class CloversAgent(ToolManager, OpenAIAPI):
                 return reply
         async with session.lock:
             session.memory_filter(timestamp - self.memory_timeout)
-            session.silence_filter(topic_timeout := (timestamp - self.topic_coldown))
+            session.silence_filter(timestamp - self.topic_coldown)
             session.silence.append((request, timestamp))
-            if len(session.records) >= 5 and session.records[-1][2] < topic_timeout:
-                summary = await self.summary_context(event)
-                logger.debug(f"[{self.name}][SUMMARY] {summary}")
-                session.records.clear()
-                session.silence.appendleft((summary, topic_timeout))
             message = list(x[0] for x in session.silence)
             if "extra_context" in event.properties:
                 message.extend(event.extra_context)
@@ -387,7 +409,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
                         self.current_input["content"].extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
                 self.current_input["content"].append({"type": "text", "text": "</引用上下文>"})
             try:
-                resp = await self.call_unit(event, payload)
+                resp = await self.call_unit(session, event, payload)
             except Exception as e:
                 logger.exception(e)
                 return
