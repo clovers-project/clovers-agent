@@ -35,19 +35,9 @@ class ToolManager:
     def tool(self, name: str, description: str, parameters: Parameters | None, keywords: Iterable[str] | None = None):
         if name in self.functions:
             raise ValueError(f"Tool {name} already exists.")
-        info: FunctionToolInfo = {
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": description,
-            },
-        }
+        info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
         if parameters:
-            info["function"]["parameters"] = {
-                "type": "object",
-                "properties": parameters,
-                "required": list(parameters.keys()),
-            }
+            info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
         if not keywords:
             self.intro_tools.append(info)
         else:
@@ -222,7 +212,7 @@ class Session(ContextRecoder):
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
         if self.summary:
             if isinstance(request["content"], str):
-                request["content"] = f"{self.summary}\n***\n{request}"
+                request["content"] = f"{self.summary}\n***\n{request["content"]}"
             else:
                 request["content"] = [{"type": "text", "text": f"{self.summary}\n***"}, *request["content"]]
             self.summary = None
