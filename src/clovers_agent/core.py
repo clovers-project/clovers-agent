@@ -288,6 +288,8 @@ class CloversAgent(ToolManager, OpenAIAPI):
     @staticmethod
     async def summary_context(agent: "CloversAgent", event: Event) -> str:
         session = agent.current_session(event)
+        if not session.records:
+            return ""
         payload = agent.auxiliary.build_payload(context=session)
         payload["messages"].append(
             {"role": "user", "content": "对以上对话进行深度详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"}
