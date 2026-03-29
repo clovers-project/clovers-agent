@@ -57,7 +57,7 @@ async def _(event: Event):
 @__plugin__.handle(
     ["记忆清除"],
     ["user_id", "group_id", "to_me", "permission"],
-    rule=[switch_check, permission_check, to_me_check],
+    rule=[switch_check, permission_check],
     block=True,
 )
 async def _(event: Event):
@@ -65,30 +65,6 @@ async def _(event: Event):
     async with session.lock:
         session.clear()
     return Result("text", "记忆已清除")
-
-
-if console_mode:
-    console_protocol = b"\x05\x03\x01".decode()
-
-    @__plugin__.handle(
-        [f"{console_protocol}"],
-        ["user_id", "group_id"],
-        rule=[switch_check, args_check],
-        block=True,
-    )
-    async def _(event: Event):
-        match event.args[0]:
-            case "cleanup":
-                session = agent.current_session(event)
-                async with session.lock:
-                    session.clear()
-                return Result("console", ["log", "记忆已清除"])
-            case "title":
-                prompt = f"给这句话生成一个标题，长度不超过20个字。禁止输出标题以外的内容。\n{event.message[9:]}"
-                payload = agent.auxiliary.build_payload([{"role": "user", "content": prompt}])
-                return Result("console", ["title", (await agent.auxiliary.call_api(payload))["content"].strip()])
-            case _:
-                return
 
 
 __version__ = "0.1.0"

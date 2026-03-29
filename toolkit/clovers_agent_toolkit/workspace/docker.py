@@ -2,7 +2,6 @@ import asyncio
 import docker
 import shlex
 from docker.models.containers import Container
-from docker.types import DeviceRequest
 from docker.errors import NotFound
 from pathlib import Path
 
@@ -42,7 +41,6 @@ class Shell:
                         tty=True,
                         command="sleep infinity",
                         volumes={workspace.resolve().as_posix(): {"bind": "/workspace", "mode": "rw"}},
-                        device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])],
                     )
             else:
                 self.container
