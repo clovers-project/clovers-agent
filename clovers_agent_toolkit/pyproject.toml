@@ -10,3 +10,6 @@ dependencies = ["clovers-agent>=0.1.9", "docker>=7.1.0"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+clovers-agent = { workspace = true, editable = true }
