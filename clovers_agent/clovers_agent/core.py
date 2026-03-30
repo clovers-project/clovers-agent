@@ -208,7 +208,6 @@ class OpenAIAPI:
         return payload
 
     async def call_api(self, payload: Payload) -> AssistantMessage:
-        print(json.dumps(payload, indent=4, ensure_ascii=False))
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
         if resp.status_code != 200:
             logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
