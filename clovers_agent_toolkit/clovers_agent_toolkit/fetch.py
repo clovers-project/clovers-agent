@@ -5,7 +5,7 @@ from .config import __config__
 BRAVE_API_KEY = __config__.BRAVE_API_KEY
 
 
-@toolkit.tool(
+@toolkit.register(
     "web_search",
     "联网搜索",
     {"query": {"type": "string", "description": "搜索关键词"}},
@@ -33,7 +33,7 @@ async def _(agent: CloversAgent, event: Event, query: list[str]):
     return "\n".join(md_output)
 
 
-@toolkit.tool(
+@toolkit.register(
     "web_extractor",
     "读取指定 URL 的网页纯文本内容。当需要从特定网页获取文本信息时使用。",
     {"webpage_url": {"type": "string", "description": "网页的完整 URL 地址"}},
@@ -51,7 +51,7 @@ async def _(agent: CloversAgent, event: Event, webpage_url: str):
         return "获取网页失败"
 
 
-@toolkit.tool(
+@toolkit.register(
     "view_image_url",
     "查看网络图片。当你需要查看用户提供的图片链接时，请调用此工具",
     {"image_url": {"type": "string", "description": "图片的完整 URL 地址"}},

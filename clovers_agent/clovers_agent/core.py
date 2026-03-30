@@ -17,33 +17,50 @@ type AgentFunction[**P] = Callable[Concatenate["CloversAgent", Any, P], Coroutin
 type WrappedAgentFunction[**P] = Callable[Concatenate[str, "CloversAgent", Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
 
 
-class ToolManager:
+def int_generator():
+    i = 0
+    while True:
+        yield i
+        i += 1
+
+
+class SkillCore:
     type Parameters = dict[str, JSONSchemaType]
 
-    class ExtraToolsType(TypedDict):
-        info: FunctionToolInfo
-        keywords: set[str]
-
     def __init__(self, name: str = "") -> None:
+        self.category_id = int_generator()
         self.name = name
         self.intro_tools: list[FunctionToolInfo] = []
-        self.skill_keywords: set[str] = set()
-        self.skill_hooks: dict[str, AgentFunction] = {}
-        self.extra_tools: list[ToolManager.ExtraToolsType] = []
-        self.functions: dict[str, WrappedAgentFunction] = {}
+        self.skill_init: dict[str, AgentFunction] = {}
+        self.manifest: dict[str, FunctionToolInfo] = {}
+        self.invoker: dict[str, WrappedAgentFunction] = {}
+        self.__map_category_to_id: dict[str, int] = {}
+        self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
 
-    def tool(self, name: str, description: str, parameters: Parameters | None, keywords: Iterable[str] | None = None):
-        if name in self.functions:
+    def select_tools(self, category: str) -> list[FunctionToolInfo]:
+        if category not in self.__map_category_to_id:
+            return []
+        return self.__map_id_to_tools[self.__map_category_to_id[category]]
+
+    def register(self, name: str, description: str, parameters: Parameters | None = None, categories: str | Iterable[str] | None = None):
+        if name in self.invoker:
             raise ValueError(f"Tool {name} already exists.")
         info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
         if parameters:
             info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
-        if not keywords:
+        # info 是 OpneAI API 要求的 tools 字段中元素的格式
+        if not categories:
             self.intro_tools.append(info)
         else:
-            keywords = set(keywords)
-            self.skill_keywords.update(keywords)
-            self.extra_tools.append({"info": info, "keywords": keywords})
+            if isinstance(categories, str):
+                categories = [categories]
+            for category in categories:
+                category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
+                self.__map_category_to_id[category] = category_id
+                if category_id not in self.__map_id_to_tools:
+                    self.__map_id_to_tools[category_id] = []
+                self.__map_id_to_tools[category_id].append(info)
+            self.manifest[info["function"]["name"]] = info
 
         def decorator(func: AgentFunction) -> WrappedAgentFunction:
             async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs):
@@ -56,78 +73,45 @@ class ToolManager:
                 message: ToolMessage = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
                 return message, name
 
-            self.functions[name] = wrapper
+            self.invoker[name] = wrapper
             return wrapper
 
         return decorator
 
-    def on_skill(self, category: str):
+    def merge(self, others: "SkillCore"):
+        conflict = (others.invoker.keys() & self.invoker.keys()) | (others.skill_init.keys() & self.skill_init.keys())
+        if conflict:
+            return conflict
+        self.intro_tools.extend(others.intro_tools)
+        self.manifest.update(others.manifest)
+        self.skill_init.update(others.skill_init)
+        self.invoker.update(others.invoker)
+        for category, category_id in others.__map_category_to_id.items():
+            if category in self.__map_category_to_id:
+                self.__map_id_to_tools[self.__map_category_to_id[category]].extend(others.__map_id_to_tools[category_id])
+            else:
+                new_category_id = next(self.category_id)
+                self.__map_id_to_tools[new_category_id].extend(others.__map_id_to_tools[category_id])
+                self.__map_category_to_id[category] = new_category_id
+
+    def on_skill(self, categories: str | Iterable[str]):
         def decorator(func: AgentFunction) -> AgentFunction:
             async def wrapper(*args, **kwargs):
                 try:
                     return await func(*args, **kwargs)
                 except Exception as e:
                     logger.exception(e)
-                    return f"{category} 初始化失败"
+                    return f"{categories} 初始化失败"
 
-            self.skill_hooks[category] = wrapper
+            if isinstance(categories, str):
+                self.skill_init[categories] = wrapper
+            else:
+                for category in categories:
+                    self.skill_init[category] = wrapper
+
             return wrapper
 
         return decorator
-
-    def mixin(self, plugin: "ToolManager"):
-        conflict = plugin.functions.keys() & self.functions.keys()
-        if conflict:
-            return conflict
-        self.intro_tools.extend(plugin.intro_tools)
-        self.skill_keywords.update(plugin.skill_keywords)
-        self.extra_tools.extend(plugin.extra_tools)
-        self.functions.update(plugin.functions)
-        self.skill_hooks.update(plugin.skill_hooks)
-
-    def load_plugin(self, name: str | Path, is_path=False):
-        """加载 clovers-agent 插件
-
-        Args:
-            name (str | Path): 插件的包名或路径
-            is_path (bool, optional): 是否为路径
-        """
-        package = import_name(name, is_path)
-        try:
-            plugin = getattr(import_module(package), "__plugin__", None)
-            assert isinstance(plugin, ToolManager)
-        except Exception as e:
-            logger.exception(f'[{self.name}][loading plugin] "{package}" load failed', exc_info=e)
-            return
-        conflict = self.mixin(plugin)
-        if conflict:
-            logger.error(f'[{self.name}][loading plugin] "{package}" conflict with {conflict}')
-        else:
-            logger.info(f'[{self.name}][loading plugin] "{package}" loaded')
-        plugin.name = plugin.name or package
-
-    def load_plugins_from_list(self, plugin_list: list[str]):
-        """从包名列表加载插件
-
-        Args:
-            plugin_list (list[str]): 插件的包名列表
-        """
-        for plugin in plugin_list:
-            self.load_plugin(plugin)
-
-    def load_plugins_from_dirs(self, plugin_dirs: list[str]):
-        """从本地目录列表加载插件
-
-        Args:
-            plugin_dirs (list[str]): 插件的目录列表
-        """
-        for plugin_dir in plugin_dirs:
-            plugin_dir = Path(plugin_dir)
-            if not plugin_dir.exists():
-                plugin_dir.mkdir(parents=True, exist_ok=True)
-                continue
-            for plugin in list_modules(plugin_dir):
-                self.load_plugin(plugin)
 
 
 class OpenAIAPI:
@@ -191,6 +175,7 @@ class Session(ContextRecoder):
     records: deque[tuple[UserMessage, AssistantMessage, int | float]]
     silence: deque[tuple[str, int | float]]
     temp: ContextRecoder
+    extra: dict
 
     def __init__(self, size: int) -> None:
         super().__init__(size)
@@ -198,6 +183,7 @@ class Session(ContextRecoder):
         self.temp = ContextRecoder(size)
         self.summary: str | None = None
         self.skill_menu: str | None = None
+        self.extra = {}
 
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
@@ -224,11 +210,11 @@ class Session(ContextRecoder):
         self.silence.clear()
 
 
-class CloversAgent(ToolManager, OpenAIAPI):
+class CloversAgent(SkillCore, OpenAIAPI):
     """OpenAI API"""
 
     def __init__(self, name: str, async_client: httpx.AsyncClient, config: Config) -> None:
-        ToolManager.__init__(self, name)
+        SkillCore.__init__(self, name)
         OpenAIAPI.__init__(self, async_client, config.primary)
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.style_prompt = config.style_prompt
@@ -239,36 +225,34 @@ class CloversAgent(ToolManager, OpenAIAPI):
         self.topic_coldown = config.topic_coldown
         self.sessions: dict[str, Session] = {}
         self.current_input: UserMessage | None = None
-        self.tool(
+        # 注册技能
+        self.categories: list[str] = []
+        self._plugins = config.plugins
+        self._plugins_dirs = config.plugin_dirs
+        self.register(
+            "skill_menu",
+            "获取更多技能，如果assistant无法单独完成用户指令，则需要调用此方法获取更多技能。",
+            {"category": {"type": "string", "description": "选择需要的技能关键词", "enum": self.categories}},
+        )(self.skill_menu)
+        self.register(
             "summary_context",
             "当上下文有足够多（值得总结）的内容，且满足下列条件之一时，请 **主动调用此方法** 以整理上下文。\n"
             "1. 当从闲聊进入到具体主题时"
             "2. 当话题某个具体主题讨论结束，回归到闲聊时"
             "3. 当讨论的主题发生了切换时"
             "4. 当你认为上下文过于冗余、重复内容过多，需要整理时，即使话题没有切换也应调用此方法",
-            None,
         )(self.summary_context)
-        self.load_plugins_from_list(config.plugins)
-        self.load_plugins_from_dirs(config.plugin_dirs)
-        if self.skill_keywords:
-            skill_keywords = list(self.skill_keywords)
-            self.tool(
-                "skill_menu",
-                "获取更多技能，如果assistant无法单独完成用户指令，则需要调用此方法获取更多技能。",
-                {"category": {"type": "string", "description": "选择需要的技能关键词", "enum": skill_keywords}},
-            )(self.skill_menu)
-            logger.info(f"[{self.name}][LOAD SKILLS] {skill_keywords}")
-        self.toolmap: dict[str, FunctionToolInfo] = {}
-        for tool in self.intro_tools:
-            self.toolmap[tool["function"]["name"]] = tool
-        for tool in self.extra_tools:
-            self.toolmap[tool["info"]["function"]["name"]] = tool["info"]
+
+    def init(self) -> None:
+        self.load_plugins_from_list(self._plugins)
+        self.load_plugins_from_dirs(self._plugins_dirs)
+        self.categories.extend(self.__map_category_to_id.keys())
 
     @staticmethod
     async def skill_menu(agent: "CloversAgent", event: Event, category: str):
         tip = f"已获取技能：{category}"
         agent.current_session(event).skill_menu = category
-        hook = agent.skill_hooks.get(category)
+        hook = agent.skill_init.get(category)
         if hook:
             info = await hook(agent, event)
             if info:
@@ -282,7 +266,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
             return ""
         payload = agent.auxiliary.build_payload(context=session)
         payload["messages"].append(
-            {"role": "user", "content": "对以上对话进行深度详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"}
+            {"role": "user", "content": "对以上对话进行简短的总结，但要保留核心内容和结论，禁止输出除总结外的其他内容。"}
         )
         session.records.clear()
         session.summary = (await agent.auxiliary.call_api(payload))["content"].strip()
@@ -292,7 +276,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
     async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
         task_queue = []
         for call_info in call_infos:
-            func = self.functions[call_info["function"]["name"]]
+            func = self.invoker[call_info["function"]["name"]]
             kwargs = json.loads(call_info["function"]["arguments"])
             task_queue.append(func(call_info["id"], self, event, **kwargs))
         return await asyncio.gather(*task_queue)
@@ -307,16 +291,13 @@ class CloversAgent(ToolManager, OpenAIAPI):
             self.sessions[session_id] = Session(self.memory_size)
         return self.sessions[session_id]
 
-    def select_tools(self, keyword: str):
-        return [d["info"] for d in self.extra_tools if keyword in d["keywords"]]
-
     async def call_unit(self, session: Session, event: Event, payload: Payload):
         date_prompt = f"今天的日期是:{datetime.now().strftime('%Y年%m月%d日')}"
         system_prompt = f"{self.style_prompt}\n{self.chat_prompt}\n{date_prompt}"
         system_message: SystemMessage = {"role": "system", "content": system_prompt}
         payload["messages"].insert(0, system_message)
         mark = len(payload["messages"])
-        payload["tools"] = self.intro_tools
+        payload["tools"] = self.intro_tools if self.categories else self.intro_tools[1:]
         resp = await self.call_api(payload)
         # 退出条件：不需要额外技能
         if not (tool_calls := resp.get("tool_calls")):
@@ -325,13 +306,12 @@ class CloversAgent(ToolManager, OpenAIAPI):
         intro_prompt = "".join(msg[0]["content"] for msg in await self.function_call(event, tool_calls) if msg[1])
         # 退出条件：不需要额外技能
         if session.skill_menu:
-            used_tools = {"skill_menu"}
+            toolkit = {"skill_menu"}
             system_message["content"] = f"{self.call_prompt}\n{date_prompt}\n\n{intro_prompt}"
             for _ in range(100):
-                payload["tools"] = [self.toolmap[k] for k in used_tools]
+                payload["tools"] = [self.manifest[k] for k in toolkit]
                 if session.skill_menu:
-                    select_tools = self.select_tools(session.skill_menu)
-                    payload["tools"].extend(tool for tool in select_tools if tool["function"]["name"] not in used_tools)
+                    payload["tools"].extend(x for x in self.select_tools(session.skill_menu) if x["function"]["name"] not in toolkit)
                 message = await self.call_api(payload)
                 if not (tool_calls := message.get("tool_calls")):
                     payload["messages"] = payload["messages"][:mark]
@@ -340,7 +320,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
                 payload["messages"].append(message)
                 session.skill_menu = None
                 for msg, key in await self.function_call(event, tool_calls):
-                    used_tools.add(key)
+                    toolkit.add(key)
                     payload["messages"].append(msg)
         if session.temp:
             intro_prompt = f"在你处理任务时的对话如下：{"\n".join(cast(str,msg["content"]) for msg in session.temp )}\n{intro_prompt}"
@@ -357,7 +337,7 @@ class CloversAgent(ToolManager, OpenAIAPI):
                 return
             user_msg: UserMessage = {"role": "user", "content": message}
             payload = self.auxiliary.build_payload(
-                (*session.temp, user_msg),
+                (*session, *session.temp, user_msg),
                 f"{self.style_prompt}\n{self.chat_prompt}\n"
                 f"**特别提示**\n你正在处理上一个指令：{session.silence[-1][0]}\n"
                 "如果用户进行了简单的提问或不依赖上下文的聊天，请正常回复。\n"
@@ -372,9 +352,11 @@ class CloversAgent(ToolManager, OpenAIAPI):
         now = datetime.now()
         timestamp = int(now.timestamp())
         session = self.current_session(event)
+        session.extra[event.user_id] = event.nickname
         to_me = event.to_me or "extra_context" in event.properties
         if not to_me:
-            session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]{event.message}", timestamp))
+            at = "".join(f"@{name} " for user_id in event.at if (name := session.extra.get(user_id))) if event.at else ""
+            session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]{at}{event.message}", timestamp))
             return
         request = f"{event.nickname}[{now.strftime("%I:%M %p")}]@me {event.message}"
         if session.lock.locked():
@@ -408,3 +390,47 @@ class CloversAgent(ToolManager, OpenAIAPI):
             session.over({"role": "user", "content": content}, {"role": "assistant", "content": resp}, timestamp)
             self.current_input = None
             return resp
+
+    def load_plugin(self, name: str | Path, is_path=False):
+        """加载 clovers-agent 插件
+
+        Args:
+            name (str | Path): 插件的包名或路径
+            is_path (bool, optional): 是否为路径
+        """
+        package = import_name(name, is_path)
+        try:
+            plugin = getattr(import_module(package), "__plugin__", None)
+            assert isinstance(plugin, SkillCore)
+        except Exception as e:
+            logger.exception(f'[{self.name}][loading plugin] "{package}" load failed', exc_info=e)
+            return
+        conflict = self.merge(plugin)
+        if conflict:
+            logger.error(f'[{self.name}][loading plugin] "{package}" conflict with {conflict}')
+        else:
+            logger.info(f'[{self.name}][loading plugin] "{package}" loaded')
+        plugin.name = plugin.name or package
+
+    def load_plugins_from_list(self, plugin_list: list[str]):
+        """从包名列表加载插件
+
+        Args:
+            plugin_list (list[str]): 插件的包名列表
+        """
+        for plugin in plugin_list:
+            self.load_plugin(plugin)
+
+    def load_plugins_from_dirs(self, plugin_dirs: list[str]):
+        """从本地目录列表加载插件
+
+        Args:
+            plugin_dirs (list[str]): 插件的目录列表
+        """
+        for plugin_dir in plugin_dirs:
+            plugin_dir = Path(plugin_dir)
+            if not plugin_dir.exists():
+                plugin_dir.mkdir(parents=True, exist_ok=True)
+                continue
+            for plugin in list_modules(plugin_dir):
+                self.load_plugin(plugin)

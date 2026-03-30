@@ -1,3 +1,3 @@
-from clovers_agent import ToolManager
+from clovers_agent import SkillCore
 
-toolkit = ToolManager("Agent Toolkit")
+toolkit = SkillCore("Agent Toolkit")

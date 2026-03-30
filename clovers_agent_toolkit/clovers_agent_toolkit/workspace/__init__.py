@@ -40,7 +40,7 @@ async def _(agent: CloversAgent, event: Event):
 
 if __config__.use_shell:
 
-    @toolkit.tool(
+    @toolkit.register(
         "shell",
         "在工作区环境下执行命令",
         {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
@@ -56,7 +56,7 @@ if __config__.use_shell:
         return f"{output}\n当前工作目录: {shell.workdir}"
 
 
-@toolkit.tool(
+@toolkit.register(
     "read_files",
     "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件上下文。"
     "在需要分析代码、检查配置文件时，尤其是需要查看多个文件时，应优先使用此工具以提高效率。",
@@ -87,7 +87,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
     return "\n\n".join(md)
 
 
-@toolkit.tool(
+@toolkit.register(
     "write_file",
     "写入文件",
     {

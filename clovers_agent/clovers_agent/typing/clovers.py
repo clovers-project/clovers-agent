@@ -15,6 +15,7 @@ class Event(EventProtocol, Protocol):
     group_id: str | None
     nickname: str
     to_me: bool
+    at: list[str]
     image_list: list[str]
     permission: int
     extra_context: list[str]
