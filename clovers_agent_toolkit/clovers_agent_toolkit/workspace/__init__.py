@@ -1,4 +1,6 @@
-from clovers_agent import Event, CloversAgent
+from pathlib import Path
+from typing import overload, Literal, Protocol
+from clovers_agent import Event as BaseEvent, CloversAgent
 from clovers.logger import logger
 from .docker import WORKSPACE, Shell
 from ..toolkit import toolkit
@@ -6,6 +8,11 @@ from ..config import __config__
 
 README = WORKSPACE / "README.md"
 shell_dict: dict[str, Shell] = {}
+
+
+class Event(BaseEvent, Protocol):
+
+    async def call(self, key: Literal["upload_file"], file: Path): ...
 
 
 def get_session_id(agent: CloversAgent, event: Event) -> str: ...
@@ -56,6 +63,17 @@ if __config__.use_shell:
         return f"{output}\n当前工作目录: {shell.workdir}"
 
 
+def read_text(file: Path):
+    for encoding in ["utf-8", None, "ansi"]:
+        try:
+            return file.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+        except Exception as e:
+            logger.error(f"文件读取失败: {e}")
+            return ""
+
+
 @toolkit.register(
     "read_files",
     "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件上下文。"
@@ -77,13 +95,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
         if not file.exists():
             md.append(f"{file_path} 文件不存在")
             continue
-        try:
-            content = file.read_text()
-        except Exception as e:
-            logger.error(f"{file_path} 文件读取失败:{e}")
-            md.append(f"{file_path} 文件读取失败")
-            continue
-        md.append(f"```{file_path}\n{content}\n```")
+        md.append(f"```{file_path}\n{read_text(file)}\n```")
     return "\n\n".join(md)
 
 
@@ -110,3 +122,29 @@ async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str
     except Exception as e:
         logger.error(e)
         return f"文件写入失败：{e}"
+
+
+@toolkit.register(
+    "upload_file",
+    "把文件上传给用户。",
+    {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
+    ["工作区工具"],
+)
+async def _(agent: CloversAgent, event: Event, file_path: str):
+    session_id = get_session_id(agent, event)
+    workspace = WORKSPACE / session_id
+    if file_path.startswith("/workspace"):
+        file = workspace / f"./{file_path[10:]}"
+    else:
+        file = workspace / file_path
+    if not file.is_relative_to(workspace):
+        return f"{file_path} 非工作区文件"
+    if not file.exists():
+        return f"{file_path} 文件不存在"
+    if (coro := event.call("upload_file", file)) is None:
+        return "未实现上传文件接口"
+    try:
+        await coro
+    except Exception as e:
+        return f"上传失败：{e}"
+    return "上传成功！"

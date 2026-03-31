@@ -24,7 +24,9 @@ class Config(BaseModel):
     plugin_dirs: list[str] = []
     """插件路径"""
     primary: OpenAIConfig
+    """主模型接入点"""
     auxiliary: OpenAIConfig | None
+    """辅助模型接入点"""
     memory_timeout: int = 7200
     """记忆超时时间"""
     topic_coldown: int = 300

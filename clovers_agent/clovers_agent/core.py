@@ -291,17 +291,16 @@ class CloversAgent(SkillCore, OpenAIAPI):
             self.sessions[session_id] = Session(self.memory_size)
         return self.sessions[session_id]
 
-    async def aux_reply(self, session: Session, message: str):
+    async def aux_reply(self, session: Session, message: UserMessage):
         if not session.silence:
             return
         async with session.snap.lock:
             if not session.lock.locked():
                 return
-            user_msg: UserMessage = {"role": "user", "content": message}
-            payload = self.auxiliary.build_payload((*session.snap, user_msg), f"{self.style_prompt}\n{self.chat_prompt}\n")
+            payload = self.auxiliary.build_payload((*session.snap, message), f"{self.style_prompt}\n{self.chat_prompt}\n")
             reply = (await self.auxiliary.call_api(payload))["content"].strip()
             assistant_msg: AssistantMessage = {"role": "assistant", "content": reply}
-            session.snap.over(user_msg, assistant_msg)
+            session.snap.over(message, assistant_msg)
             return reply
 
     async def call_unit(self, session: Session, event: Event, payload: Payload, extra_prompt: str = ""):
@@ -348,23 +347,24 @@ class CloversAgent(SkillCore, OpenAIAPI):
         timestamp = int(now.timestamp())
         session = self.current_session(event)
         session.extra[event.user_id] = event.nickname
-        to_me = event.to_me or "extra_context" in event.properties
-        if not to_me:
-            at = "".join(f"@{name} " for user_id in event.at if (name := session.extra.get(user_id))) if event.at else ""
-            session.silence.append((f"{event.nickname}[{now.strftime("%I:%M %p")}]{at}{event.message}", timestamp))
+        head = f"{event.nickname}[{now.strftime("%I:%M %p")}]"
+        at = "".join(f"@{name} " for user_id in event.at if (name := session.extra.get(user_id))) if event.at else ""
+        if "extra_context" in event.properties:
+            body = f"@me {at}{event.message}\n{"\n".join(event.extra_context)}"
+        elif event.to_me:
+            body = f"@me {at}{event.message}"
+        else:
+            session.silence.append((f"{head}{at}{event.message}", timestamp))
             return
-        request = f"{event.nickname}[{now.strftime("%I:%M %p")}]@me {event.message}"
+        request = f"{head}{at}{body}"
         if session.lock.locked():
-            if reply := await self.aux_reply(session, request):
-                return reply
+            return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, event.image_list)})
         async with session.lock:
             async with session.snap.lock:
                 session.memory_filter(timestamp - self.memory_timeout)
                 session.silence_filter(timestamp - self.topic_coldown)
                 session.silence.append((request, timestamp))
                 message = list(x[0] for x in session.silence)
-                if "extra_context" in event.properties:
-                    message.extend(event.extra_context)
                 message = "\n".join(message)
                 session.sync_snap()
                 session.snap.over({"role": "user", "content": message}, {"role": "system", "content": "正在执行任务..."})
@@ -400,7 +400,8 @@ class CloversAgent(SkillCore, OpenAIAPI):
         package = import_name(name, is_path)
         try:
             plugin = getattr(import_module(package), "__plugin__", None)
-            assert isinstance(plugin, SkillCore)
+            if not isinstance(plugin, SkillCore):
+                raise TypeError(f"{package}.__plugin__ must be a subclass of SkillCore")
         except Exception as e:
             logger.exception(f'[{self.name}][loading plugin] "{package}" load failed', exc_info=e)
             return
