@@ -9,7 +9,7 @@ from clovers.logger import logger
 from collections import deque
 from collections.abc import Iterable, Callable, Coroutine
 from typing import Any, Concatenate
-from .embedding import TopicDecoupler
+from .embedding import SentenceTransformer, TopicDecoupler
 from .typing import Event, Message, SystemMessage, Payload, FunctionToolInfo
 from .typing.message import UserMessage, AssistantMessage, ToolMessage, ContentSegment
 from .typing.json_schema import JSONSchemaType
@@ -17,6 +17,10 @@ from .config import OpenAIConfig, Config
 
 type AgentFunction[**P] = Callable[Concatenate["CloversAgent", Any, P], Coroutine[Any, Any, str]]
 type WrappedAgentFunction[**P] = Callable[Concatenate[str, "CloversAgent", Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
+
+
+def char_count(content: str | list[ContentSegment]):
+    return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
 
 
 def int_generator():
@@ -69,7 +73,8 @@ class SkillCore:
 
         def decorator(func: AgentFunction) -> WrappedAgentFunction:
             async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs):
-                logger.debug(f"[{agent.name}][TOOL CALL][{name}] called")
+                logger.info(f"[{agent.name}][CALL][{name}] called")
+                logger.debug(f"[{agent.name}][CALL][{name}] called with {kwargs}")
                 try:
                     content = await func(agent, event, **kwargs)
                 except Exception as e:
@@ -168,14 +173,17 @@ class Session(ContextRecoder):
             self.silence.popleft()
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
+        """处理完成"""
         self.records.append((request, reply, timestamp))
         self.silence.clear()
 
     def clear(self):
+        """清理记录"""
         self.records.clear()
         self.silence.clear()
 
     def sync_snap(self):
+        """同步上下文到辅助AI"""
         self.snap.clear()
         self.snap.records.extend((x, y) for x, y, _ in self.records)
 
@@ -231,10 +239,10 @@ class CloversAgent(SkillCore, OpenAIAPI):
         self.topic_coldown = config.topic_coldown
         self.sessions: dict[str, Session] = {}
         # 注册技能
+        self.decoupler = TopicDecoupler(SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache))
         self.categories: list[str] = []
         self._plugins = config.plugins
         self._plugins_dirs = config.plugin_dirs
-        self.decoupler = TopicDecoupler(config.sentence_model, config.sentence_model_cache)
         self.register(
             "skill_menu",
             "获取更多技能，如果assistant无法单独完成用户指令，则需要调用此方法获取更多技能。",
@@ -257,11 +265,15 @@ class CloversAgent(SkillCore, OpenAIAPI):
                 tip += f"\n{info}"
         return tip
 
-    async def summary_context(self, event: Event) -> str:
-        session = self.current_session(event)
+    async def summary_context(self, session: Session):
+        if sum(char_count(msg["content"]) for msg in session) < 2000:
+            return
         payload = self.auxiliary.build_payload(context=session)
         payload["messages"].append({"role": "system", "content": "对以上对话进行总结，保留核心内容和结论，禁止输出除总结外的其他内容。"})
-        return (await self.auxiliary.call_api(payload))["content"].strip()
+        summary = (await self.auxiliary.call_api(payload))["content"].strip()
+        logger.info(f"[{self.name}][SUMMARY]")
+        logger.debug(f"[{self.name}][SUMMARY]{summary}")
+        return summary
 
     async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
         task_queue = []
@@ -346,15 +358,17 @@ class CloversAgent(SkillCore, OpenAIAPI):
         else:
             session.silence.append((f"{head}{at}{event.message}", timestamp))
             return
-        self.decoupler.step(event.message)
-
         request = f"{head}{at}{body}"
         if session.lock.locked():
             return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, event.image_list)})
         async with session.lock:
             async with session.snap.lock:
-                session.memory_filter(timestamp - self.memory_timeout)
-                session.silence_filter(timestamp - self.topic_coldown)
+                if self.decoupler.step(event.message) and (summary := await self.summary_context(session)):
+                    session.clear()
+                    session.silence.append((summary, timestamp))
+                else:
+                    session.memory_filter(timestamp - self.memory_timeout)
+                    session.silence_filter(timestamp - self.topic_coldown)
                 session.silence.append((request, timestamp))
                 message = list(x[0] for x in session.silence)
                 message = "\n".join(message)
@@ -384,42 +398,26 @@ class CloversAgent(SkillCore, OpenAIAPI):
             return resp
 
     def load_plugin(self, name: str | Path, is_path=False):
-        """加载 clovers-agent 插件
-
-        Args:
-            name (str | Path): 插件的包名或路径
-            is_path (bool, optional): 是否为路径
-        """
         package = import_name(name, is_path)
         try:
             plugin = getattr(import_module(package), "__plugin__", None)
             if not isinstance(plugin, SkillCore):
                 raise TypeError(f"{package}.__plugin__ must be a subclass of SkillCore")
         except Exception as e:
-            logger.exception(f'[{self.name}][loading plugin] "{package}" load failed', exc_info=e)
+            logger.exception(f'[{self.name}][LOADING] "{package}" load failed', exc_info=e)
             return
         conflict = self.merge(plugin)
         if conflict:
-            logger.error(f'[{self.name}][loading plugin] "{package}" conflict with {conflict}')
+            logger.error(f'[{self.name}][LOADING] "{package}" conflict with {conflict}')
         else:
-            logger.info(f'[{self.name}][loading plugin] "{package}" loaded')
+            logger.info(f'[{self.name}][LOADING] "{package}" loaded')
         plugin.name = plugin.name or package
 
     def load_plugins_from_list(self, plugin_list: list[str]):
-        """从包名列表加载插件
-
-        Args:
-            plugin_list (list[str]): 插件的包名列表
-        """
         for plugin in plugin_list:
             self.load_plugin(plugin)
 
     def load_plugins_from_dirs(self, plugin_dirs: list[str]):
-        """从本地目录列表加载插件
-
-        Args:
-            plugin_dirs (list[str]): 插件的目录列表
-        """
         for plugin_dir in plugin_dirs:
             plugin_dir = Path(plugin_dir)
             if not plugin_dir.exists():
