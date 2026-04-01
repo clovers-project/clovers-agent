@@ -1,6 +1,6 @@
-import os
+# import os
 
-os.environ["HF_HUB_OFFLINE"] = os.environ.get("HF_HUB_OFFLINE", "1")
+# os.environ["HF_HUB_OFFLINE"] = os.environ.get("HF_HUB_OFFLINE", "1")
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer, util
@@ -46,12 +46,14 @@ class TopicDecoupler:
     def _topic_change_0(self, sentence_emb: torch.Tensor, weight: float):
         self.weights_history.append(weight)
         self.topic_change = self._topic_change_1
+        print(f"| weight:{weight :.4f} |")
         return False
 
     def _topic_change_1(self, sentence_emb: torch.Tensor, weight: float):
         self.weights_history.append(weight)
         self.scores_history.append(util.cos_sim(sentence_emb, self.context_emb).item())
         self.topic_change = self._topic_change_2
+        print(f"| weight:{weight :.4f} | score:{self.scores_history[-1]:.4f} |")
         return False
 
     def _topic_change_2(self, sentence_emb: torch.Tensor, weight: float):
@@ -64,6 +66,7 @@ class TopicDecoupler:
             self.topic_change = self._topic_change_1
         elif scores_history.size > 3:
             self.topic_change = self._topic_change_3
+        print(f"| weight:{weight :.4f} | score:{score:.4f} | threshold:{threshold:.4f} |")
         self.weights_history.append(weight)
         self.scores_history.append(score)
         return flag
@@ -79,6 +82,7 @@ class TopicDecoupler:
             self.weights_history.clear()
             self.scores_history.clear()
             self.topic_change = self._topic_change_1
+        print(f"| weight:{weight :.4f} | score:{score:.4f} | threshold:{threshold:.4f} | scale:{scale}")
         self.weights_history.append(weight)
         self.scores_history.append(score)
         return flag

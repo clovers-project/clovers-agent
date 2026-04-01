@@ -78,7 +78,7 @@ class SkillCore:
         def decorator(func: AgentFunction) -> WrappedAgentFunction:
             async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs):
                 logger.info(f"[{agent.name}][CALL][{name}] called")
-                logger.debug(f"[{agent.name}][CALL][{name}] called with {kwargs}")
+                logger.debug(kwargs)
                 try:
                     content = await func(agent, event, **kwargs)
                 except Exception as e:
@@ -178,9 +178,11 @@ class Session(ContextRecoder):
             self.silence.popleft()
 
     def step(self, message: str):
-        if sum(char_count(msg["content"]) for msg in self) < 2000:
+        if not self.decoupler.step(message):
             return False
-        return self.decoupler.step(message)
+        count = sum(char_count(msg["content"]) for msg in self)
+        print(f"{count = } {message}")
+        return count > 800
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
         """处理完成"""
@@ -276,11 +278,11 @@ class CloversAgent(SkillCore, OpenAIAPI):
         return tip
 
     async def summary_context(self, session: Session):
-        payload = self.auxiliary.build_payload(context=session)
-        payload["messages"].append({"role": "system", "content": "对以上对话进行总结，保留核心内容和结论，禁止输出除总结外的其他内容。"})
-        summary = (await self.auxiliary.call_api(payload))["content"].strip()
+        payload = self.build_payload(context=session)
+        payload["messages"].append({"role": "user", "content": "对以上对话进行总结，保留核心内容和结论，禁止输出除总结外的其他内容。"})
+        summary = (await self.call_api(payload))["content"].strip()
         logger.info(f"[{self.name}][SUMMARY]")
-        logger.debug(f"[{self.name}][SUMMARY]{summary}")
+        logger.debug(summary)
         return summary
 
     async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
@@ -379,6 +381,7 @@ class CloversAgent(SkillCore, OpenAIAPI):
                 if session.step(message) and (summary := await self.summary_context(session)):
                     session.clear()
                     session.silence.append((summary, timestamp))
+
                 session.sync_snap()
                 session.snap.over({"role": "user", "content": message}, {"role": "system", "content": "正在执行任务..."})
             content: list[ContentSegment] = []
