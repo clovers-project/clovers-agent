@@ -1,3 +1,6 @@
+import os
+
+os.environ["HF_HUB_OFFLINE"] = os.environ.get("HF_HUB_OFFLINE", "1")
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer, util
@@ -34,10 +37,10 @@ class TopicDecoupler:
         if emb_dim is None:
             raise ValueError("SentenceTransformer model does not have a fixed sentence embedding dimension.")
         self.model = model
+        self.alpha = alpha
         self.context_emb = torch.zeros(emb_dim, device=self.model.device)
         self.scores_history: list[float] = []
         self.weights_history: list[float] = []
-        self.alpha = alpha
         self.topic_change = self._topic_change_0
 
     def _topic_change_0(self, sentence_emb: torch.Tensor, weight: float):

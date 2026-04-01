@@ -19,6 +19,10 @@ type AgentFunction[**P] = Callable[Concatenate["CloversAgent", Any, P], Coroutin
 type WrappedAgentFunction[**P] = Callable[Concatenate[str, "CloversAgent", Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
 
 
+def extract_plain_text(content: str | list[ContentSegment]) -> str:
+    return content if isinstance(content, str) else "\n".join(text["text"] for text in content if text["type"] == "text")
+
+
 def char_count(content: str | list[ContentSegment]):
     return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
 
@@ -154,12 +158,13 @@ class Session(ContextRecoder):
     snap: ContextRecoder
     extra: dict
 
-    def __init__(self, size: int) -> None:
+    def __init__(self, size: int, sentence_model: SentenceTransformer) -> None:
         super().__init__(size)
         self.silence = deque()
         self.snap = ContextRecoder(size)
         self.skill_menu: str | None = None
         self.current_input: UserMessage | None = None
+        self.decoupler = TopicDecoupler(sentence_model)
         self.extra = {}
 
     def memory_filter(self, timeout: int | float):
@@ -171,6 +176,11 @@ class Session(ContextRecoder):
         """过滤静默记录群聊上下文"""
         while self.silence and (self.silence[0][1] <= timeout):
             self.silence.popleft()
+
+    def step(self, message: str):
+        if sum(char_count(msg["content"]) for msg in self) < 2000:
+            return False
+        return self.decoupler.step(message)
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
         """处理完成"""
@@ -237,9 +247,9 @@ class CloversAgent(SkillCore, OpenAIAPI):
         self.memory_size = config.memory_size
         self.memory_timeout = config.memory_timeout
         self.topic_coldown = config.topic_coldown
+        self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
         self.sessions: dict[str, Session] = {}
         # 注册技能
-        self.decoupler = TopicDecoupler(SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache))
         self.categories: list[str] = []
         self._plugins = config.plugins
         self._plugins_dirs = config.plugin_dirs
@@ -266,8 +276,6 @@ class CloversAgent(SkillCore, OpenAIAPI):
         return tip
 
     async def summary_context(self, session: Session):
-        if sum(char_count(msg["content"]) for msg in session) < 2000:
-            return
         payload = self.auxiliary.build_payload(context=session)
         payload["messages"].append({"role": "system", "content": "对以上对话进行总结，保留核心内容和结论，禁止输出除总结外的其他内容。"})
         summary = (await self.auxiliary.call_api(payload))["content"].strip()
@@ -290,7 +298,7 @@ class CloversAgent(SkillCore, OpenAIAPI):
     def current_session(self, event: Event):
         session_id = self.session_id(event)
         if session_id not in self.sessions:
-            self.sessions[session_id] = Session(self.memory_size)
+            self.sessions[session_id] = Session(self.memory_size, self.sentence_model)
         return self.sessions[session_id]
 
     async def aux_reply(self, session: Session, message: UserMessage):
@@ -363,15 +371,14 @@ class CloversAgent(SkillCore, OpenAIAPI):
             return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, event.image_list)})
         async with session.lock:
             async with session.snap.lock:
-                if self.decoupler.step(event.message) and (summary := await self.summary_context(session)):
-                    session.clear()
-                    session.silence.append((summary, timestamp))
-                else:
-                    session.memory_filter(timestamp - self.memory_timeout)
-                    session.silence_filter(timestamp - self.topic_coldown)
+                session.memory_filter(timestamp - self.memory_timeout)
+                session.silence_filter(timestamp - self.topic_coldown)
                 session.silence.append((request, timestamp))
                 message = list(x[0] for x in session.silence)
                 message = "\n".join(message)
+                if session.step(message) and (summary := await self.summary_context(session)):
+                    session.clear()
+                    session.silence.append((summary, timestamp))
                 session.sync_snap()
                 session.snap.over({"role": "user", "content": message}, {"role": "system", "content": "正在执行任务..."})
             content: list[ContentSegment] = []
