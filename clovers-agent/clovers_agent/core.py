@@ -8,7 +8,8 @@ from clovers.utils import import_name, list_modules
 from clovers.logger import logger
 from collections import deque
 from collections.abc import Iterable, Callable, Coroutine
-from typing import Any, Concatenate, cast
+from typing import Any, Concatenate
+from .embedding import TopicDecoupler
 from .typing import Event, Message, SystemMessage, Payload, FunctionToolInfo
 from .typing.message import UserMessage, AssistantMessage, ToolMessage, ContentSegment
 from .typing.json_schema import JSONSchemaType
@@ -233,20 +234,12 @@ class CloversAgent(SkillCore, OpenAIAPI):
         self.categories: list[str] = []
         self._plugins = config.plugins
         self._plugins_dirs = config.plugin_dirs
+        self.decoupler = TopicDecoupler(config.sentence_model, config.sentence_model_cache)
         self.register(
             "skill_menu",
             "获取更多技能，如果assistant无法单独完成用户指令，则需要调用此方法获取更多技能。",
             {"category": {"type": "string", "description": "选择需要的技能关键词", "enum": self.categories}},
         )(self.skill_menu)
-        self.register(
-            "summary_context",
-            "当上下文有足够多（值得总结）的内容，且满足下列条件之一时，请 **主动调用此方法** 以整理上下文。\n"
-            "1. 当从闲聊进入到具体主题时"
-            "2. 当话题某个具体主题讨论结束，回归到闲聊时"
-            "3. 当讨论的主题发生了切换时"
-            "4. 当你认为上下文过于冗余、重复内容过多，需要整理时，即使话题没有切换也应调用此方法",
-            {"summary": {"type": "string", "description": "对话题进行总结，保留核心内容和结论"}},
-        )(self.summary_context)
 
     def init(self) -> None:
         self.load_plugins_from_list(self._plugins)
@@ -264,14 +257,11 @@ class CloversAgent(SkillCore, OpenAIAPI):
                 tip += f"\n{info}"
         return tip
 
-    @staticmethod
-    async def summary_context(agent: "CloversAgent", event: Event, summary: str) -> str:
-        session = agent.current_session(event)
-        if not session.records:
-            return ""
-        session.clear()
-        logger.debug(f"[{agent.name}][SUMMARY] {summary}")
-        return f"\n***\n{summary}\n***\n"
+    async def summary_context(self, event: Event) -> str:
+        session = self.current_session(event)
+        payload = self.auxiliary.build_payload(context=session)
+        payload["messages"].append({"role": "system", "content": "对以上对话进行总结，保留核心内容和结论，禁止输出除总结外的其他内容。"})
+        return (await self.auxiliary.call_api(payload))["content"].strip()
 
     async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
         task_queue = []
@@ -333,7 +323,7 @@ class CloversAgent(SkillCore, OpenAIAPI):
                     toolkit.add(key)
                     payload["messages"].append(msg)
             async with session.snap.lock:
-                result = f"{result or '任务执行失败'}\n\n请用第一视角的语气复述以上结果"
+                result = f"{result or '任务执行失败'}\n\n请用你的语气复述以上结果"
                 context = [system_message, *session.snap, {"role": "system", "content": result}]
                 session.snap.clear()
         else:
@@ -356,6 +346,8 @@ class CloversAgent(SkillCore, OpenAIAPI):
         else:
             session.silence.append((f"{head}{at}{event.message}", timestamp))
             return
+        self.decoupler.step(event.message)
+
         request = f"{head}{at}{body}"
         if session.lock.locked():
             return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, event.image_list)})
@@ -368,25 +360,26 @@ class CloversAgent(SkillCore, OpenAIAPI):
                 message = "\n".join(message)
                 session.sync_snap()
                 session.snap.over({"role": "user", "content": message}, {"role": "system", "content": "正在执行任务..."})
-            content = self.build_content(message, event.image_list)
+            content: list[ContentSegment] = []
+            if (call := event.call("flat_context")) and (flat_context := await call):
+                content.append({"type": "text", "text": "<引用上下文>"})
+                for unit in flat_context:
+                    if unit["text"]:
+                        content.append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
+                    if unit["images"]:
+                        content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
+                content.append({"type": "text", "text": "</引用上下文>"})
+            pure_content: list[ContentSegment] = [{"type": "text", "text": message}]
+            pure_content.extend({"type": "image_url", "image_url": {"url": x}} for x in event.image_list)
+            content.extend(pure_content)
             session.current_input = {"role": "user", "content": content}  # 注入输入（可修改）
             payload: Payload = {"model": self.model, "messages": [*session, session.current_input]}
-            if (call := event.call("flat_context")) and (flat_context := await call):
-                if isinstance(content, str):
-                    session.current_input["content"] = [{"type": "text", "text": content}]
-                assert isinstance(session.current_input["content"], list)
-                session.current_input["content"].append({"type": "text", "text": "<引用上下文>"})
-                for unit in flat_context:
-                    session.current_input["content"].append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
-                    if unit["images"]:
-                        session.current_input["content"].extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
-                session.current_input["content"].append({"type": "text", "text": "</引用上下文>"})
             try:
                 resp = await self.call_unit(session, event, payload, f"今天的日期是:{now.strftime('%Y年%m月%d日')}")
             except Exception as e:
                 logger.exception(e)
                 return
-            session.over({"role": "user", "content": content}, {"role": "assistant", "content": resp}, timestamp)
+            session.over({"role": "user", "content": pure_content}, {"role": "assistant", "content": resp}, timestamp)
             session.current_input = None
             return resp
 

@@ -60,6 +60,10 @@ class Config(BaseModel):
     """白名单"""
     blacklist: list[str] = []
     """黑名单"""
+    sentence_model: str = "BAAI/bge-small-zh-v1.5"
+    """词嵌入向量模型"""
+    sentence_model_cache: str = "./data/clovers-agent/sentence_model_cache"
+    """词嵌入向量模型缓存路径"""
 
     @classmethod
     def sync_config(cls):
