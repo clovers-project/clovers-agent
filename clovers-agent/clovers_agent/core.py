@@ -81,6 +81,7 @@ class SkillCore:
                 except Exception as e:
                     logger.exception(e)
                     content = "Error"
+                logger.debug(f"[{name}][RETURNED] {content}")
                 message: ToolMessage = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
                 return message, name
 
@@ -432,7 +433,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             return
         conflict = self.merge(tools)
         if conflict:
-            logger.error(f'[{self.name}][LOADING] "{package}" conflict with {conflict}')
+            logger.error(f'[{self.name}] "{package}" conflict with {conflict}')
             return
-        logger.info(f'[{self.name}][LOADING] "{package}" loaded')
+        logger.info(f'[{self.name}] "{package}" loaded')
         tools.name = tools.name or package

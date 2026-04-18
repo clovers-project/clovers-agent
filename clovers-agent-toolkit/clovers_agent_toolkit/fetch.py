@@ -15,7 +15,7 @@ async def _(agent: CloversAgent, event: Event, query: list[str]):
     headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
     url = "https://api.search.brave.com/res/v1/web/search"
     params = {"q": query, "count": 8}
-    resp = await agent.async_client.get(url, headers=headers, params=params, timeout=20.0)
+    resp = await agent.async_client.get(url, headers=headers, params=params, timeout=30.0)
     if resp.status_code != 200:
         return f"搜索失败，状态码：{resp.status_code}"
     try:
