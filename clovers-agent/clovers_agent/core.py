@@ -1,11 +1,11 @@
 import json
 import asyncio
 import httpx
+from itertools import count
 from datetime import datetime
 from clovers.core import ModuleLoader
 from clovers.logger import logger
 from clovers_client import Event as BaseEvent
-from clovers_client.utils import id_generator
 from collections import deque
 from collections.abc import Iterable, Callable, Coroutine
 from typing import Any, Concatenate, Protocol
@@ -35,14 +35,14 @@ class SkillCore:
     type Parameters = dict[str, JSONSchemaType]
 
     def __init__(self, name: str = "") -> None:
-        self.category_id = id_generator()
+        self.category_id = count()
         self.name = name
         self.intro_tools: list[FunctionToolInfo] = []
         self.skill_init: dict[str, AgentFunction] = {}
         self.manifest: dict[str, FunctionToolInfo] = {}
         self.invoker: dict[str, WrappedAgentFunction] = {}
-        self.__map_category_to_id: dict[str, str] = {}
-        self.__map_id_to_tools: dict[str, list[FunctionToolInfo]] = {}
+        self.__map_category_to_id: dict[str, int] = {}
+        self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
 
     def all_categories(self):
         return self.__map_category_to_id.keys()
@@ -335,7 +335,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         system_prompt = f"{self.style_prompt}\n{self.chat_prompt}\n{extra_prompt}"
         system_message: SystemMessage = {"role": "system", "content": system_prompt}
         payload["messages"].insert(0, system_message)
-        payload["tools"] = self.intro_tools if self.categories else self.intro_tools[1:]
+        if self.categories:
+            payload["tools"] = self.intro_tools
         resp = await self.call_api(payload)
         # 退出条件：不需要额外技能
         if not (tool_calls := resp.get("tool_calls")):

@@ -33,7 +33,7 @@ class TopicDecoupler:
             model (SentenceTransformer): SentenceTransformer 模型。
             alpha (float): 指数衰减权重。
         """
-        emb_dim = model.get_sentence_embedding_dimension()
+        emb_dim = model.get_embedding_dimension()
         if emb_dim is None:
             raise ValueError("SentenceTransformer model does not have a fixed sentence embedding dimension.")
         self.model = model
