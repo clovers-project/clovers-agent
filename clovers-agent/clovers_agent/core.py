@@ -2,21 +2,25 @@ import json
 import asyncio
 import httpx
 from datetime import datetime
-from pathlib import Path
-from importlib import import_module
-from clovers.utils import import_name, list_modules
+from clovers.core import ModuleLoader
 from clovers.logger import logger
+from clovers_client import Event as BaseEvent
+from clovers_client.utils import id_generator
 from collections import deque
 from collections.abc import Iterable, Callable, Coroutine
-from typing import Any, Concatenate
+from typing import Any, Concatenate, Protocol
 from .embedding import SentenceTransformer, TopicDecoupler
-from .typing import Event, Message, SystemMessage, Payload, FunctionToolInfo
+from .typing import Message, SystemMessage, Payload, FunctionToolInfo
 from .typing.message import UserMessage, AssistantMessage, ToolMessage, ContentSegment
 from .typing.json_schema import JSONSchemaType
 from .config import OpenAIConfig, Config
 
-type AgentFunction[**P] = Callable[Concatenate["CloversAgent", Any, P], Coroutine[Any, Any, str]]
-type WrappedAgentFunction[**P] = Callable[Concatenate[str, "CloversAgent", Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
+type AgentFunction[**P] = Callable[Concatenate[CloversAgent, Any, P], Coroutine[Any, Any, str]]
+type WrappedAgentFunction[**P] = Callable[Concatenate[str, CloversAgent, Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
+
+
+class Event(BaseEvent, Protocol):
+    extra_context: list[str] = []
 
 
 def extract_plain_text(content: str | list[ContentSegment]) -> str:
@@ -27,25 +31,18 @@ def char_count(content: str | list[ContentSegment]):
     return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
 
 
-def int_generator():
-    i = 0
-    while True:
-        yield i
-        i += 1
-
-
 class SkillCore:
     type Parameters = dict[str, JSONSchemaType]
 
     def __init__(self, name: str = "") -> None:
-        self.category_id = int_generator()
+        self.category_id = id_generator()
         self.name = name
         self.intro_tools: list[FunctionToolInfo] = []
         self.skill_init: dict[str, AgentFunction] = {}
         self.manifest: dict[str, FunctionToolInfo] = {}
         self.invoker: dict[str, WrappedAgentFunction] = {}
-        self.__map_category_to_id: dict[str, int] = {}
-        self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
+        self.__map_category_to_id: dict[str, str] = {}
+        self.__map_id_to_tools: dict[str, list[FunctionToolInfo]] = {}
 
     def all_categories(self):
         return self.__map_category_to_id.keys()
@@ -236,12 +233,27 @@ class OpenAIAPI:
         return resp.json()["choices"][0]["message"]
 
 
-class CloversAgent(SkillCore, OpenAIAPI):
+class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     """OpenAI API"""
 
     def __init__(self, name: str, async_client: httpx.AsyncClient, config: Config) -> None:
         SkillCore.__init__(self, name)
         OpenAIAPI.__init__(self, async_client, config.primary)
+        ModuleLoader.__init__(self, ["TOOLS"], SkillCore)
+        # clovers 设置
+        if config.whitelist:
+            whitelist = set(config.whitelist)
+            logger.info(f"[CloversAgent] 检查规则设置为白名单模式：{whitelist}")
+            self.check = lambda e: e.group_id is not None and e.group_id in whitelist
+        elif config.blacklist:
+            blacklist = set(config.blacklist)
+            logger.info(f"[CloversAgent] 检查规则设置为黑名单模式：{blacklist}")
+            self.check = lambda e: e.group_id is not None and e.group_id not in blacklist
+        else:
+            console_mode = config.console_mode
+            logger.info(f"[CloversAgent] 检查规则设置为 {console_mode} 模式")
+            self.check = lambda e: console_mode
+        # 模型设置
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.style_prompt = config.style_prompt
         self.chat_prompt = config.chat_prompt
@@ -261,9 +273,13 @@ class CloversAgent(SkillCore, OpenAIAPI):
             {"category": {"type": "string", "description": "选择需要的技能关键词", "enum": self.categories}},
         )(self.skill_menu)
 
+    @staticmethod
+    def check(e: Event) -> bool:
+        raise NotImplementedError
+
     def init(self) -> None:
-        self.load_plugins_from_list(self._plugins)
-        self.load_plugins_from_dirs(self._plugins_dirs)
+        self.load_from_list(self._plugins)
+        self.load_from_dirs(self._plugins_dirs)
         self.categories.extend(self.all_categories())
 
     @staticmethod
@@ -381,9 +397,11 @@ class CloversAgent(SkillCore, OpenAIAPI):
                 if session.step(message) and (summary := await self.summary_context(session)):
                     session.clear()
                     session.silence.append((summary, timestamp))
-
                 session.sync_snap()
-                session.snap.over({"role": "user", "content": message}, {"role": "system", "content": "正在执行任务..."})
+                session.snap.over(
+                    {"role": "user", "content": message},
+                    {"role": "system", "content": "此任务正在处理中，若用户追问则回复用户稍等。"},
+                )
             content: list[ContentSegment] = []
             if (call := event.call("flat_context")) and (flat_context := await call):
                 content.append({"type": "text", "text": "<引用上下文>"})
@@ -407,31 +425,13 @@ class CloversAgent(SkillCore, OpenAIAPI):
             session.current_input = None
             return resp
 
-    def load_plugin(self, name: str | Path, is_path=False):
-        package = import_name(name, is_path)
-        try:
-            plugin = getattr(import_module(package), "__plugin__", None)
-            if not isinstance(plugin, SkillCore):
-                raise TypeError(f"{package}.__plugin__ must be a subclass of SkillCore")
-        except Exception as e:
-            logger.exception(f'[{self.name}][LOADING] "{package}" load failed', exc_info=e)
+    def _load(self, package: str):
+        tools = super()._load(package)
+        if tools is None:
             return
-        conflict = self.merge(plugin)
+        conflict = self.merge(tools)
         if conflict:
             logger.error(f'[{self.name}][LOADING] "{package}" conflict with {conflict}')
-        else:
-            logger.info(f'[{self.name}][LOADING] "{package}" loaded')
-        plugin.name = plugin.name or package
-
-    def load_plugins_from_list(self, plugin_list: list[str]):
-        for plugin in plugin_list:
-            self.load_plugin(plugin)
-
-    def load_plugins_from_dirs(self, plugin_dirs: list[str]):
-        for plugin_dir in plugin_dirs:
-            plugin_dir = Path(plugin_dir)
-            if not plugin_dir.exists():
-                plugin_dir.mkdir(parents=True, exist_ok=True)
-                continue
-            for plugin in list_modules(plugin_dir):
-                self.load_plugin(plugin)
+            return
+        logger.info(f'[{self.name}][LOADING] "{package}" loaded')
+        tools.name = tools.name or package

@@ -1,11 +1,11 @@
 [project]
 name = "clovers-agent-toolkit"
-version = "0.2.2"
+version = "0.2.5"
 description = ""
 authors = [{ name = "KarisAya", email = "karisaya@foxmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<4.0.0"
-dependencies = ["clovers-agent>=0.1.9", "docker>=7.1.0"]
+dependencies = ["clovers-agent>=0.2.5", "docker>=7.1.0"]
 
 [build-system]
 requires = ["hatchling"]

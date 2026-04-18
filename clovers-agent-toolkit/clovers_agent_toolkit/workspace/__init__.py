@@ -1,36 +1,30 @@
 from pathlib import Path
-from typing import overload, Literal, Protocol
-from clovers_agent import Event as BaseEvent, CloversAgent
+from clovers_agent import Event
+from clovers_agent.core import CloversAgent
 from clovers.logger import logger
 from .docker import WORKSPACE, Shell
-from ..toolkit import toolkit
-from ..config import __config__
+from ..toolkit import TOOLS, CONFIG
 
 README = WORKSPACE / "README.md"
 shell_dict: dict[str, Shell] = {}
 
 
-class Event(BaseEvent, Protocol):
-
-    async def call(self, key: Literal["upload_file"], file: Path): ...
-
-
 def get_session_id(agent: CloversAgent, event: Event) -> str: ...
 
 
-if __config__.session_workspace:
+if CONFIG.session_workspace:
     get_session_id = lambda agent, event: agent.session_id(event)
 else:
     get_session_id = lambda agent, event: "public"
 
 
-@toolkit.on_skill("工作区工具")
+@TOOLS.on_skill("工作区工具")
 async def _(agent: CloversAgent, event: Event):
     if not WORKSPACE.exists():
         WORKSPACE.mkdir(parents=True, exist_ok=True)
     if not README.exists():
         README.write_text("Clovers Agent Workspace")
-    if __config__.use_shell:
+    if CONFIG.use_shell:
         session_id = get_session_id(agent, event)
         if session_id in shell_dict:
             shell_dict[session_id].workdir = "/workspace"
@@ -45,9 +39,9 @@ async def _(agent: CloversAgent, event: Event):
         return f"workspace 已初始化\n当前工作目录: /workspace"
 
 
-if __config__.use_shell:
+if CONFIG.use_shell:
 
-    @toolkit.register(
+    @TOOLS.register(
         "shell",
         "在工作区环境下执行命令",
         {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
@@ -74,7 +68,7 @@ def read_text(file: Path):
             return ""
 
 
-@toolkit.register(
+@TOOLS.register(
     "read_files",
     "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件上下文。"
     "在需要分析代码、检查配置文件时，尤其是需要查看多个文件时，应优先使用此工具以提高效率。",
@@ -99,7 +93,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
     return "\n\n".join(md)
 
 
-@toolkit.register(
+@TOOLS.register(
     "write_file",
     "写入文件",
     {
@@ -124,7 +118,7 @@ async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str
         return f"文件写入失败：{e}"
 
 
-@toolkit.register(
+@TOOLS.register(
     "upload_file",
     "把文件上传给用户。",
     {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
@@ -141,7 +135,7 @@ async def _(agent: CloversAgent, event: Event, file_path: str):
         return f"{file_path} 非工作区文件"
     if not file.exists():
         return f"{file_path} 文件不存在"
-    if (coro := event.call("upload_file", file)) is None:
+    if (coro := event.send("file", file)) is None:
         return "未实现上传文件接口"
     try:
         await coro

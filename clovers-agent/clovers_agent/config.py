@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from clovers.config import Config as CloversConfig
+from clovers_client import Config as BaseConfig
 from typing import Any
 
 
@@ -16,7 +16,7 @@ class OpenAIConfig(BaseModel):
     """额外请求体"""
 
 
-class Config(BaseModel):
+class Config(BaseConfig):
     path: str = "./data/clovers-agent/"
     """数据文件路径"""
     plugins: list[str] = []
@@ -64,10 +64,3 @@ class Config(BaseModel):
     """词嵌入向量模型"""
     sentence_model_cache: str = "./data/clovers-agent/sentence_model_cache"
     """词嵌入向量模型缓存路径"""
-
-    @classmethod
-    def sync_config(cls):
-        """获取 `CloversConfig.environ()[__package__]` 配置并将默认配置同步到全局配置中。"""
-        __config_dict__: dict = CloversConfig.environ().setdefault(__package__, {})
-        __config_dict__.update((__config__ := cls.model_validate(__config_dict__)).model_dump())
-        return __config__

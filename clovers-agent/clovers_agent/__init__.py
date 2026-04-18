@@ -1,64 +1,6 @@
-import httpx
-from clovers import Plugin, Result
-from clovers.logger import logger
-from .core import SkillCore, CloversAgent
-from .typing import Event
-from .config import Config
-
-__plugin__ = Plugin(priority=100)
-__plugin__.set_protocol("properties", Event)
-__config__ = Config.sync_config()
-__agent__ = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), __config__)
-__plugin__.startup(__agent__.init)
-
-type Rule = Plugin.Rule.Checker[Event]
-whitelist = set(__config__.whitelist)
-blacklist = set(__config__.blacklist)
-console_mode = __config__.console_mode
-
-switch_check: Rule
-if console_mode:
-    switch_check = lambda e: True
-else:
-    if whitelist:
-        logger.info(f"[CloversAgent] 检查规则设置为白名单模式：{whitelist}")
-        switch_check = lambda e: (e.group_id is not None) and (e.group_id in whitelist)
-    elif blacklist:
-        logger.info(f"[CloversAgent] 检查规则设置为黑名单模式：{blacklist}")
-        switch_check = lambda e: (e.group_id is not None) and (e.group_id not in blacklist)
-    else:
-        logger.info(f"[CloversAgent] 检查规则设置为 False 模式")
-        switch_check = lambda e: False
-
-permission_check: Rule = lambda e: e.permission > 0
-to_me_check: Rule = lambda e: e.to_me
-args_check: Rule = lambda e: bool(e.args)
+from .main import PLUGIN, AGENT
+from .core import SkillCore, Event
 
 
-@__plugin__.handle(
-    None,
-    ["user_id", "group_id", "nickname", "to_me", "image_list", "at"],
-    rule=switch_check,
-    priority=2,
-    block=False,
-)
-async def _(event: Event):
-    result = await __agent__.chat(event)
-    return Result("text", result) if result else None
-
-
-@__plugin__.handle(
-    ["记忆清除"],
-    ["user_id", "group_id", "to_me", "permission"],
-    rule=[switch_check, permission_check],
-    block=True,
-)
-async def _(event: Event):
-    session = __agent__.current_session(event)
-    async with session.lock:
-        session.clear()
-    return Result("text", "记忆已清除")
-
-
-__version__ = "0.1.0"
-__all__ = ["SkillCore", "CloversAgent", "Event", "__plugin__"]
+__version__ = "0.2.5"
+__all__ = ["PLUGIN", "AGENT", "SkillCore", "Event"]

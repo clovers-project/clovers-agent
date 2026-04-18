@@ -1,4 +1,4 @@
-from .toolkit import toolkit as __plugin__
+from .toolkit import TOOLS as __plugin__
 from . import fetch as _
 from . import workspace as _
 
