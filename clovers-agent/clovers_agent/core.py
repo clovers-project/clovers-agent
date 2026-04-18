@@ -242,7 +242,10 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         OpenAIAPI.__init__(self, async_client, config.primary)
         ModuleLoader.__init__(self, ["TOOLS"], SkillCore)
         # clovers 设置
-        if config.whitelist:
+        if config.console_mode:
+            logger.info("[CloversAgent] 启动控制台模式")
+            self.check = lambda e: True
+        elif config.whitelist:
             whitelist = set(config.whitelist)
             logger.info(f"[CloversAgent] 检查规则设置为白名单模式：{whitelist}")
             self.check = lambda e: e.group_id is not None and e.group_id in whitelist
@@ -251,9 +254,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             logger.info(f"[CloversAgent] 检查规则设置为黑名单模式：{blacklist}")
             self.check = lambda e: e.group_id is not None and e.group_id not in blacklist
         else:
-            console_mode = config.console_mode
-            logger.info(f"[CloversAgent] 检查规则设置为 {console_mode} 模式")
-            self.check = lambda e: console_mode
+            logger.info("[CloversAgent] 已关闭")
+            self.check = lambda e: False
         # 模型设置
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.style_prompt = config.style_prompt
