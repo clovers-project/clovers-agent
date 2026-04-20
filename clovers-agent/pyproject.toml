@@ -1,6 +1,6 @@
 [project]
 name = "clovers-agent"
-version = "0.2.6"
+version = "0.2.7"
 description = ""
 authors = [{ name = "KarisAya", email = "karisaya@foxmail.com" }]
 readme = "README.md"
@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=2.4.4",
     "torch>=2.5.0",
     "sentence-transformers>=5.3.0",
+    "python-magic>=0.4.27",
 ]
 
 [build-system]

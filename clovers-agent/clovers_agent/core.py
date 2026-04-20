@@ -6,13 +6,14 @@ from datetime import datetime
 from clovers.core import ModuleLoader
 from clovers.logger import logger
 from clovers_client import Event as BaseEvent
-from collections import deque
 from collections.abc import Iterable, Callable, Coroutine
+from .utils import data_url
+from .embedding import SentenceTransformer
+from .session import Session
 from typing import Any, Concatenate, Protocol
-from .embedding import SentenceTransformer, TopicDecoupler
-from .typing import Message, SystemMessage, Payload, FunctionToolInfo
-from .typing.message import UserMessage, AssistantMessage, ToolMessage, ContentSegment
+from .typing import Message, UserMessage, AssistantMessage, SystemMessage, ToolMessage, Payload, FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
+from .typing.message import ContentSegment
 from .config import OpenAIConfig, Config
 
 type AgentFunction[**P] = Callable[Concatenate[CloversAgent, Any, P], Coroutine[Any, Any, str]]
@@ -21,14 +22,6 @@ type WrappedAgentFunction[**P] = Callable[Concatenate[str, CloversAgent, Any, P]
 
 class Event(BaseEvent, Protocol):
     extra_context: list[str] = []
-
-
-def extract_plain_text(content: str | list[ContentSegment]) -> str:
-    return content if isinstance(content, str) else "\n".join(text["text"] for text in content if text["type"] == "text")
-
-
-def char_count(content: str | list[ContentSegment]):
-    return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
 
 
 class SkillCore:
@@ -126,78 +119,6 @@ class SkillCore:
         return decorator
 
 
-class ContextRecoder:
-    """会话上下文管理器"""
-
-    records: deque[tuple[UserMessage | SystemMessage, AssistantMessage | SystemMessage]]
-
-    def __init__(self, size: int) -> None:
-        self.records = deque(maxlen=size)
-        self.lock = asyncio.Lock()
-
-    def __iter__(self):
-        for record in self.records:
-            yield record[0]
-            yield record[1]
-
-    def __bool__(self):
-        return bool(self.records)
-
-    def over(self, request: UserMessage | SystemMessage, reply: AssistantMessage | SystemMessage):
-        self.records.append((request, reply))
-
-    def clear(self):
-        self.records.clear()
-
-
-class Session(ContextRecoder):
-    records: deque[tuple[UserMessage, AssistantMessage, int | float]]
-    silence: deque[tuple[str, int | float]]
-    snap: ContextRecoder
-    extra: dict
-
-    def __init__(self, size: int, sentence_model: SentenceTransformer) -> None:
-        super().__init__(size)
-        self.silence = deque()
-        self.snap = ContextRecoder(size)
-        self.skill_menu: str | None = None
-        self.current_input: UserMessage | None = None
-        self.decoupler = TopicDecoupler(sentence_model)
-        self.extra = {}
-
-    def memory_filter(self, timeout: int | float):
-        """过滤记忆"""
-        while self.records and (self.records[0][2] <= timeout):
-            self.records.popleft()
-
-    def silence_filter(self, timeout: int | float):
-        """过滤静默记录群聊上下文"""
-        while self.silence and (self.silence[0][1] <= timeout):
-            self.silence.popleft()
-
-    def step(self, message: str):
-        if not self.decoupler.step(message):
-            return False
-        count = sum(char_count(msg["content"]) for msg in self)
-        print(f"{count = } {message}")
-        return count > 800
-
-    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
-        """处理完成"""
-        self.records.append((request, reply, timestamp))
-        self.silence.clear()
-
-    def clear(self):
-        """清理记录"""
-        self.records.clear()
-        self.silence.clear()
-
-    def sync_snap(self):
-        """同步上下文到辅助AI"""
-        self.snap.clear()
-        self.snap.records.extend((x, y) for x, y, _ in self.records)
-
-
 class OpenAIAPI:
     def __init__(self, async_client: httpx.AsyncClient, config: OpenAIConfig) -> None:
         self.async_client = async_client
@@ -232,6 +153,15 @@ class OpenAIAPI:
             logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
             resp.raise_for_status()
         return resp.json()["choices"][0]["message"]
+
+    async def download_url(self, url: str):
+        try:
+            resp = await self.async_client.get(url, timeout=60)
+            resp.raise_for_status()
+            return data_url(resp.content)
+        except Exception as e:
+            logger.exception(e)
+            return None
 
 
 class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
@@ -389,8 +319,9 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             session.silence.append((f"{head}{at}{event.message}", timestamp))
             return
         request = f"{head}{at}{body}"
+        image_list = [data for data in await asyncio.gather(*(self.download_url(image) for image in event.image_list)) if data]
         if session.lock.locked():
-            return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, event.image_list)})
+            return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, image_list)})
         async with session.lock:
             async with session.snap.lock:
                 session.memory_filter(timestamp - self.memory_timeout)
@@ -416,7 +347,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                         content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
                 content.append({"type": "text", "text": "</引用上下文>"})
             pure_content: list[ContentSegment] = [{"type": "text", "text": message}]
-            pure_content.extend({"type": "image_url", "image_url": {"url": x}} for x in event.image_list)
+            pure_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list)
             content.extend(pure_content)
             session.current_input = {"role": "user", "content": content}  # 注入输入（可修改）
             payload: Payload = {"model": self.model, "messages": [*session, session.current_input]}
