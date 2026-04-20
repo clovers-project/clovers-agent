@@ -155,6 +155,8 @@ class OpenAIAPI:
         return resp.json()["choices"][0]["message"]
 
     async def download_url(self, url: str):
+        if not url.startswith("http"):
+            return url
         try:
             resp = await self.async_client.get(url, timeout=60)
             resp.raise_for_status()
