@@ -120,7 +120,7 @@ async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str
 
 @TOOLS.register(
     "upload_file",
-    "把文件上传给用户。",
+    "把文件上传给用户。如果用户明确要求助手发送文件则必须使用此工具。",
     {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
     ["工作区工具"],
 )
