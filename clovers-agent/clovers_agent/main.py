@@ -14,7 +14,7 @@ AGENT = CloversAgent("CloversAgent", ASYNC_CLIENT, Config.sync_config(__package_
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
 
-PLUGIN.startup(AGENT.init)
+
 PLUGIN.shutdown(ASYNC_CLIENT.aclose)
 
 

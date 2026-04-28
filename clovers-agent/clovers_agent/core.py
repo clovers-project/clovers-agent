@@ -36,33 +36,37 @@ class SkillCore:
         self.invoker: dict[str, WrappedAgentFunction] = {}
         self.__map_category_to_id: dict[str, int] = {}
         self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
-
-    def all_categories(self):
-        return self.__map_category_to_id.keys()
+        self.categories: dict[str, str] = {}
 
     def select_tools(self, category: str) -> list[FunctionToolInfo]:
         if category not in self.__map_category_to_id:
             return []
         return self.__map_id_to_tools[self.__map_category_to_id[category]]
 
-    def register(self, name: str, description: str, parameters: Parameters | None = None, categories: str | Iterable[str] | None = None):
+    def category_desc(self, category: str, description: str):
+        self.categories[category] = description
+
+    def register(
+        self,
+        name: str,
+        description: str,
+        parameters: Parameters | None = None,
+        category: str | None = None,
+    ):
         if name in self.invoker:
             raise ValueError(f"Tool {name} already exists.")
         info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
         if parameters:
             info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
         # info 是 OpneAI API 要求的 tools 字段中元素的格式
-        if not categories:
+        if not category:
             self.intro_tools.append(info)
         else:
-            if isinstance(categories, str):
-                categories = [categories]
-            for category in categories:
-                category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
-                self.__map_category_to_id[category] = category_id
-                if category_id not in self.__map_id_to_tools:
-                    self.__map_id_to_tools[category_id] = []
-                self.__map_id_to_tools[category_id].append(info)
+            category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
+            self.__map_category_to_id[category] = category_id
+            if category_id not in self.__map_id_to_tools:
+                self.__map_id_to_tools[category_id] = []
+            self.__map_id_to_tools[category_id].append(info)
         self.manifest[info["function"]["name"]] = info
 
         def decorator(func: AgentFunction) -> WrappedAgentFunction:
@@ -98,6 +102,7 @@ class SkillCore:
                 new_category_id = next(self.category_id)
                 self.__map_id_to_tools[new_category_id] = others.__map_id_to_tools[category_id]
                 self.__map_category_to_id[category] = new_category_id
+        self.categories.update(others.categories)
 
     def on_skill(self, categories: str | Iterable[str]):
         def decorator(func: AgentFunction) -> AgentFunction:
@@ -199,23 +204,25 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
         self.sessions: dict[str, Session] = {}
         # 注册技能
-        self.categories: list[str] = []
-        self._plugins = config.plugins
-        self._plugins_dirs = config.plugin_dirs
+        self.load_from_list(config.plugins)
+        self.load_from_dirs(config.plugin_dirs)
+        category_description = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
+        categories = list(self.categories.keys())
         self.register(
             "skill_menu",
             "获取更多技能，如果assistant无法单独完成用户指令，则需要调用此方法获取更多技能。",
-            {"category": {"type": "string", "description": "选择需要的技能关键词", "enum": self.categories}},
+            {
+                "category": {
+                    "type": "string",
+                    "description": f"选择需要的技能关键词\n\n{category_description}",
+                    "enum": list(categories),
+                }
+            },
         )(self.skill_menu)
 
     @staticmethod
     def check(e: Event) -> bool:
         raise NotImplementedError
-
-    def init(self) -> None:
-        self.load_from_list(self._plugins)
-        self.load_from_dirs(self._plugins_dirs)
-        self.categories.extend(self.all_categories())
 
     @staticmethod
     async def skill_menu(agent: "CloversAgent", event: Event, category: str):
