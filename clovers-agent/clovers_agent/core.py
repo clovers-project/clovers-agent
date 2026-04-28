@@ -297,8 +297,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                     toolkit.add(key)
                     payload["messages"].append(msg)
             async with session.snap.lock:
-                result = f"{result or '任务执行失败'}\n\n请用你的语气复述以上结果"
-                context = [system_message, *session.snap, {"role": "system", "content": result}]
+                result = f"[系统提示]任务执行完毕，请用你的语气复述结果\n\n{result or '任务执行失败'}"
+                context = [system_message, *session.snap, {"role": "user", "content": result}]
                 session.snap.clear()
         else:
             context = payload["messages"]
@@ -321,7 +321,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             session.silence.append((f"{head}{at}{event.message}", timestamp))
             return
         request = f"{head}{at}{body}"
-        image_list = [data for data in await asyncio.gather(*(self.download_url(image) for image in event.image_list)) if data]
+        image_list = await asyncio.gather(*(self.download_url(image) for image in event.image_list))
+        image_list = [image for image in image_list if image]
         if session.lock.locked():
             return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, image_list)})
         async with session.lock:
@@ -337,7 +338,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 session.sync_snap()
                 session.snap.over(
                     {"role": "user", "content": message},
-                    {"role": "system", "content": "此任务正在处理中，若用户追问则回复用户稍等。"},
+                    {"role": "assistant", "content": "[系统提示]任务正在执行，请稍等。"},
                 )
             content: list[ContentSegment] = []
             if (call := event.call("flat_context")) and (flat_context := await call):
