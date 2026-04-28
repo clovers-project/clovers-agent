@@ -202,6 +202,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         # 模型设置
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.style_prompt = config.style_prompt
+        self.base_prompt = config.system_prompt
         self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
         self.memory_size = config.memory_size
@@ -296,7 +297,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     async def call_unit(self, session: Session, event: Event, payload: Payload, extra_prompt: str = ""):
         hooks = await asyncio.gather(*[hook(self, event) for hook in self.hooks])
         hooks_prompt = "\n".join(prompt for prompt in hooks if prompt)
-        system_prompt = f"{self.style_prompt}\n{self.chat_prompt}\n{hooks_prompt}\n{extra_prompt}"
+        system_prompt = f"{self.style_prompt}\n{self.base_prompt}\n{self.chat_prompt}\n{hooks_prompt}\n{extra_prompt}"
         system_message: SystemMessage = {"role": "system", "content": system_prompt}
         payload["messages"].insert(0, system_message)
         if self.categories:
