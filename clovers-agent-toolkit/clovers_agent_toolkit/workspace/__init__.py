@@ -58,6 +58,25 @@ if CONFIG.use_shell:
         output = await shell.execute(command)
         return f"{output}\n当前工作目录: {shell.workdir}"
 
+else:
+
+    @TOOLS.register(
+        "ls",
+        "查看工作区文件",
+        {"path": {"type": "string", "description": "需要查看的目录路径"}},
+        "工作区工具",
+    )
+    async def _(agent: CloversAgent, event: Event, path: str):
+        session_id = get_session_id(agent, event)
+        folder = WORKSPACE / session_id / path
+        if not folder.exists():
+            return f"路径 '{path}' 不存在。"
+        files = []
+        for file in folder.rglob("*"):
+            if file.is_file():
+                files.append(str(file.relative_to(folder)))
+        return f"路径 '{path}' 下的文件列表：\n{"\n".join(files)}"
+
 
 def read_text(file: Path):
     for encoding in ["utf-8", None, "ansi"]:

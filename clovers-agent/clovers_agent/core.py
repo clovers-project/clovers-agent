@@ -247,12 +247,22 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         logger.debug(summary)
         return summary
 
+    @staticmethod
+    async def default_func(tool_call_id: str, content: str) -> tuple[ToolMessage, str]:
+        return {"role": "tool", "tool_call_id": tool_call_id, "content": content}, ""
+
     async def function_call(self, event: Event, call_infos: list[dict]) -> list[tuple[ToolMessage, str]]:
         task_queue = []
         for call_info in call_infos:
-            func = self.invoker[call_info["function"]["name"]]
-            kwargs = json.loads(call_info["function"]["arguments"])
-            task_queue.append(func(call_info["id"], self, event, **kwargs))
+            name = call_info["function"]["name"]
+            try:
+                func = self.invoker[name]
+                kwargs = json.loads(call_info["function"]["arguments"])
+                task_queue.append(func(call_info["id"], self, event, **kwargs))
+            except KeyError:
+                task_queue.append(self.default_func(call_info["id"], f'工具 "{name}" 不存在。'))
+            except Exception as e:
+                task_queue.append(self.default_func(call_info["id"], str(e)))
         return await asyncio.gather(*task_queue)
 
     @staticmethod
@@ -305,23 +315,18 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 payload["messages"].append(message)
                 session.skill_menu = None
                 for msg, key in await self.function_call(event, tool_calls):
-                    toolkit.add(key)
+                    if key:
+                        toolkit.add(key)
                     payload["messages"].append(msg)
             async with session.snap.lock:
                 if result:
                     if session.records:
                         return result
-                    context = [
-                        system_message,
-                        *session.snap,
-                        {"role": "system", "content": f"请以你的语气完整复述以下内容：\n\n{result}"},
-                    ]
+                    else:
+                        result = f"{result}\n\n请以你的语气风格完整复述上述内容。"
                 else:
-                    context = [
-                        system_message,
-                        *session.snap,
-                        {"role": "system", "content": "请告知用户任务执行失败。"},
-                    ]
+                    result = "请告知用户任务执行失败。"
+                context = [system_message, *session.snap, {"role": "system", "content": result}]
         else:
             context = payload["messages"]
         system_message["content"] = f"{self.style_prompt}\n\n{intro_prompt}"
