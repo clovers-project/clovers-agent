@@ -309,8 +309,19 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                     payload["messages"].append(msg)
             async with session.snap.lock:
                 if result:
-                    return result
-                context = [system_message, *session.snap, {"role": "system", "content": "任务执行失败"}]
+                    if session.records:
+                        return result
+                    context = [
+                        system_message,
+                        *session.snap,
+                        {"role": "system", "content": f"请以你的语气完整复述以下内容：\n\n{result}"},
+                    ]
+                else:
+                    context = [
+                        system_message,
+                        *session.snap,
+                        {"role": "system", "content": "请告知用户任务执行失败。"},
+                    ]
         else:
             context = payload["messages"]
         system_message["content"] = f"{self.style_prompt}\n\n{intro_prompt}"
