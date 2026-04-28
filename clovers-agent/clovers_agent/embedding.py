@@ -9,6 +9,12 @@ import transformers
 transformers.logging.set_verbosity_error()
 
 
+def similarity(content: str, line: str, model: SentenceTransformer):
+    line_emb = model.encode(line, convert_to_tensor=True)
+    sentence_emb = model.encode(content, convert_to_tensor=True)
+    return util.cos_sim(sentence_emb, line_emb).item()
+
+
 def sentence_weight(text: str):
     cn = jp = kr = 0
     others: list[str] = []

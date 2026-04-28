@@ -1,6 +1,7 @@
 from pathlib import Path
 from clovers_agent import Event
 from clovers_agent.core import CloversAgent
+from clovers_agent.embedding import similarity
 from clovers.logger import logger
 from .docker import WORKSPACE, Shell
 from ..toolkit import TOOLS, CONFIG
@@ -35,10 +36,57 @@ async def _(agent: CloversAgent, event: Event):
                 shell_dict[session_id] = Shell(session_id)
             except Exception as e:
                 logger.error(e)
-                return f"workspace 已初始化, shell 初始化失败:{e}\n当前工作目录: /workspace"
+                return f"workspace 已初始化, shell 初始化失败，此工作区无法执行命令。\n当前工作目录: /workspace"
         return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
     else:
         return f"workspace 已初始化\n当前工作目录: /workspace"
+
+
+@TOOLS.register("read_note", "查看助手所记录的笔记内容，除非用户消息十分简短，否则每次都应调用此方法。")
+async def _(agent: CloversAgent, event: Event):
+    session_id = get_session_id(agent, event)
+    note_file = WORKSPACE / session_id / "NOTE.md"
+    if not note_file.exists():
+        return "暂无笔记。"
+    return f"```markdown\n{read_text(note_file)}\n```"
+
+
+@TOOLS.register(
+    "write_note",
+    "记录笔记内容，助手可以使用此工具记录一些重要的信息以便后续查看。",
+    {"content": {"type": "string", "description": "需要记录的笔记内容"}},
+)
+async def _(agent: CloversAgent, event: Event, content: str):
+    session_id = get_session_id(agent, event)
+    note_file = WORKSPACE / session_id / "NOTE.md"
+    note_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if not note_file.exists() or not (note := note_file.read_text(encoding="utf-8")):
+            note_file.write_text(content, encoding="utf-8")
+            return "笔记已更新。"
+        lines = note.strip().splitlines()
+        new_lines = []
+        flag = False
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if similarity(content, line, agent.sentence_model) > CONFIG.note_similarity_threshold:
+                logger.info(f"找到相似笔记: {line}，已去除重复内容。")
+                if flag:
+                    continue
+                else:
+                    flag = True
+                    new_lines.append(content)
+            else:
+                new_lines.append(line)
+        if not flag:
+            new_lines.append(content)
+        note_file.write_text("\n".join(new_lines), encoding="utf-8")
+        return "笔记已更新。"
+    except Exception as e:
+        logger.error(e)
+        return f"笔记更新失败。"
 
 
 if CONFIG.use_shell:
