@@ -8,11 +8,18 @@ from .core import Event, CloversAgent
 from .config import Config
 
 
-ASYNC_CLIENT = httpx.AsyncClient(timeout=300)
-AGENT = CloversAgent("CloversAgent", ASYNC_CLIENT, Config.sync_config(__package__))
+CONFIG = Config.sync_config(__package__)
+
 
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
+
+
+@PLUGIN.startup
+def _():
+    global ASYNC_CLIENT, AGENT
+    ASYNC_CLIENT = httpx.AsyncClient(timeout=300)
+    AGENT = CloversAgent("CloversAgent", ASYNC_CLIENT, CONFIG)
 
 
 PLUGIN.shutdown(ASYNC_CLIENT.aclose)
