@@ -42,19 +42,25 @@ async def _(agent: CloversAgent, event: Event):
         return f"workspace 已初始化\n当前工作目录: /workspace"
 
 
-@TOOLS.register("read_note", "查看助手所记录的笔记内容，除非用户消息十分简短，否则每次都应调用此方法。")
+@TOOLS.hook
 async def _(agent: CloversAgent, event: Event):
     session_id = get_session_id(agent, event)
     note_file = WORKSPACE / session_id / "NOTE.md"
     if not note_file.exists():
-        return "暂无笔记。"
-    return f"```markdown\n{read_text(note_file)}\n```"
+        return ""
+    try:
+        note = note_file.read_text(encoding="utf-8")
+    except Exception as e:
+        note_file.unlink()
+        logger.error(f"笔记读取失败: {e}")
+        return ""
+    return f"笔记内容\n\n{note}\n"
 
 
 @TOOLS.register(
     "write_note",
-    "记录笔记内容，助手可以使用此工具记录一些重要的信息以便后续查看。",
-    {"content": {"type": "string", "description": "需要记录的笔记内容"}},
+    "写笔记。当用户与助手约定、提出长期要求或有其他需要记录的信息时，必须调用此工具记录。",
+    {"content": {"type": "string", "description": "笔记内容。内容应精炼为陈述句，去除口语化修饰。"}},
 )
 async def _(agent: CloversAgent, event: Event, content: str):
     session_id = get_session_id(agent, event)

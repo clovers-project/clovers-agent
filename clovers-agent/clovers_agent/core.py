@@ -30,6 +30,7 @@ class SkillCore:
     def __init__(self, name: str = "") -> None:
         self.category_id = count()
         self.name = name
+        self.hooks: list[AgentFunction] = []
         self.intro_tools: list[FunctionToolInfo] = []
         self.skill_init: dict[str, AgentFunction] = {}
         self.manifest: dict[str, FunctionToolInfo] = {}
@@ -45,6 +46,10 @@ class SkillCore:
 
     def category_desc(self, category: str, description: str):
         self.categories[category] = description
+
+    def hook(self, func: AgentFunction):
+        self.hooks.append(func)
+        return func
 
     def register(
         self,
@@ -103,6 +108,7 @@ class SkillCore:
                 self.__map_id_to_tools[new_category_id] = others.__map_id_to_tools[category_id]
                 self.__map_category_to_id[category] = new_category_id
         self.categories.update(others.categories)
+        self.hooks.extend(others.hooks)
 
     def on_skill(self, categories: str | Iterable[str]):
         def decorator(func: AgentFunction) -> AgentFunction:
@@ -288,7 +294,9 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             return reply
 
     async def call_unit(self, session: Session, event: Event, payload: Payload, extra_prompt: str = ""):
-        system_prompt = f"{self.style_prompt}\n{self.chat_prompt}\n{extra_prompt}"
+        hooks = await asyncio.gather(*[hook(self, event) for hook in self.hooks])
+        hooks_prompt = "\n".join(prompt for prompt in hooks if prompt)
+        system_prompt = f"{self.style_prompt}\n{self.chat_prompt}\n{hooks_prompt}\n{extra_prompt}"
         system_message: SystemMessage = {"role": "system", "content": system_prompt}
         payload["messages"].insert(0, system_message)
         if self.categories:
