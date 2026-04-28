@@ -204,8 +204,12 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
         self.sessions: dict[str, Session] = {}
         # 注册技能
-        self.load_from_list(config.plugins)
-        self.load_from_dirs(config.plugin_dirs)
+        self._plugins = config.plugins
+        self._plugin_dirs = config.plugin_dirs
+
+    def init(self):
+        self.load_from_list(self._plugins)
+        self.load_from_dirs(self._plugin_dirs)
         category_description = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
         categories = list(self.categories.keys())
         self.register(
