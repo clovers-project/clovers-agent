@@ -1,7 +1,7 @@
 import asyncio
 from collections import deque
 from .embedding import SentenceTransformer, TopicDecoupler
-from .typing.message import UserMessage, AssistantMessage, ContentSegment
+from .typing.message import UserMessage, AssistantMessage, SystemMessage, ContentSegment
 
 
 def extract_plain_text(content: str | list[ContentSegment]) -> str:
@@ -15,7 +15,7 @@ def char_count(content: str | list[ContentSegment]):
 class ContextRecoder:
     """会话上下文管理器"""
 
-    records: deque[tuple[UserMessage, AssistantMessage]]
+    records: deque[tuple[UserMessage | SystemMessage, AssistantMessage | SystemMessage]]
 
     def __init__(self, size: int) -> None:
         self.records = deque(maxlen=size)
@@ -29,7 +29,7 @@ class ContextRecoder:
     def __bool__(self):
         return bool(self.records)
 
-    def over(self, request: UserMessage, reply: AssistantMessage):
+    def over(self, request: UserMessage | SystemMessage, reply: AssistantMessage | SystemMessage):
         self.records.append((request, reply))
 
     def clear(self):

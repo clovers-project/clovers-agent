@@ -297,9 +297,9 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                     toolkit.add(key)
                     payload["messages"].append(msg)
             async with session.snap.lock:
-                result = f"[系统提示]任务执行完毕，请用你的语气复述结果\n\n{result or '任务执行失败'}"
-                context = [system_message, *session.snap, {"role": "user", "content": result}]
-                session.snap.clear()
+                if result:
+                    return result
+                context = [system_message, *session.snap, {"role": "system", "content": "任务执行失败"}]
         else:
             context = payload["messages"]
         system_message["content"] = f"{self.style_prompt}\n\n{intro_prompt}"
@@ -338,7 +338,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 session.sync_snap()
                 session.snap.over(
                     {"role": "user", "content": message},
-                    {"role": "assistant", "content": "[系统提示]任务正在执行，请稍等。"},
+                    {"role": "system", "content": "任务正在执行，请稍等。"},
                 )
             content: list[ContentSegment] = []
             if (call := event.call("flat_context")) and (flat_context := await call):
@@ -359,6 +359,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             except Exception as e:
                 logger.exception(e)
                 return
+            finally:
+                session.snap.clear()
             session.over({"role": "user", "content": pure_content}, {"role": "assistant", "content": resp}, timestamp)
             session.current_input = None
             return resp
