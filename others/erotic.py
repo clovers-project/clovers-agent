@@ -55,7 +55,7 @@ EROTIC_PROMPT = """你现在正在被调戏，你的回复必须彻底摆脱 AI 
 
 
 @TOOLS.register("on_erotic", "当助手被群友进行色情调戏时必须调用此方法以获取回复准则。")
-async def _(agent: CloversAgent, event: Event):*
+async def _(agent: CloversAgent, event: Event):
     if not EROTIC_MD.exists():
         EROTIC_MD.parent.mkdir(parents=True, exist_ok=True)
         EROTIC_MD.write_text(EROTIC_PROMPT, encoding="utf-8")
