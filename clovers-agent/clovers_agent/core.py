@@ -339,7 +339,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 context = [system_message, *session.snap, {"role": "system", "content": result}]
         else:
             context = payload["messages"]
-        system_message["content"] = f"{self.style_prompt}\n\n{intro_prompt}"
+        system_message["content"] = f"{self.style_prompt}\n{hooks_prompt}\n{intro_prompt}"
         payload = self.auxiliary.build_payload(context)
         return (await self.auxiliary.call_api(payload))["content"].strip()
 

@@ -71,10 +71,10 @@ async def _(agent: CloversAgent, event: Event, content: str):
             return "笔记已更新。"
         aux = agent.auxiliary
         payload = aux.build_payload(
-            ({"role": "user", "content": "\n".join(note)},),
+            ({"role": "user", "content": "\n".join(note) + "\n" + content},),
             "你是一个专业的笔记整理助手。请按以下规则处理用户输入的文本：\n"
             "1. 每行仅记录一件事，同一信息严禁跨行记录，严禁使用序号、列表或任何 Markdown 格式。\n"
-            "2. 合并重复意思的记录，剔除冗余内容。\n"
+            "2. 合并含义重复或相近的记录，剔除冗余内容。\n"
             "3. 若记录内容相互矛盾，仅顺序靠后的那条，严禁提及未保留的内容。\n"
             "4. 仅输出整理后的纯文本内容，不对有效信息进行额外的解释、总结或扩充。",
         )
