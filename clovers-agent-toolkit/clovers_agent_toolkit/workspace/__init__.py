@@ -1,7 +1,6 @@
 from pathlib import Path
 from clovers_agent import Event
 from clovers_agent.core import CloversAgent
-from clovers_agent.embedding import similarity
 from clovers.logger import logger
 from .docker import WORKSPACE, Shell
 from ..toolkit import TOOLS, CONFIG
@@ -70,25 +69,17 @@ async def _(agent: CloversAgent, event: Event, content: str):
         if not note_file.exists() or not (note := note_file.read_text(encoding="utf-8")):
             note_file.write_text(content, encoding="utf-8")
             return "笔记已更新。"
-        lines = note.strip().splitlines()
-        new_lines = []
-        flag = False
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if similarity(content, line, agent.sentence_model) > CONFIG.note_similarity_threshold:
-                logger.info(f"找到相似笔记: {line}，已去除重复内容。")
-                if flag:
-                    continue
-                else:
-                    flag = True
-                    new_lines.append(content)
-            else:
-                new_lines.append(line)
-        if not flag:
-            new_lines.append(content)
-        note_file.write_text("\n".join(new_lines), encoding="utf-8")
+        aux = agent.auxiliary
+        payload = aux.build_payload(
+            ({"role": "user", "content": "\n".join(note)},),
+            "你是一个专业的笔记整理助手。请按以下规则处理用户输入的文本：\n"
+            "1. 每行仅记录一件事，同一信息严禁跨行记录，严禁使用序号、列表或任何 Markdown 格式。\n"
+            "2. 合并重复意思的记录，剔除冗余内容。\n"
+            "3. 若记录内容相互矛盾，仅顺序靠后的那条，严禁提及未保留的内容。\n"
+            "4. 仅输出整理后的纯文本内容，不对有效信息进行额外的解释、总结或扩充。",
+        )
+        new_note = await aux.call_api(payload)
+        note_file.write_text(new_note["content"], encoding="utf-8")
         return "笔记已更新。"
     except Exception as e:
         logger.error(e)
