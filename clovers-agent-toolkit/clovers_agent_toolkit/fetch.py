@@ -3,6 +3,7 @@ from clovers_agent.core import CloversAgent
 from .toolkit import TOOLS, CONFIG
 
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
+BRAVE_URL = CONFIG.BRAVE_URL
 
 TOOLS.category_desc("联网工具", "包含联网搜索、网页内容提取、图片查看等工具，用于从互联网获取信息和资源。")
 
@@ -15,9 +16,8 @@ TOOLS.category_desc("联网工具", "包含联网搜索、网页内容提取、�
 )
 async def _(agent: CloversAgent, event: Event, query: list[str]):
     headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
-    url = "https://api.search.brave.com/res/v1/web/search"
     params = {"q": query, "count": 8}
-    resp = await agent.async_client.get(url, headers=headers, params=params, timeout=30.0)
+    resp = await agent.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
     if resp.status_code != 200:
         return f"搜索失败，状态码：{resp.status_code}"
     try:
