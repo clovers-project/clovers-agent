@@ -312,7 +312,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         # 退出条件：不需要额外技能
         if session.skill_menu:
             toolkit = {"skill_menu"}
-            system_message["content"] = f"{self.call_prompt}\n{extra_prompt}\n\n{intro_prompt}"
+            system_message["content"] = f"{self.call_prompt}\n{hooks_prompt}\n{extra_prompt}\n{intro_prompt}"
             result = ""
             for _ in range(100):
                 payload["tools"] = [self.manifest[k] for k in toolkit]
