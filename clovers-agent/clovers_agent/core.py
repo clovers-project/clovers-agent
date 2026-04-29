@@ -162,6 +162,7 @@ class OpenAIAPI:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
         if resp.status_code != 200:
             logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
+            logger.error(resp.text)
             resp.raise_for_status()
         return resp.json()["choices"][0]["message"]
 

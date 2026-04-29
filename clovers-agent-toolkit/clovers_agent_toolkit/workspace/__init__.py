@@ -59,7 +59,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "write_note",
-    "写笔记。当用户与助手约定、提出长期要求或有其他需要记录的信息时，必须调用此工具记录。",
+    "记录信息。当用户与助手约定、提出长期要求、让助手记住某事、或有其他需要记录的信息时，必须调用此工具记录。",
     {"content": {"type": "string", "description": "笔记内容。内容应精炼为陈述句，去除口语化修饰。"}},
 )
 async def _(agent: CloversAgent, event: Event, content: str):
