@@ -46,7 +46,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         # 模型设置
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.style_prompt = config.style_prompt
-        self.base_prompt = config.system_prompt
+        self.base_prompt = config.base_prompt
         self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
         self.memory_size = config.memory_size
@@ -147,14 +147,16 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     async def aux_reply(self, session: Session, message: UserMessage):
         if not session.silence:
             return
+        if session.snap.lock.locked():
+            return
         async with session.snap.lock:
-            if not session.lock.locked():
-                return
-            payload = self.auxiliary.build_payload((*session.snap, message), f"{self.style_prompt}\n{self.chat_prompt}\n")
+            system_prompt = f"{self.style_prompt}\n{self.base_prompt}\n{self.chat_prompt}"
+            payload = self.auxiliary.build_payload((*session.snap, message), system_prompt)
             reply = (await self.auxiliary.call_api(payload))["content"].strip()
             assistant_msg: AssistantMessage = {"role": "assistant", "content": reply}
             session.snap.over(message, assistant_msg)
-            return reply
+            if session.lock.locked():
+                return reply
 
     async def call_unit(self, session: Session, event: Event, payload: Payload, extra_prompt: str = ""):
         hooks = [coro if isinstance(coro := hook(self, event), str) else await coro for hook in self.chat_hooks]
@@ -200,7 +202,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 context = [system_message, *session.snap, {"role": "system", "content": result}]
         else:
             context = payload["messages"]
-        system_message["content"] = f"{self.style_prompt}\n{hooks_prompt}\n{intro_prompt}"
+        system_message["content"] = f"{self.style_prompt}\n{self.base_prompt}\n{hooks_prompt}\n{extra_prompt}"
         payload = self.auxiliary.build_payload(context)
         return (await self.auxiliary.call_api(payload))["content"].strip()
 
