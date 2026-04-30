@@ -1,8 +1,7 @@
+import importlib.util
 import frontmatter
 from pathlib import Path
 from itertools import count
-from importlib import import_module
-from clovers.core.loader import import_path
 from clovers.logger import logger
 from collections.abc import Callable, Coroutine
 from typing import Any, Concatenate, TYPE_CHECKING
@@ -146,7 +145,7 @@ class SkillCore:
             self.delete_skill(None, skill_md[0])
             return self.load_skill_md(skill_md, None)
         elif skill_path.is_dir() and (skill_file := skill_path / "SKILL.md").exists() and (skill_md := parse_skill(skill_file)):
-            module = import_module_from_path(skill_path)
+            module = load_module_from_path(skill_md[0], skill_path / "skill.py")
             other_mds = [md for file in skill_path.glob("*.md") if not file.samefile(skill_file) if (md := parse_skill(file))]
             if not other_mds:
                 self.delete_skill(None, skill_md[0])
@@ -162,14 +161,16 @@ class SkillCore:
                 return category, None
 
 
-def import_module_from_path(module_path: Path):
-    if not module_path.exists():
+def load_module_from_path(module_name: str, file: Path):
+    spec = importlib.util.spec_from_file_location(module_name, file)
+    if spec is None:
         return
-    if not (module_path / "__init__.py").exists():
+    module = importlib.util.module_from_spec(spec)
+    if spec.loader is None:
         return
     try:
-        return import_module(import_path(module_path))
-    except Exception:
+        return spec.loader.exec_module(module)
+    except:
         return
 
 
@@ -193,4 +194,4 @@ def parse_skill(skill_path: Path) -> SkillMD | None:
         return
     if not (isinstance(name, str) and isinstance(desc, str)):
         return
-    return name, desc, parameters, content
+    return name.replace("-", "_"), desc, parameters, content

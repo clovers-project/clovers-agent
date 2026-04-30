@@ -248,3 +248,13 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             session.over({"role": "user", "content": pure_content}, {"role": "assistant", "content": resp}, timestamp)
             session.current_input = None
             return resp
+
+    def load(self, package: str):
+        tools = super()._load(package)
+        if tools is None:
+            return
+        conflict = self.merge(tools)
+        if conflict:
+            logger.error(f'[{self.name}] "{package}" conflict with {conflict}')
+            return
+        logger.info(f'[{self.name}] "{package}" loaded')
