@@ -37,7 +37,10 @@ class ContextRecoder:
 
 
 class Session(ContextRecoder):
-    records: deque[tuple[UserMessage, AssistantMessage, int | float]]
+    type Storge = deque[tuple[UserMessage, AssistantMessage, int | float]]
+    records: Storge
+    storage: Storge
+    unimp_storage: Storge
     silence: deque[tuple[str, int | float]]
     snap: ContextRecoder
     extra: dict
@@ -50,6 +53,9 @@ class Session(ContextRecoder):
         self.current_input: UserMessage | None = None
         self.decoupler = TopicDecoupler(sentence_model)
         self.extra = {}
+        self.unimp = False
+        self.storage = self.records
+        self.unimp_storage = deque(maxlen=2)
 
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
@@ -69,12 +75,20 @@ class Session(ContextRecoder):
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
         """处理完成"""
+        if self.unimportant:
+            self.records = self.unimp_storage
+            self.unimportant = False
+        elif self.unimp_storage:
+            self.storage.extend(self.unimp_storage)
+            self.unimp_storage.clear()
+            self.records = self.storage
         self.records.append((request, reply, timestamp))
         self.silence.clear()
 
     def clear(self):
         """清理记录"""
-        self.records.clear()
+        self.storage.clear()
+        self.unimp_storage.clear()
         self.silence.clear()
 
     def sync_snap(self):
