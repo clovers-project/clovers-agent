@@ -249,7 +249,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             session.current_input = None
             return resp
 
-    def load(self, package: str):
+    def _load(self, package: str):
         tools = super()._load(package)
         if tools is None:
             return
