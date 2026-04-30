@@ -65,7 +65,6 @@ class Session(ContextRecoder):
         if not self.decoupler.step(message):
             return False
         count = sum(char_count(msg["content"]) for msg in self)
-        print(f"{count = } {message}")
         return count > 800
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):

@@ -18,7 +18,7 @@ else:
     get_session_id = lambda agent, event: "public"
 
 
-@TOOLS.create_category("工作区工具", "包含文件读写、命令执行等工具，用于在工作区环境下进行文件操作和命令执行。")
+@TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具")
 async def _(agent: CloversAgent, event: Event):
     if not WORKSPACE.exists():
         WORKSPACE.mkdir(parents=True, exist_ok=True)
