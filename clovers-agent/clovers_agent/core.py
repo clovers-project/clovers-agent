@@ -56,9 +56,9 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.sessions: dict[str, Session] = {}
         # 注册技能
         self.skills = tuple()
-        self.skill_dir = Path(config.path)
         self._plugins = config.plugins
         self._plugin_dirs = config.plugin_dirs
+        self._skill_dirs = config.skill_dirs
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
 
     @staticmethod
@@ -75,7 +75,15 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     def sync_menu(self):
         for skill in self.skills:
             self.delete_skill(*skill)
-        self.skills = tuple({name for skill_path in self.skill_dir.iterdir() if (name := self.load_skill(skill_path))})
+        self.skills = tuple(
+            {
+                select
+                for skill_dir in self._skill_dirs
+                if (path := Path(skill_dir)).exists()
+                for skill_path in path.iterdir()
+                if (select := self.load_skill(skill_path))
+            }
+        )
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
         self._category_schema["enum"] = list(self.categories.keys())
 

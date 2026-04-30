@@ -1,5 +1,5 @@
-import puremagic
 import base64
+import puremagic
 
 
 def data_url(data: bytes) -> str:

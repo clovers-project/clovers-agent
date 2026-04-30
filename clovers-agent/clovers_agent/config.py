@@ -21,8 +21,10 @@ class Config(BaseConfig):
     """数据文件路径"""
     plugins: list[str] = []
     """插件列表"""
-    plugin_dirs: list[str] = []
+    plugin_dirs: list[str] = ["./AgentTools"]
     """插件路径"""
+    skill_dirs: list[str] = ["./AgentSkills"]
+    """技能路径"""
     primary: OpenAIConfig
     """主模型接入点"""
     auxiliary: OpenAIConfig | None
