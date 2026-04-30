@@ -1,3 +1,4 @@
+from __future__ import annotations
 import importlib.util
 import frontmatter
 from pathlib import Path
@@ -135,7 +136,7 @@ class SkillCore:
 
     def load_skill_md(self, skill: SkillMD, category: str | None = None, func: AgentFunction | None = None):
         name, desc, parameters, content = skill
-        register = self.register(name, desc, parameters)
+        register = self.register(name, desc, parameters, category)
         if skill_func := skill_wrapper(content, func):
             register(skill_func)
         return category, name
@@ -169,9 +170,10 @@ def load_module_from_path(module_name: str, file: Path):
     if spec.loader is None:
         return
     try:
-        return spec.loader.exec_module(module)
+        spec.loader.exec_module(module)
     except:
         return
+    return module
 
 
 def skill_wrapper(content: str, func: AgentFunction | None = None) -> AgentFunction | None:
@@ -184,7 +186,7 @@ def skill_wrapper(content: str, func: AgentFunction | None = None) -> AgentFunct
 
 def parse_skill(skill_path: Path) -> SkillMD | None:
     try:
-        skill = frontmatter.load(skill_path.read_text())
+        skill = frontmatter.loads(skill_path.read_text("utf-8"))
         name = skill["name"]
         desc = skill["description"]
         parameters: SkillCore.Parameters | None = skill.get("parameters")  # type: ignore

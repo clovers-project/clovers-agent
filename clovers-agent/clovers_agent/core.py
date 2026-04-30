@@ -31,17 +31,17 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         # clovers 设置
         if config.whitelist:
             whitelist = set(config.whitelist)
-            logger.info(f"[CloversAgent] 检查规则设置为白名单模式：{whitelist}")
+            logger.info(f"[{self.name}] 检查规则设置为白名单模式：{whitelist}")
             self.check = lambda e: e.group_id is not None and e.group_id in whitelist
         elif config.blacklist:
             blacklist = set(config.blacklist)
-            logger.info(f"[CloversAgent] 检查规则设置为黑名单模式：{blacklist}")
+            logger.info(f"[{self.name}] 检查规则设置为黑名单模式：{blacklist}")
             self.check = lambda e: e.group_id is not None and e.group_id not in blacklist
         elif config.console_mode:
-            logger.info("[CloversAgent] 启动控制台模式")
+            logger.info(f"[{self.name}] 启动控制台模式")
             self.check = lambda e: True
         else:
-            logger.info("[CloversAgent] 已关闭")
+            logger.info(f"[{self.name}] 已关闭")
             self.check = lambda e: False
         # 模型设置
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
@@ -76,7 +76,20 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         for skill in self.skills:
             self.delete_skill(*skill)
         paths = (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir)).exists() for _p in _dir.iterdir())
-        self.skills = tuple({select for _p in paths if (select := self.load_skill(_p))})
+        category_set: set[str] = set()
+        name_set: set[str] = set()
+        for path in paths:
+            select = self.load_skill(path)
+            if not select:
+                continue
+            category, name = select
+            if category:
+                category_set.add(category)
+            if name:
+                name_set.add(name)
+            logger.info(f'[{self.name}][SKILLS] "{category or name}" loaded')
+        self.skills = *((category, None) for category in category_set), *((None, name) for name in name_set)
+        logger.info(f"")
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
         self._category_schema["enum"] = list(self.categories.keys())
 
@@ -258,4 +271,4 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         if conflict:
             logger.error(f'[{self.name}] "{package}" conflict with {conflict}')
             return
-        logger.info(f'[{self.name}] "{package}" loaded')
+        logger.info(f'[{self.name}][TOOLS] "{package}" loaded')

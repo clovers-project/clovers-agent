@@ -1,6 +1,6 @@
 from .main import PLUGIN, AGENT
-from .core import SkillCore, Event
-
+from .skill import SkillCore
+from .core import CloversAgent, Event
 
 __version__ = "0.2.5"
-__all__ = ["PLUGIN", "AGENT", "SkillCore", "Event"]
+__all__ = ["PLUGIN", "AGENT", "CloversAgent", "SkillCore", "Event"]
