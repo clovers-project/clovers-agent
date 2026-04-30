@@ -75,15 +75,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     def sync_menu(self):
         for skill in self.skills:
             self.delete_skill(*skill)
-        self.skills = tuple(
-            {
-                select
-                for skill_dir in self._skill_dirs
-                if (path := Path(skill_dir)).exists()
-                for skill_path in path.iterdir()
-                if (select := self.load_skill(skill_path))
-            }
-        )
+        paths = (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir)).exists() for _p in _dir.iterdir())
+        self.skills = tuple({select for _p in paths if (select := self.load_skill(_p))})
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
         self._category_schema["enum"] = list(self.categories.keys())
 
