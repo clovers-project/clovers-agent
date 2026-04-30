@@ -15,7 +15,7 @@ PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
 
 
-PLUGIN.startup(AGENT.init)
+PLUGIN.startup(AGENT.skill_init)
 PLUGIN.shutdown(ASYNC_CLIENT.aclose)
 
 

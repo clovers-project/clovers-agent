@@ -5,7 +5,7 @@ from .toolkit import TOOLS, CONFIG
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
 BRAVE_URL = CONFIG.BRAVE_URL
 
-TOOLS.category_desc("联网工具", "包含联网搜索、网页内容提取、图片查看等工具，用于从互联网获取信息和资源。")
+TOOLS.create_category("联网工具", "包含联网搜索、网页内容提取、图片查看等工具，用于从互联网获取信息和资源。")
 
 
 @TOOLS.register(

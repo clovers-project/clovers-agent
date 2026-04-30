@@ -4,5 +4,5 @@ if not __package__:
 from clovers_agent import SkillCore
 from .config import Config
 
-TOOLS = SkillCore("Agent Toolkit")
+TOOLS = SkillCore()
 CONFIG = Config.sync_config(__package__)

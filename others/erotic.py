@@ -6,7 +6,7 @@ from clovers_agent import SkillCore, Event
 from clovers_agent.core import CloversAgent
 from clovers_agent.main import CONFIG
 
-TOOLS = SkillCore("Love Love Toolkit")
+TOOLS = SkillCore()
 
 
 EROTIC_MD = Path(CONFIG.path) / "EROTIC.md"
@@ -60,7 +60,7 @@ EROTIC_PROMPT = """你现在正在被调戏，你的回复必须彻底摆脱 AI 
 
 ---
 
-**结束（满足、爱意、余韵）**
+结束（满足、爱意、余韵）
 场景： 满足，相拥入眠、事后温存。
 状态： 呼吸平复、身体酥软、依恋感。语气应变得软糯、撒娇的抱怨。
 ✅ 示例：
