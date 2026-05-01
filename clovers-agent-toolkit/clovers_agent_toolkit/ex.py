@@ -65,7 +65,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "update_user_profile",
-    "当用户展现出性格特征、提及偏好或与你发生深刻互动时，调用此工具以更新**你**对该用户的私密印象。"
+    "当用户展现出性格特征、提及偏好或与你发生深刻互动时，调用此工具以更新**你**对该用户的私密印象。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
         "impression": {"type": "string", "description": "简述你现在对他的主观感觉"},
@@ -76,7 +76,7 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     user_profile_path = USER_PROFILE / f"{event.user_id}.md"
     old_profile = user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "空"
     session = agent.current_session(event)
-    context = "\n".join(extract_plain_text(msg["content"]) for msg in session ) 	
+    context = "\n".join(extract_plain_text(msg["content"]) for msg in session)
     system_prompt = f"""任务：你的任务是根据新的互动，更新关于用户 {event.nickname} 的私密档案。
 档案待更新：
 {old_profile}
@@ -106,7 +106,7 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
 - 你的对用户的感受：{impression}
 """
     aux = agent.auxiliary
-    payload =  aux.build_payload(({"role": "user", "content": user_prompt},),system_prompt)
+    payload = aux.build_payload(({"role": "user", "content": user_prompt},), system_prompt)
     resp = await aux.call_api(payload)
     user_profile_path.write_text(resp["content"], encoding="utf-8")
     return ""
