@@ -3,8 +3,7 @@ import httpx
 from clovers.logger import logger
 from collections.abc import Iterable
 from .utils import data_url
-from .typing import Message, AssistantMessage, Payload
-from .typing.message import ContentSegment
+from .typing import Message, UserMessage, AssistantMessage, Payload
 from .config import OpenAIConfig
 
 
@@ -17,16 +16,16 @@ class OpenAIAPI:
         self.extra_body = config.extra_body
 
     @staticmethod
-    def build_content(text: str, image_list: list[str] | None) -> str | list[ContentSegment]:
+    def build_message(text: str, image_list: list[str] | None) -> UserMessage:
         if not image_list:
-            return text
+            return {"role": "user", "content": text}
         else:
             content = []
             if text:
                 content.append({"type": "text", "text": text})
             if image_list:
                 content.extend({"type": "image_url", "image_url": {"url": image_url}} for image_url in image_list)
-            return content
+            return {"role": "user", "content": content}
 
     def build_payload(self, context: Iterable[Message] | None = None, system_prompt: str | None = None) -> Payload:
         payload: Payload = {"model": self.model, "messages": [], **self.extra_body}  # type: ignore 这里允许额外请求体

@@ -39,24 +39,28 @@ class ContextRecoder:
 class Session(ContextRecoder):
     type Storge = deque[tuple[UserMessage, AssistantMessage, int | float]]
     records: Storge
+    silence: deque[tuple[str, int | float]]
     storage: Storge
     unimp_storage: Storge
-    silence: deque[tuple[str, int | float]]
     snap: ContextRecoder
     extra: dict
 
     def __init__(self, size: int, sentence_model: SentenceTransformer) -> None:
+        # 标准记录
         super().__init__(size)
         self.silence = deque()
+        # 临时记录
         self.snap = ContextRecoder(size)
+        # 状态
         self.skill_menu: str | None = None
         self.current_input: UserMessage | None = None
-        self.decoupler = TopicDecoupler(sentence_model)
         self.extra = {}
-        self.unimp = False
+        # 不重要信息
         self.unimportant = False
         self.storage = self.records
         self.unimp_storage = deque(maxlen=2)
+        # 主题分离
+        self.decoupler = TopicDecoupler(sentence_model)
 
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""

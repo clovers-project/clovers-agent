@@ -47,7 +47,7 @@ if CONFIG.use_shell:
         "shell",
         "在工作区环境下执行命令",
         {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
-        "工作区工具",
+        "workspace",
     )
     async def _(agent: CloversAgent, event: Event, command: str):
         session_id = get_session_id(agent, event)
@@ -64,7 +64,7 @@ else:
         "ls",
         "查看工作区文件",
         {"path": {"type": "string", "description": "需要查看的目录路径"}},
-        "工作区工具",
+        "workspace",
     )
     async def _(agent: CloversAgent, event: Event, path: str):
         session_id = get_session_id(agent, event)
@@ -94,7 +94,7 @@ def read_text(file: Path):
     "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件上下文。"
     "在需要分析代码、检查配置文件时，尤其是需要查看多个文件时，应优先使用此工具以提高效率。",
     {"filepaths": {"type": "array", "description": "包含一个或多个文件路径的数组", "items": {"type": "string"}}},
-    "工作区工具",
+    "workspace",
 )
 async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
     session_id = get_session_id(agent, event)
@@ -121,7 +121,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
         "file_path": {"type": "string", "description": "需要写入的文件路径"},
         "file_content": {"type": "string", "description": "需要写入到文件的内容"},
     },
-    "工作区工具",
+    "workspace",
 )
 async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str):
     session_id = get_session_id(agent, event)
@@ -143,7 +143,7 @@ async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str
     "upload_file",
     "把文件上传给用户。注意助手工作区对用户不可见，如用户要求助手发送文件则必须使用此工具。",
     {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
-    "工作区工具",
+    "workspace",
 )
 async def _(agent: CloversAgent, event: Event, file_path: str):
     session_id = get_session_id(agent, event)
