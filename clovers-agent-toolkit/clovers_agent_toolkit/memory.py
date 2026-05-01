@@ -24,7 +24,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "write_note",
-    "记录关键信息与备忘。当**助手**认为上下文中出现了重要信息，或需要长期记录信息时**主动调用**",
+    "当**助手**认为上下文中出现了重要或需要长期记录信息时**主动调用**",
     {"content": {"type": "string", "description": "笔记内容。内容应为简洁清晰的陈述句。"}},
 )
 async def _(agent: CloversAgent, event: Event, content: str):
