@@ -61,6 +61,16 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self._skill_dirs = config.skill_dirs
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
 
+    def _load(self, package: str):
+        tools = super()._load(package)
+        if tools is None:
+            return
+        conflict = self.merge(tools)
+        if conflict:
+            logger.error(f'[{self.name}] "{package}" conflict with {conflict}')
+            return
+        logger.info(f'[{self.name}][TOOLS] "{package}" loaded')
+
     @staticmethod
     async def _skill_menu(agent: "CloversAgent", event: Event, category: str):
         tip = f"已获取技能：{category}"
@@ -109,12 +119,16 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         raise NotImplementedError
 
     async def summary_context(self, session: Session):
-        payload = self.build_payload(context=session)
-        payload["messages"].append({"role": "user", "content": "对以上对话进行总结，保留核心内容和结论，禁止输出除总结外的其他内容。"})
-        summary = (await self.call_api(payload))["content"].strip()
-        logger.info(f"[{self.name}][SUMMARY]")
-        logger.debug(summary)
-        return summary
+        payload = self.auxiliary.build_payload(context=session)
+        payload["messages"].append({"role": "user", "content": "对历史全部对话进行总结，保留核心内容和结论，禁止输出除总结外的其他内容。"})
+        try:
+            summary = (await self.auxiliary.call_api(payload))["content"].strip()
+            logger.info(f"[{self.name}][SUMMARY]")
+            logger.debug(summary)
+            return summary
+        except Exception as e:
+            logger.error(f"[{self.name}][SUMMARY] {e}")
+            return
 
     @staticmethod
     async def default_func(tool_call_id: str, content: str) -> tuple[ToolMessage, str]:
@@ -221,25 +235,21 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             session.silence.append((f"{head}{at}{event.message}", timestamp))
             return
         request = f"{head}{at}{body}"
-        image_list = await asyncio.gather(*(self.download_url(image) for image in event.image_list))
-        image_list = [image for image in image_list if image]
+        imagelist_task = asyncio.gather(*(self.download_url(image) for image in event.image_list))
         if session.lock.locked():
+            image_list = [image for image in await imagelist_task if image]
             return await self.aux_reply(session, {"role": "user", "content": self.auxiliary.build_content(request, image_list)})
         async with session.lock:
-            async with session.snap.lock:
-                session.memory_filter(timestamp - self.memory_timeout)
-                session.silence_filter(timestamp - self.topic_coldown)
-                session.silence.append((request, timestamp))
-                message = list(x[0] for x in session.silence)
-                message = "\n".join(message)
-                if session.step(message) and (summary := await self.summary_context(session)):
-                    session.clear()
-                    session.silence.append((summary, timestamp))
-                session.sync_snap()
-                session.snap.over(
-                    {"role": "user", "content": message},
-                    {"role": "system", "content": "任务正在执行，请稍等。"},
-                )
+            session.memory_filter(timestamp - self.memory_timeout)
+            session.silence_filter(timestamp - self.topic_coldown)
+            session.silence.append((request, timestamp))
+            message = list(x[0] for x in session.silence)
+            message = "\n".join(message)
+            session.sync_snap()
+            session.snap.over(
+                {"role": "user", "content": message},
+                {"role": "system", "content": "任务正在执行，请稍等。"},
+            )
             content: list[ContentSegment] = []
             if (call := event.call("flat_context")) and (flat_context := await call):
                 content.append({"type": "text", "text": "<引用上下文>"})
@@ -250,6 +260,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                         content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
                 content.append({"type": "text", "text": "</引用上下文>"})
             pure_content: list[ContentSegment] = [{"type": "text", "text": message}]
+            image_list = [image for image in await imagelist_task if image]
             pure_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list)
             content.extend(pure_content)
             session.current_input = {"role": "user", "content": content}  # 注入输入（可修改）
@@ -261,16 +272,9 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 return
             finally:
                 session.snap.clear()
+            if session.step(body) and (summary := await self.summary_context(session)):
+                session.clear()
+                session.silence.append((summary, timestamp))
             session.over({"role": "user", "content": pure_content}, {"role": "assistant", "content": resp}, timestamp)
             session.current_input = None
             return resp
-
-    def _load(self, package: str):
-        tools = super()._load(package)
-        if tools is None:
-            return
-        conflict = self.merge(tools)
-        if conflict:
-            logger.error(f'[{self.name}] "{package}" conflict with {conflict}')
-            return
-        logger.info(f'[{self.name}][TOOLS] "{package}" loaded')

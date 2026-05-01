@@ -54,6 +54,7 @@ class Session(ContextRecoder):
         self.decoupler = TopicDecoupler(sentence_model)
         self.extra = {}
         self.unimp = False
+        self.unimportant = False
         self.storage = self.records
         self.unimp_storage = deque(maxlen=2)
 

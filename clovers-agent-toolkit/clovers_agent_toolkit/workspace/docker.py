@@ -5,14 +5,13 @@ from docker.models.containers import Container
 from docker.errors import NotFound
 from pathlib import Path
 
-
-WORKSPACE = Path("workspace")
 client: docker.DockerClient | None = None
 
 
 class Shell:
 
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, workspace: Path):
+        self.workspace = workspace
         self.lock = asyncio.Lock()
         self.session_id = session_id
         self.workdir = "/workspace"
@@ -26,7 +25,7 @@ class Shell:
         async with self.lock:
             if self.container is None:
                 self.workdir = "/workspace"
-                workspace = WORKSPACE / self.session_id
+                workspace = self.workspace / self.session_id
                 if not workspace.exists():
                     workspace.mkdir(parents=True, exist_ok=True)
                 container_name = f"CloversAgentSandbox-{self.session_id}"
@@ -66,7 +65,7 @@ class Shell:
 
     def execute_thread(self, command: str):
         """运行命令,不输出被回车覆盖的行"""
-        exec_id = self.client.api.exec_create(self.container.id, command, workdir=self.workdir)  # type:ignore
+        exec_id = self.client.api.exec_create(self.container.id, command, workdir=self.workdir)  # type: ignore
         output_gen = self.client.api.exec_start(exec_id["Id"], stream=True)
         outputs: list[str] = []
         buffer: bytearray = bytearray()

@@ -1,5 +1,4 @@
-from clovers_agent import Event
-from clovers_agent.core import CloversAgent
+from clovers_agent import CloversAgent, Event
 from .toolkit import TOOLS, CONFIG
 
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY

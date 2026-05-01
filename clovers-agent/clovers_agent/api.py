@@ -42,9 +42,14 @@ class OpenAIAPI:
             logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
             logger.error(resp.text)
             resp.raise_for_status()
-        else:
-            logger.error(json.dumps(payload["messages"], indent=4, ensure_ascii=False))
-        return resp.json()["choices"][0]["message"]
+        try:
+            message = resp.json()["choices"][0]["message"]
+        except Exception as e:
+            logger.error(resp.text)
+            raise e
+        if "content" not in message:
+            raise ValueError(f"API returned an invalid response: {message}")
+        return message
 
     async def download_url(self, url: str):
         if not url.startswith("http"):

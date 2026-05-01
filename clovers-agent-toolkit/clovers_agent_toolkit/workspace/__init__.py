@@ -1,12 +1,12 @@
 from pathlib import Path
-from clovers_agent import Event
-from clovers_agent.core import CloversAgent
+from clovers_agent import CloversAgent, Event
+from clovers_agent.main import CONFIG as AGENT_CONFIG
 from clovers.logger import logger
-from .docker import WORKSPACE, Shell
+from .docker import Shell
 from ..toolkit import TOOLS, CONFIG
 
+WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
 README = WORKSPACE / "README.md"
-shell_dict: dict[str, Shell] = {}
 
 
 def get_session_id(agent: CloversAgent, event: Event) -> str: ...
@@ -17,8 +17,10 @@ if CONFIG.session_workspace:
 else:
     get_session_id = lambda agent, event: "public"
 
+shell_dict: dict[str, Shell] = {}
 
-@TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具")
+
+@TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
 async def _(agent: CloversAgent, event: Event):
     if not WORKSPACE.exists():
         WORKSPACE.mkdir(parents=True, exist_ok=True)
@@ -30,58 +32,13 @@ async def _(agent: CloversAgent, event: Event):
             shell_dict[session_id].workdir = "/workspace"
         else:
             try:
-                shell_dict[session_id] = Shell(session_id)
+                shell_dict[session_id] = Shell(session_id, WORKSPACE)
             except Exception as e:
                 logger.error(e)
                 return f"workspace 已初始化, shell 初始化失败，此工作区无法执行命令。\n当前工作目录: /workspace"
         return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
     else:
         return f"workspace 已初始化\n当前工作目录: /workspace"
-
-
-@TOOLS.hook
-async def _(agent: CloversAgent, event: Event):
-    session_id = get_session_id(agent, event)
-    note_file = WORKSPACE / session_id / "NOTE.md"
-    if not note_file.exists():
-        return ""
-    try:
-        note = note_file.read_text(encoding="utf-8")
-    except Exception as e:
-        note_file.unlink()
-        logger.error(f"笔记读取失败: {e}")
-        return ""
-    return f"笔记内容\n\n{note}\n"
-
-
-@TOOLS.register(
-    "write_note",
-    "记录信息。当用户与助手约定、提出长期要求、让助手记住某事、或有其他需要记录的信息时，必须调用此工具记录。",
-    {"content": {"type": "string", "description": "笔记内容。内容应精炼为陈述句，去除口语化修饰。"}},
-)
-async def _(agent: CloversAgent, event: Event, content: str):
-    session_id = get_session_id(agent, event)
-    note_file = WORKSPACE / session_id / "NOTE.md"
-    note_file.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        if not note_file.exists() or not (note := note_file.read_text(encoding="utf-8")):
-            note_file.write_text(content, encoding="utf-8")
-            return "笔记已更新。"
-        aux = agent.auxiliary
-        payload = aux.build_payload(
-            ({"role": "user", "content": "\n".join(note) + "\n" + content},),
-            "你是一个专业的笔记整理助手。请按以下规则处理用户输入的文本：\n"
-            "1. 每行仅记录一件事，同一信息严禁跨行记录，严禁使用序号、列表或任何 Markdown 格式。\n"
-            "2. 合并含义重复或相近的记录，剔除冗余内容。\n"
-            "3. 若记录内容相互矛盾，仅顺序靠后的那条，严禁提及未保留的内容。\n"
-            "4. 仅输出整理后的纯文本内容，不对有效信息进行额外的解释、总结或扩充。",
-        )
-        new_note = await aux.call_api(payload)
-        note_file.write_text(new_note["content"], encoding="utf-8")
-        return "笔记已更新。"
-    except Exception as e:
-        logger.error(e)
-        return f"笔记更新失败。"
 
 
 if CONFIG.use_shell:
@@ -184,7 +141,7 @@ async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str
 
 @TOOLS.register(
     "upload_file",
-    "把文件上传给用户。工作区对用户透明，如用户要求助手发送文件则必须使用此工具。",
+    "把文件上传给用户。注意助手工作区对用户不可见，如用户要求助手发送文件则必须使用此工具。",
     {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
     "工作区工具",
 )

@@ -190,7 +190,7 @@ def parse_skill(skill_path: Path) -> SkillMD | None:
         name = skill["name"]
         desc = skill["description"]
         parameters: SkillCore.Parameters | None = skill.get("parameters")  # type: ignore
-        content = skill.content
+        content = skill.content.strip()
     except Exception as e:
         logger.exception(e)
         return
