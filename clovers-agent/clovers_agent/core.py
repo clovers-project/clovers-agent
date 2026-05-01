@@ -1,3 +1,4 @@
+import time
 import json
 import asyncio
 import httpx
@@ -6,6 +7,7 @@ from datetime import datetime
 from clovers.core import ModuleLoader
 from clovers.logger import logger
 from clovers_client import Event as BaseEvent
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI
 from .skill import SkillCore
 from .session import Session
@@ -24,7 +26,7 @@ class Event(BaseEvent, Protocol):
 class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     """OpenAI API"""
 
-    def __init__(self, name: str, async_client: httpx.AsyncClient, config: Config) -> None:
+    def __init__(self, name: str, async_client: httpx.AsyncClient, scheduler: AsyncIOScheduler, config: Config) -> None:
         OpenAIAPI.__init__(self, async_client, config.primary)
         ModuleLoader.__init__(self, ["TOOLS"], SkillCore)
         self.name = name
@@ -44,6 +46,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             logger.info(f"[{self.name}] 已关闭")
             self.check = lambda e: False
         # 模型设置
+        self.scheduler = scheduler
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.style_prompt = config.style_prompt
         self.base_prompt = config.base_prompt
@@ -60,6 +63,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self._plugin_dirs = config.plugin_dirs
         self._skill_dirs = config.skill_dirs
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
+        self.scheduler.add_job(self.session_clear, trigger="cron", hour="*/8", misfire_grace_time=120)
 
     def _load(self, package: str):
         tools = super()._load(package)
@@ -113,6 +117,12 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()
+
+    def session_clear(self):
+        timeout = time.time() - self.memory_timeout
+        sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.records[-1][2] < timeout)
+        for sessions_id in sessions_ids:
+            del self.sessions[sessions_id]
 
     @staticmethod
     def check(e: Event) -> bool:
@@ -221,8 +231,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         return (await self.auxiliary.call_api(payload))["content"].strip()
 
     async def chat(self, event: Event):
-        now = datetime.now()
-        timestamp = int(now.timestamp())
+        timestamp = time.time()
+        now = datetime.fromtimestamp(timestamp)
         session = self.current_session(event)
         session.extra[event.user_id] = event.nickname
         head = f"{event.nickname}[{now.strftime("%I:%M %p")}]"

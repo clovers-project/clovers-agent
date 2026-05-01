@@ -59,24 +59,23 @@ USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 async def _(agent: CloversAgent, event: Event):
     user_profile = USER_PROFILE / f"{event.user_id}.md"
     if not user_profile.exists():
-        return ""
+        return f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前未对此用户建立档案，请在上下文充足时调用 `update_user_profile` 工具"
     return f"当前关注：\n\n{user_profile.read_text(encoding='utf-8')}"
 
 
 @TOOLS.register(
     "update_user_profile",
-    "更新用户画像。当用户展现出性格特征、提及偏好或与你发生深刻互动时"
-    "或出现可以修正或深化你对用户情感与认知的语境时"
-    "主动调用此工具以更新**你**对该用户的私密印象。",
+    "更新用户画像。当用户展现出性格特征、提及偏好或与你发生深刻互动时或出现可以修正或深化你对用户情感与认知的语境时"
+    "**主动调用此工具**以更新你对用户专属认知与记录。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
-        "impression": {"type": "string", "description": "简述你现在对他的主观感觉"},
+        "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},
     },
 )
 async def _(agent: CloversAgent, event: Event, observation: str, impression: str):
     USER_PROFILE.mkdir(parents=True, exist_ok=True)
     user_profile_path = USER_PROFILE / f"{event.user_id}.md"
-    old_profile = user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "空"
+    old_profile = user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "无"
     session = agent.current_session(event)
     context = "\n".join(extract_plain_text(msg["content"]) for msg in session)
     system_prompt = f"""任务：你的任务是根据新的互动，更新关于用户 {event.nickname} 的私密档案。
@@ -84,13 +83,16 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
 {old_profile}
 
 要求：
-结合档案与触发点，输出一份 Markdown 格式的档案。不要写废话。
-请按以下维度更新：
+合并重复项，如果新旧记录冲突，以触发点为准。
+由于合并与冲突删除的信息及触发点要求删除的信息请确保不留任何痕迹。
+
+结合档案与触发点，按以下维度更新：
 # 用户档案：[用户昵称]
 
 - **称呼**：(我怎么称呼对方)
 - **标签**：(一个或几个标签)
 - **约定**：(与用户有没有约定)
+- **偏好**：(话题、语言风格、观点等)
 - **印象**：(对该用户的印象)
 - **关系**：(目前与用户的关系怎么样)
 ... (额外维度，请自行添加)

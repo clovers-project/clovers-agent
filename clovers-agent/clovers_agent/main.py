@@ -4,12 +4,13 @@ if not __package__:
 import httpx
 from clovers import Plugin, Result
 from clovers_client import Event as EventProtocol
+from clovers_apscheduler import scheduler
 from .core import Event, CloversAgent
 from .config import Config
 
 ASYNC_CLIENT = httpx.AsyncClient(timeout=300)
 CONFIG = Config.sync_config(__package__)
-AGENT = CloversAgent("CloversAgent", ASYNC_CLIENT, CONFIG)
+AGENT = CloversAgent("CloversAgent", ASYNC_CLIENT, scheduler, CONFIG)
 
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
