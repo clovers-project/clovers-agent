@@ -37,8 +37,8 @@ class OpenAIAPI:
 
     async def call_api(self, payload: Payload) -> AssistantMessage:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
+        logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
         if resp.status_code != 200:
-            logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
             logger.error(resp.text)
             resp.raise_for_status()
         try:
@@ -47,7 +47,7 @@ class OpenAIAPI:
             logger.error(resp.text)
             raise e
         if "content" not in message and "tool_calls" not in message:
-            raise ValueError(f"API returned an invalid response: {message}")
+            raise ValueError(f"API returned an invalid response: {resp.text}")
         return message
 
     async def download_url(self, url: str):
