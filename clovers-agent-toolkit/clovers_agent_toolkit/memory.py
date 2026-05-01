@@ -24,7 +24,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "write_note",
-    "记录信息。当用户与助手约定、提出长期要求、让助手记住某事、或有其他需要记录的信息时，必须调用此工具记录。",
+    "记录关键信息与备忘。当**助手**认为上下文中出现了重要信息，或需要长期记录信息时**主动调用**",
     {"content": {"type": "string", "description": "笔记内容。内容应为简洁清晰的陈述句。"}},
 )
 async def _(agent: CloversAgent, event: Event, content: str):
@@ -65,7 +65,9 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "update_user_profile",
-    "当用户展现出性格特征、提及偏好或与你发生深刻互动时，调用此工具以更新**你**对该用户的私密印象。",
+    "更新用户画像。当用户展现出性格特征、提及偏好或与你发生深刻互动时"
+    "或出现可以修正或深化你对用户情感与认知的语境时"
+    "主动调用此工具以更新**你**对该用户的私密印象。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
         "impression": {"type": "string", "description": "简述你现在对他的主观感觉"},
