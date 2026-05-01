@@ -54,6 +54,7 @@ class Session(ContextRecoder):
         # 状态
         self.skill_menu: str | None = None
         self.current_input: UserMessage | None = None
+        self.interim_message: SystemMessage | None = None
         self.extra = {}
         # 不重要信息
         self.unimportant = False

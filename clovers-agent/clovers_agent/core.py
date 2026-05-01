@@ -53,6 +53,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.base_prompt = config.base_prompt
         self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
+        self.interim_prompt = config.interim_prompt
         self.memory_size = config.memory_size
         self.memory_timeout = config.memory_timeout
         self.topic_coldown = config.topic_coldown
@@ -124,6 +125,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.records[-1][2] < timeout)
         for sessions_id in sessions_ids:
             del self.sessions[sessions_id]
+        logger.info(f"[{self.name}][SESSIONS_CLEAR]")
 
     @staticmethod
     def check(e: Event) -> bool:
@@ -170,17 +172,17 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             self.sessions[session_id] = Session(self.memory_size, self.sentence_model)
         return self.sessions[session_id]
 
-    async def aux_reply(self, session: Session, text: str, images: list[str] | None = None):
+    async def interim_reply(self, session: Session, text: str, images: list[str] | None = None):
         async with session.snap.lock:
-            aux = self.auxiliary
-            message = aux.build_message(text, images)
+            message = self.build_message(text, images)
             system_prompt = f"{self.style_prompt}\n{self.base_prompt}\n{self.chat_prompt}"
-            payload = aux.build_payload((*session.snap, message), system_prompt)
-            reply = (await aux.call_api(payload))["content"].strip()
+            payload = self.build_payload((*session.snap, message), system_prompt)
+            reply = (await self.call_api(payload))["content"].strip()
             if session.lock.locked():
-                notice = session.snap.records[-1][1]
-                if not notice["content"]:
-                    notice["content"] = "任务正在执行，请稍等。"
+                interim_message = session.snap.records[-1][1]
+                if interim_message["role"] == "system" and not interim_message["content"]:
+                    interim_message["content"] = self.interim_prompt
+                    session.interim_message = interim_message
                 session.snap.over(message, {"role": "assistant", "content": reply})
                 return reply
 
@@ -233,10 +235,14 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             api = self.auxiliary if session.unimportant else self
             system_message["content"] = system_prompt
             result = (await api.call_api(api.build_payload(payload["messages"])))["content"].strip()
-        if not session.snap.records[-1][1]["content"]:
+        if not session.interim_message:
             return result
+        session.interim_message["content"] = "[正在执行用户任务]"
         aux = self.auxiliary
-        result = f"请以你的语气风格完整复述如下内容：\n\n{result}" if result else f"请告知用户任务执行失败"
+        if result:
+            result = f"[用户任务执行完毕]请以你的语气风格完整复述如下内容：\n\n{result}"
+        else:
+            result = "[用户任务执行完毕]请告知用户任务执行失败"
         payload = aux.build_payload((*session.snap, {"role": "system", "content": result}), system_prompt)
         return (await aux.call_api(payload))["content"].strip()
 
@@ -264,7 +270,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 return
             if session.snap.lock.locked():
                 return
-            return await self.aux_reply(session, request, image_list)
+            return await self.interim_reply(session, request, image_list)
         async with session.lock:
             session.memory_filter(timestamp - self.memory_timeout)
             session.silence_filter(timestamp - self.topic_coldown)
