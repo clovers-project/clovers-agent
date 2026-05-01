@@ -47,7 +47,7 @@ class OpenAIAPI:
         except Exception as e:
             logger.error(resp.text)
             raise e
-        if "content" not in message:
+        if "content" not in message and "tool_calls" not in message:
             raise ValueError(f"API returned an invalid response: {message}")
         return message
 
