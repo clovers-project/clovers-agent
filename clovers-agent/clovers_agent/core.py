@@ -44,22 +44,23 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         else:
             logger.info(f"[{self.name}] 已关闭")
             self.check = lambda e: False
-        # 模型设置
-        self.scheduler = scheduler
-        self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
+        # 文件
+        path = Path(config.path)
+        self.payload_dir = path / "payloads"
+        self.prompts_dir = path / "prompts"
         self.style_prompt = config.style_prompt
         self.base_prompt = config.base_prompt
         self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
         self.wait_prompt = config.wait_prompt
+        # 模型设置
+        self.scheduler = scheduler
+        self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.memory_size = config.memory_size
         self.memory_timeout = config.memory_timeout
         self.topic_coldown = config.topic_coldown
         self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
         self.sessions: dict[str, Session] = {}
-        # 文件
-        path = Path(config.path)
-        self.payload_dir = path / "payloads"
         # 注册技能
         self.skills = tuple()
         self._plugins = config.plugins
@@ -78,6 +79,16 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             return
         logger.info(f'[{self.name}][TOOLS] "{package}" loaded')
 
+    @staticmethod
+    def load_prompt(md: Path, default_prompt: str):
+        if not md.exists():
+            prompt = md.read_text("utf-8")
+        else:
+            prompt = default_prompt
+            md.parent.mkdir(parents=True, exist_ok=True)
+            md.write_text(prompt, encoding="utf-8")
+        return prompt
+
     def skill_init(self):
         SkillCore.__init__(self)
         self.register(
@@ -88,6 +99,16 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()
+        readme_md = self.prompts_dir / "README.md"
+        if readme_md.exists():
+            return
+        if not self.prompts_dir.exists():
+            readme_md.write_text(f"若删除 README.md 则从 {self.prompts_dir.as_posix()} 读取 prompt 配置", encoding="utf-8")
+        self.style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", self.style_prompt)
+        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", self.base_prompt)
+        self.chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", self.chat_prompt)
+        self.call_prompt = self.load_prompt(self.prompts_dir / "CALL.md", self.call_prompt)
+        self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", self.wait_prompt)
 
     def sync_menu(self):
         for skill in self.skills:
