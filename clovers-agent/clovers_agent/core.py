@@ -53,6 +53,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
         self.wait_prompt = config.wait_prompt
+        self.summary_prompt = config.summary_prompt
         # 模型设置
         self.scheduler = scheduler
         self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
@@ -81,11 +82,10 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
 
     @staticmethod
     def load_prompt(md: Path, default_prompt: str):
-        if not md.exists():
+        if md.exists():
             prompt = md.read_text("utf-8")
         else:
             prompt = default_prompt
-            md.parent.mkdir(parents=True, exist_ok=True)
             md.write_text(prompt, encoding="utf-8")
         return prompt
 
@@ -103,6 +103,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         if readme_md.exists():
             return
         if not self.prompts_dir.exists():
+            self.prompts_dir.mkdir(parents=True, exist_ok=True)
             readme_md.write_text(f"删除 README.md 则会从 {self.prompts_dir.as_posix()} 读取 prompt 配置", encoding="utf-8")
         else:
             logger.info(f"[{self.name}][LOADING PROMPTS]")
@@ -111,6 +112,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", self.chat_prompt)
         self.call_prompt = self.load_prompt(self.prompts_dir / "CALL.md", self.call_prompt)
         self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", self.wait_prompt)
+        self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", self.summary_prompt)
 
     def sync_menu(self):
         for skill in self.skills:
@@ -146,8 +148,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
 
     async def summary_context(self, session: Session):
         aux = self.auxiliary
-        content = "对历史全部对话进行详细总结，保留核心内容和结论，禁止输出除总结外的其他内容。"
-        payload = aux.build_payload(context=(*session, {"role": "user", "content": content}))
+        payload = aux.build_payload(context=(*session, {"role": "user", "content": self.summary_prompt}))
         try:
             summary = (await aux.call_api(payload))["content"].strip()
             logger.info(f"[{self.name}][SUMMARY]")
