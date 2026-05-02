@@ -10,5 +10,5 @@ class Config(BaseConfig):
     """是否使用shell"""
     session_workspace: bool = True
     """为每个会话创建一个工作空间"""
-    note_similarity_threshold: float = 0.78
+    note_similarity_threshold: float = 0.6
     """笔记内容相似度阈值"""
