@@ -1,6 +1,5 @@
-from .message import Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage
+from .message import Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage, ToolCallInfo
 from .payload import FunctionToolInfo, Payload
-
 
 __all__ = [
     "Message",
@@ -8,7 +7,7 @@ __all__ = [
     "UserMessage",
     "AssistantMessage",
     "ToolMessage",
-    "ToolMessage",
+    "ToolCallInfo",
     "FunctionToolInfo",
     "Payload",
 ]

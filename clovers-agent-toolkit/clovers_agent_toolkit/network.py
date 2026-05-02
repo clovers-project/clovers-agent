@@ -64,7 +64,5 @@ async def _(agent: CloversAgent, event: Event, image_url: str):
     session = agent.current_session(event)
     if not session.current_input:
         return "图片查看失败"
-    if isinstance(session.current_input["content"], str):
-        session.current_input["content"] = [{"type": "text", "text": session.current_input["content"]}]
-    session.current_input["content"].append({"type": "image_url", "image_url": {"url": image_url}})
+    session.current_input.append({"type": "image_url", "image_url": {"url": image_url}})
     return "图片已放入用户上下文"

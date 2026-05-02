@@ -44,4 +44,19 @@ class ToolMessage(TypedDict):
     tool_call_id: str
 
 
+class ToolCallFunction(TypedDict):
+    """工具调用函数"""
+
+    name: str
+    arguments: str
+
+
+class ToolCallInfo(TypedDict):
+    """工具调用"""
+
+    id: str
+    type: Literal["function"]
+    function: ToolCallFunction
+
+
 type Message = UserMessage | AssistantMessage | SystemMessage | ToolMessage

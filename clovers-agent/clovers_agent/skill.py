@@ -12,8 +12,8 @@ from .typing.json_schema import JSONSchemaType
 if TYPE_CHECKING:
     from .core import CloversAgent
 
-type AgentFunction[**P] = Callable[Concatenate[CloversAgent, Any, P], Coroutine[Any, Any, str] | str]
-type WrappedAgentFunction[**P] = Callable[Concatenate[str, CloversAgent, Any, P], Coroutine[Any, Any, tuple[ToolMessage, str]]]
+type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Any, P], Coroutine[Any, Any, str] | str]
+type WrappedToolFunction[**P] = Callable[Concatenate[str, CloversAgent, Any, P], Coroutine[Any, Any, ToolMessage]]
 type SkillMD = tuple[str, str, SkillCore.Parameters | None, str]
 
 
@@ -24,9 +24,9 @@ class SkillCore:
         self.category_id = count()
         self.intro_tools: list[FunctionToolInfo] = []
         self.manifest: dict[str, FunctionToolInfo] = {}
-        self.chat_hooks: list[AgentFunction] = []
-        self.category_hooks: dict[str, AgentFunction] = {}
-        self.invoker: dict[str, WrappedAgentFunction] = {}
+        self.chat_hooks: list[ToolFunction] = []
+        self.category_hooks: dict[str, ToolFunction] = {}
+        self.invoker: dict[str, WrappedToolFunction] = {}
         self.__map_category_to_id: dict[str, int] = {}
         self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
         self.categories: dict[str, str] = {}
@@ -41,13 +41,13 @@ class SkillCore:
             raise ValueError(f"Category {category} already exists")
         self.categories[category] = description
 
-        def decorator(func: AgentFunction) -> AgentFunction:
+        def decorator(func: ToolFunction) -> ToolFunction:
             self.category_hooks[category] = func
             return func
 
         return decorator
 
-    def hook(self, func: AgentFunction):
+    def hook(self, func: ToolFunction):
         self.chat_hooks.append(func)
         return func
 
@@ -63,19 +63,20 @@ class SkillCore:
         info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
         if parameters:
             info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
-        # info 是 OpneAI API 要求的 tools 字段中元素的格式
-        if not category:
-            self.intro_tools.append(info)
-        else:
-            category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
-            self.__map_category_to_id[category] = category_id
-            if category_id not in self.__map_id_to_tools:
-                self.__map_id_to_tools[category_id] = []
-            self.__map_id_to_tools[category_id].append(info)
-        self.manifest[name] = info
 
-        def decorator(func: AgentFunction) -> WrappedAgentFunction:
-            async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs):
+        # info 是 OpneAI API 要求的 tools 字段中元素的格式
+        def decorator(func: ToolFunction) -> WrappedToolFunction:
+            if not category:
+                self.intro_tools.append(info)
+            else:
+                category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
+                self.__map_category_to_id[category] = category_id
+                if category_id not in self.__map_id_to_tools:
+                    self.__map_id_to_tools[category_id] = []
+                self.__map_id_to_tools[category_id].append(info)
+            self.manifest[name] = info
+
+            async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs) -> ToolMessage:
                 logger.info(f"[{agent.name}][CALL][{name}] called")
                 logger.debug(kwargs)
                 try:
@@ -84,8 +85,7 @@ class SkillCore:
                     logger.exception(e)
                     content = "Error"
                 logger.debug(f"[{name}][RETURNED] {content}")
-                message: ToolMessage = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
-                return message, name
+                return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
 
             self.invoker[name] = wrapper
             return wrapper
@@ -134,7 +134,7 @@ class SkillCore:
             del self.invoker[name]
             # 不清除 category_id
 
-    def load_skill_md(self, skill: SkillMD, category: str | None = None, func: AgentFunction | None = None):
+    def load_skill_md(self, skill: SkillMD, category: str | None = None, func: ToolFunction | None = None):
         name, desc, parameters, content = skill
         register = self.register(name, desc, parameters, category)
         if skill_func := skill_wrapper(content, func):
@@ -176,7 +176,7 @@ def load_module_from_path(module_name: str, file: Path):
     return module
 
 
-def skill_wrapper(content: str, func: AgentFunction | None = None) -> AgentFunction | None:
+def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunction | None:
     if not content:
         return func
     if func:

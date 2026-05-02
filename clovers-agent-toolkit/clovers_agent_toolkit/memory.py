@@ -59,7 +59,7 @@ USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 async def _(agent: CloversAgent, event: Event):
     user_profile = USER_PROFILE / f"{event.user_id}.md"
     if not user_profile.exists():
-        return f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前未对此用户建立档案，请在上下文充足时调用 `update_user_profile` 工具"
+        return f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前尚无该用户档案。"
     return f"当前关注：\n\n{user_profile.read_text(encoding='utf-8')}"
 
 

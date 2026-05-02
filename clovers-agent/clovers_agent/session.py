@@ -1,7 +1,8 @@
 import asyncio
 from collections import deque
 from .embedding import SentenceTransformer, TopicDecoupler
-from .typing.message import UserMessage, AssistantMessage, SystemMessage, ContentSegment
+from .typing import Payload
+from .typing.message import UserMessage, AssistantMessage, ContentSegment
 
 
 def extract_plain_text(content: str | list[ContentSegment]) -> str:
@@ -15,7 +16,7 @@ def char_count(content: str | list[ContentSegment]):
 class ContextRecoder:
     """会话上下文管理器"""
 
-    records: deque[tuple[UserMessage | SystemMessage, AssistantMessage | SystemMessage]]
+    records: deque[tuple[UserMessage, AssistantMessage]]
 
     def __init__(self, size: int) -> None:
         self.records = deque(maxlen=size)
@@ -29,7 +30,7 @@ class ContextRecoder:
     def __bool__(self):
         return bool(self.records)
 
-    def over(self, request: UserMessage | SystemMessage, reply: AssistantMessage | SystemMessage):
+    def over(self, request: UserMessage, reply: AssistantMessage):
         self.records.append((request, reply))
 
     def clear(self):
@@ -39,7 +40,7 @@ class ContextRecoder:
 class Session(ContextRecoder):
     type Storge = deque[tuple[UserMessage, AssistantMessage, int | float]]
     records: Storge
-    silence: deque[tuple[str, int | float]]
+    silence: deque[tuple[str, float]]
     storage: Storge
     unimp_storage: Storge
     snap: ContextRecoder
@@ -52,9 +53,6 @@ class Session(ContextRecoder):
         # 临时记录
         self.snap = ContextRecoder(size)
         # 状态
-        self.skill_menu: str | None = None
-        self.current_input: UserMessage | None = None
-        self.interim_message: SystemMessage | None = None
         self.extra = {}
         # 不重要信息
         self.unimportant = False
@@ -79,7 +77,22 @@ class Session(ContextRecoder):
         count = sum(char_count(msg["content"]) for msg in self)
         return count > 800
 
-    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
+    def activate(self, model: str, content: list[ContentSegment]):
+        self.current_input = content  # 注入输入（可修改）
+        self.is_first_wait: bool = True
+        self.used: set[str] = set()
+        self.payload: Payload = {"model": model, "messages": [{"role": "system"}, *self, {"role": "user", "content": self.current_input}]}  # type: ignore
+        self.skill_menu: str | None = None
+
+    def inactivate(self):
+        self.snap.clear()
+        del self.current_input
+        del self.is_first_wait
+        del self.payload
+        del self.used
+        del self.skill_menu
+
+    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
         if self.unimportant:
             self.records = self.unimp_storage
