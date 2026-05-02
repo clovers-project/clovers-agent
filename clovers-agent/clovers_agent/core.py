@@ -103,7 +103,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         if readme_md.exists():
             return
         if not self.prompts_dir.exists():
-            readme_md.write_text(f"若删除 README.md 则从 {self.prompts_dir.as_posix()} 读取 prompt 配置", encoding="utf-8")
+            readme_md.write_text(f"删除 README.md 则会从 {self.prompts_dir.as_posix()} 读取 prompt 配置", encoding="utf-8")
         self.style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", self.style_prompt)
         self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", self.base_prompt)
         self.chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", self.chat_prompt)
