@@ -29,7 +29,7 @@ class ContextRecoder:
     def __bool__(self):
         return bool(self.records)
 
-    def over(self, request: UserMessage | SystemMessage, reply: AssistantMessage | SystemMessage):
+    def over(self, request: UserMessage, reply: AssistantMessage | SystemMessage):
         self.records.append((request, reply))
 
     def clear(self):
@@ -39,7 +39,7 @@ class ContextRecoder:
 class Session(ContextRecoder):
     type Storge = deque[tuple[UserMessage, AssistantMessage, int | float]]
     records: Storge
-    silence: deque[tuple[str, int | float]]
+    silence: deque[tuple[str, float]]
     storage: Storge
     unimp_storage: Storge
     snap: ContextRecoder
@@ -79,7 +79,7 @@ class Session(ContextRecoder):
         count = sum(char_count(msg["content"]) for msg in self)
         return count > 800
 
-    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: int | float):
+    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
         if self.unimportant:
             self.records = self.unimp_storage

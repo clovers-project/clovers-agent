@@ -63,19 +63,20 @@ class SkillCore:
         info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
         if parameters:
             info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
-        # info 是 OpneAI API 要求的 tools 字段中元素的格式
-        if not category:
-            self.intro_tools.append(info)
-        else:
-            category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
-            self.__map_category_to_id[category] = category_id
-            if category_id not in self.__map_id_to_tools:
-                self.__map_id_to_tools[category_id] = []
-            self.__map_id_to_tools[category_id].append(info)
-        self.manifest[name] = info
 
+        # info 是 OpneAI API 要求的 tools 字段中元素的格式
         def decorator(func: AgentFunction) -> WrappedAgentFunction:
-            async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs):
+            if not category:
+                self.intro_tools.append(info)
+            else:
+                category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
+                self.__map_category_to_id[category] = category_id
+                if category_id not in self.__map_id_to_tools:
+                    self.__map_id_to_tools[category_id] = []
+                self.__map_id_to_tools[category_id].append(info)
+            self.manifest[name] = info
+
+            async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs) -> tuple[ToolMessage, str]:
                 logger.info(f"[{agent.name}][CALL][{name}] called")
                 logger.debug(kwargs)
                 try:
@@ -84,8 +85,7 @@ class SkillCore:
                     logger.exception(e)
                     content = "Error"
                 logger.debug(f"[{name}][RETURNED] {content}")
-                message: ToolMessage = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
-                return message, name
+                return {"role": "tool", "tool_call_id": tool_call_id, "content": content}, name
 
             self.invoker[name] = wrapper
             return wrapper
