@@ -78,11 +78,16 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             return
         logger.info(f'[{self.name}][TOOLS] "{package}" loaded')
 
-    @staticmethod
-    async def _skill_menu(agent: "CloversAgent", event: Event, category: str):
-        agent.current_session(event).skill_menu = category
-        hook = agent.category_hooks.get(category)
-        return (coro if isinstance(coro := hook(agent, event), str) else await coro) if hook else f"已获取技能：{category}"
+    def skill_init(self):
+        SkillCore.__init__(self)
+        self.register(
+            "skill_menu",
+            "获取更多技能，如果助手无法独自完成用户指令，则需要调用此方法获取更多技能。",
+            {"category": self._category_schema},
+        )(skill_menu)
+        self.load_from_list(self._plugins)
+        self.load_from_dirs(self._plugin_dirs)
+        self.sync_menu()
 
     def sync_menu(self):
         for skill in self.skills:
@@ -104,25 +109,6 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         logger.info(f"")
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
         self._category_schema["enum"] = list(self.categories.keys())
-
-    def skill_init(self):
-        SkillCore.__init__(self)
-        self.register(
-            "skill_menu",
-            "获取更多技能，如果助手无法独自完成用户指令，则需要调用此方法获取更多技能。",
-            {"category": self._category_schema},
-        )(self._skill_menu)
-
-        @self.register("system_test", "系统测试，包含一组系统测试任务。")
-        async def _(agent: "CloversAgent", event: Event):
-            print("测试任务开始执行")
-            await asyncio.sleep(10)
-            print("测试任务执行完毕")
-            return "系统测试通过"
-
-        self.load_from_list(self._plugins)
-        self.load_from_dirs(self._plugin_dirs)
-        self.sync_menu()
 
     def session_clear(self):
         timeout = time.time() - self.memory_timeout
@@ -216,11 +202,11 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         for _ in range(40):
             if result := await self.call_unit(session, event):
                 break
-        payload_file = self.payload_dir / self.session_id(event) / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
-        payload_file.parent.mkdir(parents=True, exist_ok=True)
-        with payload_file.open("w", encoding="utf-8") as f:
-            json.dump(session.payload, f, indent=4, ensure_ascii=False)
         if not result:
+            payload_file = self.payload_dir / self.session_id(event) / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            payload_file.parent.mkdir(parents=True, exist_ok=True)
+            with payload_file.open("w", encoding="utf-8") as f:
+                json.dump(session.payload, f, indent=4, ensure_ascii=False)
             raise TimeoutError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
         return result
 
@@ -282,3 +268,9 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             finally:
                 session.inactivate()
             return result
+
+
+async def skill_menu(agent: CloversAgent, event: Event, category: str):
+    agent.current_session(event).skill_menu = category
+    hook = agent.category_hooks.get(category)
+    return (coro if isinstance(coro := hook(agent, event), str) else await coro) if hook else f"已获取技能：{category}"

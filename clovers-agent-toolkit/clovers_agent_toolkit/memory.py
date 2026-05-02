@@ -59,14 +59,14 @@ USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 async def _(agent: CloversAgent, event: Event):
     user_profile = USER_PROFILE / f"{event.user_id}.md"
     if not user_profile.exists():
-        return f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前尚无该用户档案。"
+        return f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行第一次更新。"
     return f"当前关注：\n\n{user_profile.read_text(encoding='utf-8')}"
 
 
 @TOOLS.register(
     "update_user_profile",
-    "更新用户画像。当用户展现出性格特征、提及偏好或与你发生深刻互动时或出现可以修正或深化你对用户情感与认知的语境时"
-    "**主动调用此工具**以更新你对用户专属认知与记录。",
+    "更新用户画像。当用户展现出性格特征、人际关系、偏好或上下文中出现可以修正或深化现有文档的语境时"
+    "必须**主动调用此工具**以更新你对用户专属认知与记录。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
         "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},
