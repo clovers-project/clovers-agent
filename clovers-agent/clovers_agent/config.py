@@ -107,6 +107,7 @@ class Config(BaseConfig):
 """.strip()
     """中间提示 这是助手执行任务时，快速回复使用的提示"""
     summary_prompt: str = "对上述所有历史对话进行详细总结。保留所有的核心讨论内容与关键事实，禁止输出除总结内容以外的任何其他文字。"
+    """总结提示 这是总结上下文的用户提示词"""
     console_mode: bool = False
     """控制台模式"""
     whitelist: list[str] = []
