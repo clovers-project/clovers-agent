@@ -107,7 +107,6 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
             last = self.records[-1]
             messages.append(last[0])
             messages.append(last[1])
-        messages.append({"role": "user", "content": self.current_input})
         messages.extend(self.payload["messages"][mark * 2 + 1 :])
         self.payload["messages"] = messages
 

@@ -201,7 +201,8 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             except Exception as e:
                 session.payload["messages"].append({"role": "tool", "tool_call_id": call_info["id"], "content": str(e)})
         session.skill_menu = None
-        session.payload["messages"].extend(await asyncio.gather(*task_queue))
+        messages = await asyncio.gather(*task_queue)
+        session.payload["messages"].extend(messages)
         session.payload["tools"] = [self.manifest[k] for k in session.used]
         if category := session.skill_menu:
             session.payload["tools"].extend(x for x in self.select_tools(category) if x["function"]["name"] not in session.used)
