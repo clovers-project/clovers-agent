@@ -107,9 +107,7 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         if self._unimp:
             return
         self._unimp = True
-        if self.unimp_rec:
-            messages = self.unimp_rec[:2]
-        elif self.records:
+        if not self.unimp_rec and self.records:
             messages = self.records[-1][:2]
         else:
             messages = ()
