@@ -216,14 +216,18 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     async def execute_turn(self, session: Session, event: Event, extra_prompt: str = ""):
         prompts = [coro if isinstance(coro := hook(self, event), str) else await coro for hook in self.chat_hooks]
         prompts.append(extra_prompt)
-        unit_prompt = "\n".join(x for x in prompts if x)
-        style_prompt = "\n".join(x for x in (self.style_prompt, self.base_prompt, self.chat_prompt, unit_prompt) if x)
+        session.unit_prompt = "\n".join(x for x in prompts if x)
+        style_prompt = "\n".join(x for x in (self.style_prompt, self.base_prompt, self.chat_prompt, session.unit_prompt) if x)
         session.payload["messages"][0]["content"] = style_prompt
         if result := await self.call_unit(session, event):
             return result
-        if session.skill_menu:
-            session.payload["messages"][0]["content"] = "\n".join(x for x in (self.call_prompt, self.base_prompt, unit_prompt) if x)
+        elif session.skill_menu:
+            session.payload["messages"][0]["content"] = "\n".join(x for x in (self.call_prompt, self.base_prompt, session.unit_prompt) if x)
+
         for _ in range(40):
+            if session.chat_prompt:
+                session.payload["messages"][0]["content"] = session.chat_prompt
+                session.chat_prompt = ""
             if result := await self.call_unit(session, event):
                 break
         if not result:

@@ -13,10 +13,10 @@ def char_count(content: str | list[ContentSegment]):
     return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
 
 
-class ContextRecoder:
+class ContextRecoder[A, B, *Args]:
     """会话上下文管理器"""
 
-    records: deque[tuple[UserMessage, AssistantMessage]]
+    records: deque[tuple[A, B, *Args]]
 
     def __init__(self, size: int) -> None:
         self.records = deque(maxlen=size)
@@ -30,20 +30,17 @@ class ContextRecoder:
     def __bool__(self):
         return bool(self.records)
 
-    def over(self, request: UserMessage, reply: AssistantMessage):
-        self.records.append((request, reply))
+    def over(self, *args):
+        self.records.append(args)
 
     def clear(self):
         self.records.clear()
 
 
-class Session(ContextRecoder):
-    type Storge = deque[tuple[UserMessage, AssistantMessage, int | float]]
-    records: Storge
+class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
     silence: deque[tuple[str, float]]
-    storage: Storge
-    unimp_storage: Storge
-    snap: ContextRecoder
+    unimp_rec: tuple[UserMessage, AssistantMessage, float] | None
+    snap: ContextRecoder[UserMessage, AssistantMessage]
     extra: dict
 
     def __init__(self, size: int, sentence_model: SentenceTransformer) -> None:
@@ -56,9 +53,8 @@ class Session(ContextRecoder):
         self.extra = {}
         self.usage_counter = Counter[str]()
         # 不重要信息
-        self.unimportant = False
-        self.storage = self.records
-        self.unimp_storage = deque(maxlen=2)
+        self._unimp = False
+        self.unimp_rec = None
         # 主题分离
         self.decoupler = TopicDecoupler(sentence_model)
 
@@ -85,6 +81,8 @@ class Session(ContextRecoder):
         self.payload: Payload = {"model": model, "messages": [{"role": "system"}, *self, {"role": "user", "content": self.current_input}]}  # type: ignore
         self.skill_menu: str | None = None
         self.usage_counter.clear()
+        self.chat_prompt = ""
+        self.unit_prompt: str
 
     def inactivate(self):
         self.snap.clear()
@@ -93,23 +91,41 @@ class Session(ContextRecoder):
         del self.payload
         del self.used
         del self.skill_menu
+        del self.chat_prompt
+        del self.unit_prompt
+
+    def unimportant(self):
+        if self._unimp:
+            return
+        self._unimp = True
+        messages = [self.payload["messages"][0]]
+        mark = len(self.records)
+        if self.unimp_rec:
+            messages.append(self.unimp_rec[0])
+            messages.append(self.unimp_rec[1])
+        elif mark:
+            last = self.records[-1]
+            messages.append(last[0])
+            messages.append(last[1])
+        messages.append({"role": "user", "content": self.current_input})
+        messages.extend(self.payload["messages"][mark * 2 + 1 :])
+        self.payload["messages"] = messages
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
-        if self.unimportant:
-            self.records = self.unimp_storage
-            self.unimportant = False
-        elif self.unimp_storage:
-            self.storage.extend(self.unimp_storage)
-            self.unimp_storage.clear()
-            self.records = self.storage
-        self.records.append((request, reply, timestamp))
+        if self._unimp:
+            self.unimp_rec = (request, reply, timestamp)
+            self._unimp = False
+        else:
+            if self.unimp_rec:
+                self.records.append(self.unimp_rec)
+                self.unimp_rec = None
+            self.records.append((request, reply, timestamp))
         self.silence.clear()
 
     def clear(self):
         """清理记录"""
-        self.storage.clear()
-        self.unimp_storage.clear()
+        self.unimp_rec = None
         self.silence.clear()
 
     def sync_snap(self):
