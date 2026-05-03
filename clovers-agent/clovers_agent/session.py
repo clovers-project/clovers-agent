@@ -114,11 +114,11 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         if self._unimp:
             self.unimp_rec = (request, reply, timestamp)
             self._unimp = False
-            return
-        elif self.unimp_rec:
-            self.records.append(self.unimp_rec)
-            self.unimp_rec = None
-        self.records.append((request, reply, timestamp))
+        else:
+            if self.unimp_rec:
+                self.records.append(self.unimp_rec)
+                self.unimp_rec = None
+            self.records.append((request, reply, timestamp))
         self.silence.clear()
 
     def clear(self):
