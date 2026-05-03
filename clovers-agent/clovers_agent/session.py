@@ -40,11 +40,17 @@ class ContextRecoder[A, B, *Args]:
 
 class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
     silence: deque[tuple[str, float]]
-    unimp_rec: tuple[UserMessage, AssistantMessage, float] | None
+    unimp_rec: deque[tuple[UserMessage, AssistantMessage, float]]
     snap: ContextRecoder[UserMessage, AssistantMessage]
     extra: dict
 
-    def __init__(self, size: int, sentence_model: SentenceTransformer) -> None:
+    def __init__(
+        self,
+        size: int,
+        unimp_size: int,
+        decouple_size: int,
+        sentence_model: SentenceTransformer,
+    ) -> None:
         # 标准记录
         super().__init__(size)
         self.silence = deque()
@@ -55,9 +61,10 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         self.usage_counter = Counter[str]()
         # 不重要信息
         self._unimp = False
-        self.unimp_rec = None
+        self.unimp_rec = deque(maxlen=unimp_size)
         # 主题分离
         self.decoupler = TopicDecoupler(sentence_model)
+        self.decouple_size = decouple_size
 
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
@@ -70,19 +77,17 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
             self.silence.popleft()
 
     def step(self, message: str):
-        if not self.decoupler.step(message):
+        if sum(char_count(msg["content"]) for msg in self) < self.decouple_size:
             return False
-        count = sum(char_count(msg["content"]) for msg in self)
-        return count > 800
+        return self.decoupler.step(message)
 
     def activate(self, model: str, content: list[ContentSegment]):
         self.current_input = content  # 注入输入（可修改）
         self.is_first_wait: bool = True
         self.used: set[str] = set()
         self.payload: Payload = {"model": model, "messages": [{"role": "system"}, *self]}  # type: ignore
-        if self.unimp_rec:
-            self.payload["messages"].append(self.unimp_rec[0])
-            self.payload["messages"].append(self.unimp_rec[1])
+        for rec in self.unimp_rec:
+            self.payload["messages"].extend(rec[:2])
         self.payload["messages"].append({"role": "user", "content": self.current_input})
         self.skill_menu: str | None = None
         self.usage_counter.clear()
@@ -123,18 +128,18 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
         if self._unimp:
-            self.unimp_rec = (request, reply, timestamp)
+            self.unimp_rec.append((request, reply, timestamp))
             self._unimp = False
         else:
             if self.unimp_rec:
-                self.records.append(self.unimp_rec)
-                self.unimp_rec = None
+                self.records.extend(self.unimp_rec)
+                self.unimp_rec.clear()
             self.records.append((request, reply, timestamp))
         self.silence.clear()
 
     def clear(self):
         """清理记录"""
-        self.unimp_rec = None
+        self.unimp_rec.clear()
         self.silence.clear()
 
     def sync_snap(self):

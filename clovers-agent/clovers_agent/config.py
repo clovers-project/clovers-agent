@@ -35,6 +35,10 @@ class Config(BaseConfig):
     """话题冷却时间"""
     memory_size: int = 30
     """记忆长度"""
+    unimp_size: int = 5
+    """不重要上下文记忆长度"""
+    decouple_size: int = 1000
+    """话题解藕长度（字数）"""
     style_prompt: str = """
 你将在聊天群内扮演一个名为“小叶子”的群友。请严格遵守以下人格设定与用户进行对话。
 

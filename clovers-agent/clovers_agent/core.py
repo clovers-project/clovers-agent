@@ -54,14 +54,17 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.call_prompt = config.call_prompt
         self.wait_prompt = config.wait_prompt
         self.summary_prompt = config.summary_prompt
-        # 模型设置
-        self.scheduler = scheduler
-        self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
-        self.memory_size = config.memory_size
+        # 配置
         self.memory_timeout = config.memory_timeout
         self.topic_coldown = config.topic_coldown
-        self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
+        self.memory_size = config.memory_size
+        self.unimp_size = config.unimp_size
+        self.decouple_size = config.decouple_size
+        # 模型设置
         self.sessions: dict[str, Session] = {}
+        self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
+        self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
+        self.scheduler = scheduler
         # 注册技能
         self.skills = tuple()
         self._plugins = config.plugins
@@ -165,7 +168,12 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
     def current_session(self, event: Event):
         session_id = self.session_id(event)
         if session_id not in self.sessions:
-            self.sessions[session_id] = Session(self.memory_size, self.sentence_model)
+            self.sessions[session_id] = Session(
+                self.memory_size,
+                self.unimp_size,
+                self.decouple_size,
+                self.sentence_model,
+            )
         return self.sessions[session_id]
 
     async def wait_reply(self, session: Session, text: str, images: list[str] | None = None):
