@@ -105,7 +105,7 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         messages = [self.payload["messages"][0]]
         mark = len(self.records)
         if not self.unimp_rec and mark:
-            mark = -1
+            mark -= 1
         messages.extend(self.payload["messages"][mark * 2 + 1 :])
         self.payload["messages"] = messages
 
