@@ -2,8 +2,10 @@ if not __package__:
     raise RuntimeError("插件路径只能作为模块导入。")
 
 import httpx
+import asyncio
 from clovers import Plugin, Result
 from clovers_client import Event as EventProtocol
+from clovers_client.result import SegmentedResult, SegmentedMessage
 from clovers_apscheduler import scheduler
 from .core import Event, CloversAgent
 from .config import Config
@@ -27,6 +29,17 @@ PLUGIN.shutdown(ASYNC_CLIENT.aclose)
     priority=2,
     block=False,
 )
-async def _(event: Event):
+async def _(event: Event) -> SegmentedResult | None:
     result = await AGENT.chat(event)
-    return Result("text", result) if result else None
+    if result is None:
+        return None
+    return Result("segmented", format_message(result))
+
+
+async def format_message(result: str) -> SegmentedMessage:
+    for seg in result.split("\n"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        yield Result("text", seg)
+        await asyncio.sleep(min(1 + 0.12 * len(seg), 8))
