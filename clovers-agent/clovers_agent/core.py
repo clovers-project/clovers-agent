@@ -223,9 +223,6 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         if result := await self.call_unit(session, event):
             return result
         for _ in range(40):
-            if session.chat_prompt:
-                session.payload["messages"][0]["content"] = session.chat_prompt
-                session.chat_prompt = ""
             if result := await self.call_unit(session, event):
                 break
         if not result:
@@ -300,6 +297,6 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
 async def skill_menu(agent: CloversAgent, event: Event, category: str):
     session = agent.current_session(event)
     session.skill_menu = category
-    session.chat_prompt = "\n".join(x for x in (agent.call_prompt, agent.base_prompt, session.unit_prompt) if x)
+    session.system_message["content"] = "\n".join(x for x in (agent.call_prompt, agent.base_prompt, session.unit_prompt) if x)
     hook = agent.category_hooks.get(category)
     return (coro if isinstance(coro := hook(agent, event), str) else await coro) if hook else f"已获取技能：{category}"

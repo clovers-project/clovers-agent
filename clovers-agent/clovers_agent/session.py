@@ -1,8 +1,9 @@
 import asyncio
 from collections import deque, Counter
 from .embedding import SentenceTransformer, TopicDecoupler
-from .typing import Payload
-from .typing.message import UserMessage, AssistantMessage, ContentSegment
+from typing import Iterable
+from .typing import Payload, Message, UserMessage, AssistantMessage
+from .typing.message import ContentSegment
 
 
 def extract_plain_text(content: str | list[ContentSegment]) -> str:
@@ -85,8 +86,8 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         self.payload["messages"].append({"role": "user", "content": self.current_input})
         self.skill_menu: str | None = None
         self.usage_counter.clear()
-        self.chat_prompt = ""
         self.unit_prompt: str
+        self.mark = 0
 
     def inactivate(self):
         self.snap.clear()
@@ -95,19 +96,30 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         del self.payload
         del self.used
         del self.skill_menu
-        del self.chat_prompt
         del self.unit_prompt
+        del self.mark
+
+    @property
+    def system_message(self):
+        return self.payload["messages"][0]
 
     def unimportant(self):
         if self._unimp:
             return
         self._unimp = True
-        messages = [self.payload["messages"][0]]
-        mark = len(self.records)
-        if not self.unimp_rec and mark:
-            mark -= 1
-        messages.extend(self.payload["messages"][mark * 2 + 1 :])
-        self.payload["messages"] = messages
+        if self.unimp_rec:
+            messages = self.unimp_rec[:2]
+        elif self.records:
+            messages = self.records[-1][:2]
+        else:
+            messages = ()
+        self.replace_contaxt(messages)
+
+    def replace_contaxt(self, messags: Iterable[Message]):
+        mark = self.mark or (len(self.records) * 2 + 1)
+        self.payload["messages"] = [self.system_message, *messags]
+        self.mark = len(self.payload["messages"])
+        self.payload["messages"].extend(self.payload["messages"][mark:])
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
