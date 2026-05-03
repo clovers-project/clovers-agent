@@ -78,7 +78,11 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         self.current_input = content  # 注入输入（可修改）
         self.is_first_wait: bool = True
         self.used: set[str] = set()
-        self.payload: Payload = {"model": model, "messages": [{"role": "system"}, *self, {"role": "user", "content": self.current_input}]}  # type: ignore
+        self.payload: Payload = {"model": model, "messages": [{"role": "system"}, *self]}  # type: ignore
+        if self.unimp_rec:
+            self.payload["messages"].append(self.unimp_rec[0])
+            self.payload["messages"].append(self.unimp_rec[1])
+        self.payload["messages"].append({"role": "user", "content": self.current_input})
         self.skill_menu: str | None = None
         self.usage_counter.clear()
         self.chat_prompt = ""
@@ -100,13 +104,8 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         self._unimp = True
         messages = [self.payload["messages"][0]]
         mark = len(self.records)
-        if self.unimp_rec:
-            messages.append(self.unimp_rec[0])
-            messages.append(self.unimp_rec[1])
-        elif mark:
-            last = self.records[-1]
-            messages.append(last[0])
-            messages.append(last[1])
+        if not self.unimp_rec and mark:
+            mark = -1
         messages.extend(self.payload["messages"][mark * 2 + 1 :])
         self.payload["messages"] = messages
 
@@ -115,11 +114,11 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         if self._unimp:
             self.unimp_rec = (request, reply, timestamp)
             self._unimp = False
-        else:
-            if self.unimp_rec:
-                self.records.append(self.unimp_rec)
-                self.unimp_rec = None
-            self.records.append((request, reply, timestamp))
+            return
+        elif self.unimp_rec:
+            self.records.append(self.unimp_rec)
+            self.unimp_rec = None
+        self.records.append((request, reply, timestamp))
         self.silence.clear()
 
     def clear(self):
