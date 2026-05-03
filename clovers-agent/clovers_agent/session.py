@@ -1,5 +1,5 @@
 import asyncio
-from collections import deque
+from collections import deque, Counter
 from .embedding import SentenceTransformer, TopicDecoupler
 from .typing import Payload
 from .typing.message import UserMessage, AssistantMessage, ContentSegment
@@ -54,6 +54,7 @@ class Session(ContextRecoder):
         self.snap = ContextRecoder(size)
         # 状态
         self.extra = {}
+        self.usage_counter = Counter[str]()
         # 不重要信息
         self.unimportant = False
         self.storage = self.records
@@ -83,6 +84,7 @@ class Session(ContextRecoder):
         self.used: set[str] = set()
         self.payload: Payload = {"model": model, "messages": [{"role": "system"}, *self, {"role": "user", "content": self.current_input}]}  # type: ignore
         self.skill_menu: str | None = None
+        self.usage_counter.clear()
 
     def inactivate(self):
         self.snap.clear()

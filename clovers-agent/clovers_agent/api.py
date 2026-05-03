@@ -1,6 +1,7 @@
 import json
 import httpx
 from clovers.logger import logger
+from collections import Counter
 from collections.abc import Iterable
 from .utils import data_url
 from .typing import Message, UserMessage, AssistantMessage, Payload
@@ -35,14 +36,16 @@ class OpenAIAPI:
             payload["messages"].extend(context)
         return payload
 
-    async def call_api(self, payload: Payload) -> AssistantMessage:
+    async def call_api(self, payload: Payload, usage_counter: Counter[str]) -> AssistantMessage:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
         if resp.status_code != 200:
             logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
             logger.error(resp.text)
             resp.raise_for_status()
         try:
-            message = resp.json()["choices"][0]["message"]
+            data = resp.json()
+            usage_counter.update(data.get("usage", ""))
+            message = data["choices"][0]["message"]
         except Exception as e:
             logger.error(resp.text)
             raise e

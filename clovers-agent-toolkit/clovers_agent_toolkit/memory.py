@@ -54,7 +54,7 @@ async def _(agent: CloversAgent, event: Event, content: str):
         else:
             aux = agent.auxiliary
             payload = aux.build_payload(({"role": "user", "content": note + "\n" + content},), SCRIBE_PROMPT)
-            new_note = await aux.call_api(payload)
+            new_note = await aux.call_api(payload, agent.current_session(event).usage_counter)
             note_file.write_text(new_note["content"], encoding="utf-8")
         return "Done"
     except Exception as e:
@@ -132,6 +132,6 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     )
     aux = agent.auxiliary
     payload = aux.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
-    resp = await aux.call_api(payload)
+    resp = await aux.call_api(payload, session.usage_counter)
     user_profile_path.write_text(resp["content"], encoding="utf-8")
     return ""

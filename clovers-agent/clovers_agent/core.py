@@ -150,7 +150,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         aux = self.auxiliary
         payload = aux.build_payload(context=(*session, {"role": "user", "content": self.summary_prompt}))
         try:
-            summary = (await aux.call_api(payload))["content"].strip()
+            summary = (await aux.call_api(payload, session.usage_counter))["content"].strip()
             logger.info(f"[{self.name}][SUMMARY]")
             logger.debug(summary)
             return summary
@@ -182,7 +182,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 message = self.build_message(text, images)
             system_prompt = f"{self.style_prompt}\n{self.base_prompt}\n{self.chat_prompt}"
             payload = self.build_payload((*session.snap, message), system_prompt)
-            reply = (await self.call_api(payload))["content"].strip()
+            reply = (await self.call_api(payload, session.usage_counter))["content"].strip()
             if session.lock.locked():
                 session.snap.over(message, {"role": "assistant", "content": reply})
             return reply
@@ -207,7 +207,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             session.payload["tools"].extend(x for x in self.select_tools(category) if x["function"]["name"] not in session.used)
 
     async def call_unit(self, session: Session, event: Event):
-        message = await self.call_api(session.payload)
+        message = await self.call_api(session.payload, session.usage_counter)
         if not (tool_calls := message.get("tool_calls")):
             return message["content"]
         session.payload["messages"].append(message)
@@ -290,6 +290,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 logger.exception(e)
                 return
             finally:
+                logger.info(f"[{self.name}][USAGE] {session.usage_counter}")
                 session.inactivate()
             return result
 
