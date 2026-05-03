@@ -290,7 +290,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
                 logger.exception(e)
                 return
             finally:
-                logger.info(f"[{self.name}][USAGE] {session.usage_counter}")
+                logger.info(f"[{self.name}][USAGE] {dict(session.usage_counter)}")
                 session.inactivate()
             return result
 
