@@ -219,4 +219,4 @@ __marimo__/
 
 # hf
 models/
-prompt.py
+prompt-generator/config.toml

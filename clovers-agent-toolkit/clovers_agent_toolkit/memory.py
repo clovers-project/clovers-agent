@@ -110,7 +110,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "update_user_profile",
-    "更新用户画像。当用户展现出性格特征、人际关系、偏好或上下文中出现可以修正或深化现有文档的语境时"
+    "更新当前用户画像。当用户展现出性格、人际关系、偏好或上下文中出现可以修正或深化现有文档的语境时"
     "应调用此工具以更新你对用户专属认知与记录。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
@@ -123,20 +123,13 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     old_profile = user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "无"
     session = agent.current_session(event)
     context = "\n".join(extract_plain_text(msg["content"]) for msg in session)
-    user_prompt = f"""
-上下文：
-
-{context}
-
-档案待更新：
-
-{old_profile}
-
-触发点：
-
-- 观察到：{observation}
-- 你的对用户的感受：{impression}
-"""
+    user_prompt = (
+        f"上下文：\n\n{context}\n"
+        f"档案待更新：\n\n{old_profile}\n"
+        f"触发点：\n\n"
+        f"- 观察到：{observation}\n"
+        f"- 你的对用户的感受：{impression}"
+    )
     aux = agent.auxiliary
     payload = aux.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
     resp = await aux.call_api(payload)

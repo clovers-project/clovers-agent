@@ -185,7 +185,7 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
             reply = (await self.call_api(payload))["content"].strip()
             if session.lock.locked():
                 session.snap.over(message, {"role": "assistant", "content": reply})
-                return reply
+            return reply
 
     async def function_call(self, session: Session, event: Event, call_infos: list[ToolCallInfo]):
         task_queue = []
