@@ -116,10 +116,11 @@ class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
         self.replace_contaxt(messages)
 
     def replace_contaxt(self, messags: Iterable[Message]):
+        messages = [self.system_message, *messags]
         mark = self.mark or (len(self.records) * 2 + 1)
-        self.payload["messages"] = [self.system_message, *messags]
-        self.mark = len(self.payload["messages"])
-        self.payload["messages"].extend(self.payload["messages"][mark:])
+        self.mark = len(messages)
+        messages.extend(self.payload["messages"][mark:])
+        self.payload["messages"] = messages
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
