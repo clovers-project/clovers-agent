@@ -1,9 +1,8 @@
 import json
 import httpx
 from clovers.logger import logger
-from collections import Counter
 from collections.abc import Iterable
-from .utils import data_url
+from .utils import data_url, deep_add
 from .typing import Message, UserMessage, AssistantMessage, Payload
 from .config import OpenAIConfig
 
@@ -36,7 +35,7 @@ class OpenAIAPI:
             payload["messages"].extend(context)
         return payload
 
-    async def call_api(self, payload: Payload, usage_counter: Counter[str]) -> AssistantMessage:
+    async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
         if resp.status_code != 200:
             logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
@@ -44,7 +43,7 @@ class OpenAIAPI:
             resp.raise_for_status()
         try:
             data = resp.json()
-            usage_counter.update({payload["model"]: data.get("usage", "")})
+            deep_add(usage_counter, {payload["model"]: data.get("usage")})
             message = data["choices"][0]["message"]
         except Exception as e:
             raise RuntimeError(f"Failed to parse API response {resp.text}") from e

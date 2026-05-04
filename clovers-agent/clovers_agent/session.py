@@ -1,8 +1,8 @@
 import asyncio
-from collections import deque, Counter
+from collections import deque
 from .api import OpenAIAPI
 from .embedding import SentenceTransformer, TopicDecoupler
-from typing import Iterable, cast
+from typing import Iterable
 from .typing import Payload, Message, UserMessage, AssistantMessage, SystemMessage
 from .typing.message import ContentSegment
 
@@ -64,7 +64,7 @@ class Session(ContextRecoder):
         self.snap: ContextRecoder = ContextRecoder(size)
         # 状态
         self.extra: dict = {}
-        self.usage_counter = Counter[str]()
+        self.usage_counter = {}
         # 不重要信息
         self.unimportant = False
         self.unimportant_recorder: deque[Record] = deque(maxlen=unimportant_size)
