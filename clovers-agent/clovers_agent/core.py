@@ -45,8 +45,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             logger.info(f"[{self.name}] 已关闭")
             self.check = lambda e: False
         # api
-        self.api = OpenAIAPI(async_client, config.api)
-        self.router_api = OpenAIAPI(async_client, config.router_api)
+        self._api = OpenAIAPI(async_client, config.api)
+        self._apis = {name: OpenAIAPI(async_client, api_config) for name, api_config in config.apis.items()}
         # 文件
         path = Path(config.path)
         self.payload_dir = path / "payloads"
@@ -77,6 +77,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.scheduler.add_job(self.session_clear, trigger="cron", hour="*/8", misfire_grace_time=120)
 
+    def api(self, key: str):
+        return self._apis.get(key, self._api)
+
     @staticmethod
     def check(e: Event) -> bool:
         raise NotImplementedError
@@ -104,11 +107,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         SkillCore.__init__(self)
         self.register(
             ON_CHAT,
-            "当前对话为闲聊、或不属于其他工具，调用此方法。",
+            "当前对话为闲聊、讨论与简单提问、或无法分配至其他工具时，调用此方法。",
         )(on_chat)
         self.register(
             ON_SKILL,
-            "当用户发出指令、或需要特定功能支持时，调用此方法以进入技能执行环境。",
+            "当用户的指令涉及外部调用时，调用此方法以进入技能执行环境。",
             {"category": self._category_schema},
         )(on_skill)
         self.register(
@@ -180,9 +183,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         return self.sessions[session_id]
 
     async def summary_context(self, session: Session):
-        payload = self.api.build_payload(context=(*session, {"role": "user", "content": self.summary_prompt}))
+        payload = self._api.build_payload(context=(*session, {"role": "user", "content": self.summary_prompt}))
         try:
-            summary = (await self.api.call_api(payload, session.usage_counter))["content"].strip()
+            summary = (await self._api.call_api(payload, session.usage_counter))["content"].strip()
             logger.info(f"[{self.name}][SUMMARY]")
             logger.debug(summary)
             return summary
@@ -201,10 +204,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 message: UserMessage = {"role": "user", "content": content}
                 session.is_first_wait = False
             else:
-                message = self.api.build_message(text, images)
+                message = self._api.build_message(text, images)
             system_prompt = f"{self.style_prompt}\n{self.base_prompt}\n{self.chat_prompt}"
-            payload = self.api.build_payload((*session.snap, message), system_prompt)
-            reply = (await self.api.call_api(payload, session.usage_counter))["content"].strip()
+            payload = self._api.build_payload((*session.snap, message), system_prompt)
+            reply = (await self._api.call_api(payload, session.usage_counter))["content"].strip()
             if session.lock.locked():
                 session.snap.over(message, {"role": "assistant", "content": reply}, 0.0)
             return reply
@@ -236,7 +239,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         session.payload["messages"].extend(messages)
 
     async def call_unit(self, session: Session, event: Event):
-        message = await self.api.call_api(session.payload, session.usage_counter)
+        message = await session.api.call_api(session.payload, session.usage_counter)
         if not (tool_calls := message.get("tool_calls")):
             return message["content"]
         session.payload["messages"].append(message)
@@ -257,23 +260,26 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         router_prompt = f"<system>\n{self.router_prompt}\n{self.base_prompt}\n</system>"
         current_input = session.current_input.copy()
         current_input.append({"type": "text", "text": router_prompt})
-        payload = self.router_api.build_payload((*session.router_context, {"role": "user", "content": current_input}))
+        api = self.api("router")
+        payload = api.build_payload((*session.router_context, {"role": "user", "content": current_input}))
         payload["tools"] = self.intro_tools
         try:
-            message = await self.router_api.call_api(payload, session.usage_counter)
+            message = await api.call_api(payload, session.usage_counter)
             if "tool_calls" not in message:
                 raise ValueError(f"message must contain tool_calls, but got {message}")
             call_info = message["tool_calls"][0]
             category = call_info["function"]["name"]
             intro = self.intro_invoker[category]
             kwargs = json.loads(call_info["function"]["arguments"])
+            logger.info(f"[{self.name}][ROUTER] {category} {kwargs}")
             coro = intro(self, event, *kwargs)
             if not isinstance(coro, str):
                 await coro
         except Exception as e:
-            logger.exception(e)
+            logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
             category = ON_CHAT
             await on_chat(self, event)
+
         session.activate()
         if prompts := await self.activate_category(category, event):
             prompt = "\n".join(x for x in (prompts) if x)
@@ -298,7 +304,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         request = f"{head}{at}{body}"
         image_list = event.image_list
         if image_list:
-            image_list = await asyncio.gather(*(self.api.download_url(image) for image in event.image_list))
+            image_list = await asyncio.gather(*(self._api.download_url(image) for image in event.image_list))
             image_list = [image for image in image_list if image]
         if session.lock.locked():
             if not session.silence_recorder:
@@ -358,10 +364,10 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
 
 async def on_skill(agent: CloversAgent, event: Event, category: str):
     session = agent.current_session(event)
-    session.api = agent.api
+    session.api = agent.api("skill")
     unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
     prompts = (agent.call_prompt, agent.base_prompt, unit_prompt)
-    session.payload = agent.api.build_payload(session, "\n".join(x for x in prompts if x))
+    session.payload = session.api.build_payload(session, "\n".join(x for x in prompts if x))
     session.payload["tools"] = agent.select_tools(ON_SKILL).copy()
     skill_prompt = await skill_menu(agent, event, category)
     if skill_prompt:
@@ -371,9 +377,9 @@ async def on_skill(agent: CloversAgent, event: Event, category: str):
 
 async def on_chat(agent: CloversAgent, event: Event):
     session = agent.current_session(event)
-    session.api = agent.api
+    session.api = agent.api("chat")
     unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
     prompts = (agent.style_prompt, agent.base_prompt, agent.chat_prompt, unit_prompt)
-    session.payload = agent.api.build_payload(session, "\n".join(x for x in prompts if x))
+    session.payload = session.api.build_payload(session, "\n".join(x for x in prompts if x))
     session.payload["tools"] = [agent.manifest[ON_SKILL], *agent.select_tools(ON_CHAT)]
     return ""

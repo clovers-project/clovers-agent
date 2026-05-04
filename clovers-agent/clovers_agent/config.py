@@ -18,6 +18,14 @@ class OpenAIConfig(BaseModel):
 
 
 class Config(BaseConfig):
+    api: OpenAIConfig
+    """主模型接入点"""
+    apis: dict[str, OpenAIConfig] = {}
+    """其他模型接入点，内置的键名：
+    - router: 路由模型接入点
+    - skill: 技能模型接入点
+    - chat: 聊天模型接入点
+    """
     path: str = "./data/clovers-agent/"
     """数据文件路径"""
     plugins: list[str] = []
@@ -26,19 +34,17 @@ class Config(BaseConfig):
     """插件路径"""
     skill_dirs: list[str] = ["./AgentSkills"]
     """技能路径"""
-    api: OpenAIConfig
-    """主模型接入点"""
-    router_api: OpenAIConfig
-    """路由模型接入点"""
-    memory_timeout: int = 7200
+    memory_timeout: int = 3600 * 12
     """记忆超时时间"""
+    memory_size: int = 20
+    """记忆储存长度"""
     topic_coldown: int = 3600
     """话题冷却时间"""
-    memory_size: int = 30
-    """记忆长度"""
-    unimportant_size: int = 5
+    topic_size: int = 10
+    """话题储存长度"""
+    unimportant_size: int = 3
     """不重要上下文记忆长度"""
-    router_size: int = 5
+    router_size: int = 3
     """语义路由上下文长度"""
     decouple_length: int = 1000
     """话题解藕长度（字数）"""

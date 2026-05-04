@@ -1,5 +1,5 @@
 from clovers_agent import CloversAgent, Event
-from clovers_agent.utils import data_url, is_base64
+from clovers_agent.utils import is_base64
 from .toolkit import TOOLS, CONFIG
 
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
@@ -38,7 +38,7 @@ async def _(agent: CloversAgent, event: Event, query: list[str]):
 
 @TOOLS.register(
     "web_extractor",
-    "读取指定 URL 的网页纯文本内容。当需要从特定网页获取文本信息时使用。",
+    "获取指定网页 url 的纯文本内容。",
     {"webpage_url": {"type": "string", "description": "网页的完整 URL 地址"}},
     "network",
 )
@@ -93,7 +93,7 @@ async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: d
 
 @TOOLS.register(
     "view_image_url",
-    "查看网络图片。当你需要查看用户提供的图片链接时，请调用此工具",
+    "此工具会将图片注入到用户上下文，当你需要查看用户提供的图片链接请调用此工具。",
     {"image_url": {"type": "string", "description": "图片的完整 URL 地址"}},
     "network",
 )
@@ -102,4 +102,4 @@ async def _(agent: CloversAgent, event: Event, image_url: str):
         image_url = f"https://{image_url}"
     session = agent.current_session(event)
     session.current_input.append({"type": "image_url", "image_url": {"url": image_url}})
-    return "图片已放入用户上下文"
+    return "OK"

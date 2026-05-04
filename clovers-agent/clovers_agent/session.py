@@ -147,11 +147,7 @@ class Session(ContextRecoder):
 
     @property
     def unimportant_context(self):
-        if self.unimportant_recorder:
-            for a, b, _ in self.unimportant_recorder:
-                yield a
-                yield b
-        elif self.recorder:
+        if not self.unimportant_recorder:
             yield from self.recorder[-1][:2]
 
     def update_context(self, messags: Iterable[Message]):
