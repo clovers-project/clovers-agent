@@ -2,7 +2,7 @@ import asyncio
 from collections import deque, Counter
 from .api import OpenAIAPI
 from .embedding import SentenceTransformer, TopicDecoupler
-from typing import Iterable
+from typing import Iterable, cast
 from .typing import Payload, Message, UserMessage, AssistantMessage, SystemMessage
 from .typing.message import ContentSegment
 
@@ -141,7 +141,7 @@ class Session(ContextRecoder):
 
     @property
     def router_context(self):
-        for a, b, _ in self.unimportant_recorder:
+        for a, b, _ in self.router_recorder:
             yield a
             yield b
 

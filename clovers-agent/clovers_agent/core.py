@@ -254,12 +254,16 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         raise TimeoutError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
 
     async def router(self, session: Session, event: Event):
-        payload = self.router_api.build_payload(session.router_context, self.router_prompt)
+        router_prompt = f"{self.router_prompt}\n{self.base_prompt}"
+        payload = self.router_api.build_payload(
+            (*session.router_context, {"role": "user", "content": session.current_input}),
+            router_prompt,
+        )
         payload["tools"] = self.intro_tools
         message = await self.router_api.call_api(payload, session.usage_counter)
         try:
             if "tool_calls" not in message:
-                raise Exception
+                raise ValueError(f"message must contain tool_calls, but got {message}")
             call_info = message["tool_calls"][0]
             category = call_info["function"]["name"]
             intro = self.intro_invoker[category]
@@ -267,13 +271,14 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             coro = intro(self, event, *kwargs)
             if not isinstance(coro, str):
                 await coro
-        except Exception:
+        except Exception as e:
+            logger.exception(e)
             await on_chat(self, event)
+        session.activate()
         if prompts := await self.activate_category(category, event):
             prompt = "\n".join(x for x in (prompts) if x)
             if prompt:
                 session.unit_prompts.append(prompt)
-        session.activate()
         return await self.execute_turn(session, event)
 
     async def chat(self, event: Event):
@@ -343,7 +348,7 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
     else:
         prompt = ""
     if "tools" not in session.payload:
-        session.payload["tools"] = [agent.manifest[ON_SKILL], *agent.select_tools(category)]
+        session.payload["tools"] = [*agent.select_tools(ON_SKILL), *agent.select_tools(category)]
     else:
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
         new_tools = agent.select_tools(category)
@@ -355,10 +360,12 @@ async def on_skill(agent: CloversAgent, event: Event, category: str):
     session = agent.current_session(event)
     session.api = agent.api
     unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
-    skill_prompt = await skill_menu(agent, event, category)
-    prompts = (agent.call_prompt, agent.base_prompt, unit_prompt, skill_prompt)
+    prompts = (agent.call_prompt, agent.base_prompt, unit_prompt)
     session.payload = agent.api.build_payload(session, "\n".join(x for x in prompts if x))
-    session.payload["tools"] = [agent.manifest[SKILL_MENU]]
+    session.payload["tools"] = agent.select_tools(ON_SKILL).copy()
+    skill_prompt = await skill_menu(agent, event, category)
+    if skill_prompt:
+        session.system_message["content"] += f"\n{skill_prompt}"
     return ""
 
 
@@ -368,5 +375,5 @@ async def on_chat(agent: CloversAgent, event: Event):
     unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
     prompts = (agent.style_prompt, agent.base_prompt, agent.chat_prompt, unit_prompt)
     session.payload = agent.api.build_payload(session, "\n".join(x for x in prompts if x))
-    session.payload["tools"] = agent.select_tools(SKILL_MENU).copy()
+    session.payload["tools"] = [agent.manifest[ON_SKILL], *agent.select_tools(ON_CHAT)]
     return ""
