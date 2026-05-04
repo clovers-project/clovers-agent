@@ -254,11 +254,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         raise TimeoutError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
 
     async def router(self, session: Session, event: Event):
-        router_prompt = f"{self.router_prompt}\n{self.base_prompt}"
-        payload = self.router_api.build_payload(
-            (*session.router_context, {"role": "user", "content": session.current_input}),
-            router_prompt,
-        )
+        router_prompt = f"<system>\n{self.router_prompt}\n{self.base_prompt}\n</system>"
+        current_input = session.current_input.copy()
+        current_input.append({"type": "text", "text": router_prompt})
+        payload = self.router_api.build_payload((*session.router_context, {"role": "user", "content": current_input}))
         payload["tools"] = self.intro_tools
         message = await self.router_api.call_api(payload, session.usage_counter)
         try:
@@ -273,6 +272,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 await coro
         except Exception as e:
             logger.exception(e)
+            category = ON_CHAT
             await on_chat(self, event)
         session.activate()
         if prompts := await self.activate_category(category, event):
