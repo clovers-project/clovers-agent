@@ -113,7 +113,6 @@ class Session(ContextRecoder):
         return self.decoupler.step(message)
 
     def activate(self):
-        self.usage_counter.clear()
         self.is_first_wait = True
         for rec in self.unimportant_recorder:
             self.payload["messages"].extend(rec[:2])

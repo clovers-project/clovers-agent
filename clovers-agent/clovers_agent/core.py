@@ -335,6 +335,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list)
             session.current_input = [*quote_content, *chat_content]
             session.unit_prompts = [f"Today:{now.strftime('%Y-%m-%d')}"]
+            session.usage_counter.clear()
             try:
                 result = await self.router(session, event)
                 session.over({"role": "user", "content": chat_content}, {"role": "assistant", "content": result}, timestamp)
