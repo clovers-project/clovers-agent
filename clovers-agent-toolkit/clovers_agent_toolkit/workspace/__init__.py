@@ -91,8 +91,7 @@ def read_text(file: Path):
 
 @TOOLS.register(
     "read_files",
-    "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件上下文。"
-    "在需要分析代码、检查配置文件时，尤其是需要查看多个文件时，应优先使用此工具以提高效率。",
+    "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件。",
     {"filepaths": {"type": "array", "description": "包含一个或多个文件路径的数组", "items": {"type": "string"}}},
     "workspace",
 )

@@ -3,12 +3,13 @@ from clovers_agent import CloversAgent, Event
 from clovers_agent.main import CONFIG as AGENT_CONFIG
 from clovers_agent.session import extract_plain_text
 from clovers_agent.embedding import similarity
+from clovers_agent.constants import ON_CHAT
 from clovers.logger import logger
 from .toolkit import TOOLS, CONFIG
 from .workspace import get_session_id, WORKSPACE
 
 
-@TOOLS.hook
+@TOOLS.on_category(ON_CHAT)
 async def _(agent: CloversAgent, event: Event):
     session_id = get_session_id(agent, event)
     note_file = WORKSPACE / session_id / "NOTE.md"
@@ -41,6 +42,7 @@ similarity_threshold = CONFIG.note_similarity_threshold
     "write_note",
     "当**助手**认为上下文中出现了重要或需要长期记录信息时调用",
     {"content": {"type": "string", "description": "笔记内容。内容应为简洁清晰的陈述句。"}},
+    ON_CHAT,
 )
 async def _(agent: CloversAgent, event: Event, content: str):
     session_id = get_session_id(agent, event)
@@ -52,8 +54,9 @@ async def _(agent: CloversAgent, event: Event, content: str):
         elif all(similarity(line, content, agent.sentence_model) < similarity_threshold for line in note.split("\n")):
             note_file.write_text(note + "\n" + content, encoding="utf-8")
         else:
-            payload = agent.build_payload(({"role": "user", "content": note + "\n" + content},), SCRIBE_PROMPT)
-            new_note = await agent.call_api(payload, agent.current_session(event).usage_counter)
+            api = agent.current_session(event).api
+            payload = api.build_payload(({"role": "user", "content": note + "\n" + content},), SCRIBE_PROMPT)
+            new_note = await api.call_api(payload, agent.current_session(event).usage_counter)
             note_file.write_text(new_note["content"], encoding="utf-8")
         return "Done"
     except Exception as e:
@@ -99,7 +102,7 @@ ARCHIVIST_PROMPT = """
 """.strip()
 
 
-@TOOLS.hook
+@TOOLS.on_category(ON_CHAT)
 async def _(agent: CloversAgent, event: Event):
     user_profile = USER_PROFILE / f"{event.user_id}.md"
     if not user_profile.exists():
@@ -115,6 +118,7 @@ async def _(agent: CloversAgent, event: Event):
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
         "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},
     },
+    ON_CHAT,
 )
 async def _(agent: CloversAgent, event: Event, observation: str, impression: str):
     USER_PROFILE.mkdir(parents=True, exist_ok=True)
@@ -129,8 +133,8 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
         f"- 观察到：{observation}\n"
         f"- 你的对用户的感受：{impression}"
     )
-
-    payload = agent.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
-    resp = await agent.call_api(payload, session.usage_counter)
+    api = session.api
+    payload = api.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
+    resp = await api.call_api(payload, session.usage_counter)
     user_profile_path.write_text(resp["content"], encoding="utf-8")
     return ""

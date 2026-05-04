@@ -39,11 +39,7 @@ class SkillCore:
             return []
         return self.__map_id_to_tools[self.__map_category_to_id[category]]
 
-    def create_category(self, category: str, description: str):
-        if category in self.categories:
-            raise ValueError(f"Category {category} already exists")
-        self.categories[category] = description
-
+    def on_category(self, category: str):
         def decorator(func: ToolFunction) -> ToolFunction:
             if category not in self.category_hooks:
                 self.category_hooks[category] = []
@@ -51,6 +47,12 @@ class SkillCore:
             return func
 
         return decorator
+
+    def create_category(self, category: str, description: str):
+        if category in self.categories:
+            raise ValueError(f"Category {category} already exists")
+        self.categories[category] = description
+        return self.on_category(category)
 
     def intro_decorator(self, info: FunctionToolInfo) -> IntroDecorator:
         def decorator(func):
