@@ -44,7 +44,7 @@ class OpenAIAPI:
             resp.raise_for_status()
         try:
             data = resp.json()
-            usage_counter.update(data.get("usage", ""))
+            usage_counter.update({payload["model"]: data.get("usage", "")})
             message = data["choices"][0]["message"]
         except Exception as e:
             raise RuntimeError(f"Failed to parse API response {resp.text}") from e
