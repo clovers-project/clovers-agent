@@ -115,7 +115,6 @@ class Session(ContextRecoder):
     def activate(self):
         self.usage_counter.clear()
         self.is_first_wait = True
-        self.payload["messages"].extend(self)
         for rec in self.unimportant_recorder:
             self.payload["messages"].extend(rec[:2])
         self.cursor = len(self.payload["messages"])

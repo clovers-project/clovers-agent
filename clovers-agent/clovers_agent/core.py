@@ -104,11 +104,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         SkillCore.__init__(self)
         self.register(
             ON_CHAT,
-            "如果这是一个普通的聊天，或没有其他合适的工具。则调用此方法以获取回复准则",
+            "当前对话为闲聊、或不属于其他工具，调用此方法。",
         )(on_chat)
         self.register(
             ON_SKILL,
-            "如果这是一个任务则需要调用此方法以获取更多技能。",
+            "当用户发出指令、或需要特定功能支持时，调用此方法以进入技能执行环境。",
             {"category": self._category_schema},
         )(on_skill)
         self.register(
@@ -357,7 +357,7 @@ async def on_skill(agent: CloversAgent, event: Event, category: str):
     unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
     skill_prompt = await skill_menu(agent, event, category)
     prompts = (agent.call_prompt, agent.base_prompt, unit_prompt, skill_prompt)
-    session.payload = agent.api.build_payload(None, "\n".join(x for x in prompts if x))
+    session.payload = agent.api.build_payload(session, "\n".join(x for x in prompts if x))
     session.payload["tools"] = [agent.manifest[SKILL_MENU]]
     return ""
 
@@ -367,5 +367,6 @@ async def on_chat(agent: CloversAgent, event: Event):
     session.api = agent.api
     unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
     prompts = (agent.style_prompt, agent.base_prompt, agent.chat_prompt, unit_prompt)
-    session.payload = agent.api.build_payload(None, "\n".join(x for x in prompts if x))
+    session.payload = agent.api.build_payload(session, "\n".join(x for x in prompts if x))
+    session.payload["tools"] = agent.select_tools(SKILL_MENU).copy()
     return ""

@@ -5,7 +5,7 @@ from pathlib import Path
 
 LOCAL_PATH = Path(__file__).parent
 
-TASK = """
+TASK = """\
 帮我依据下面的要求构建一个虚拟群友提示词，用中文回答
 以下是你的回复准则，请严格遵守：
 
