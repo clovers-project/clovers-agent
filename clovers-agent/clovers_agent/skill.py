@@ -4,16 +4,19 @@ import frontmatter
 from pathlib import Path
 from itertools import count
 from clovers.logger import logger
-from collections.abc import Callable, Coroutine
-from typing import Any, Concatenate, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Concatenate, overload, TYPE_CHECKING
+from clovers.base import Coro
 from .typing import ToolMessage, FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 
 if TYPE_CHECKING:
-    from .core import CloversAgent
+    from .core import CloversAgent, Event
 
-type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Any, P], Coroutine[Any, Any, str] | str]
-type WrappedToolFunction[**P] = Callable[Concatenate[str, CloversAgent, Any, P], Coroutine[Any, Any, ToolMessage]]
+type IntroDecorator = Callable[[ToolFunction], ToolFunction]
+type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], Coro[str] | str]
+type WrappedToolFunction[**P] = Callable[Concatenate[str, CloversAgent, Event, P], Coro[ToolMessage]]
+type CategoryDecorator = Callable[[ToolFunction], WrappedToolFunction]
 type SkillMD = tuple[str, str, SkillCore.Parameters | None, str]
 
 
@@ -23,13 +26,13 @@ class SkillCore:
     def __init__(self) -> None:
         self.category_id = count()
         self.intro_tools: list[FunctionToolInfo] = []
+        self.intro_invoker: dict[str, ToolFunction] = {}
         self.manifest: dict[str, FunctionToolInfo] = {}
-        self.chat_hooks: list[ToolFunction] = []
-        self.category_hooks: dict[str, ToolFunction] = {}
         self.invoker: dict[str, WrappedToolFunction] = {}
         self.__map_category_to_id: dict[str, int] = {}
         self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
         self.categories: dict[str, str] = {}
+        self.category_hooks: dict[str, list[ToolFunction]] = {}
 
     def select_tools(self, category: str) -> list[FunctionToolInfo]:
         if category not in self.__map_category_to_id:
@@ -42,38 +45,31 @@ class SkillCore:
         self.categories[category] = description
 
         def decorator(func: ToolFunction) -> ToolFunction:
-            self.category_hooks[category] = func
+            if category not in self.category_hooks:
+                self.category_hooks[category] = []
+            self.category_hooks[category].append(func)
             return func
 
         return decorator
 
-    def hook(self, func: ToolFunction):
-        self.chat_hooks.append(func)
-        return func
+    def intro_decorator(self, info: FunctionToolInfo) -> IntroDecorator:
+        def decorator(func):
+            name = info["function"]["name"]
+            self.intro_tools.append(info)
+            self.manifest[name] = info
+            self.intro_invoker[name] = func
+            return func
 
-    def register(
-        self,
-        name: str,
-        description: str,
-        parameters: Parameters | None = None,
-        category: str | None = None,
-    ):
-        if name in self.invoker:
-            raise ValueError(f"Tool {name} already exists.")
-        info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
-        if parameters:
-            info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
+        return decorator
 
-        # info 是 OpneAI API 要求的 tools 字段中元素的格式
-        def decorator(func: ToolFunction) -> WrappedToolFunction:
-            if not category:
-                self.intro_tools.append(info)
-            else:
-                category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
-                self.__map_category_to_id[category] = category_id
-                if category_id not in self.__map_id_to_tools:
-                    self.__map_id_to_tools[category_id] = []
-                self.__map_id_to_tools[category_id].append(info)
+    def category_decorator(self, info: FunctionToolInfo, category: str) -> CategoryDecorator:
+        def decorator(func):
+            name = info["function"]["name"]
+            category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
+            self.__map_category_to_id[category] = category_id
+            if category_id not in self.__map_id_to_tools:
+                self.__map_id_to_tools[category_id] = []
+            self.__map_id_to_tools[category_id].append(info)
             self.manifest[name] = info
 
             async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs) -> ToolMessage:
@@ -92,13 +88,33 @@ class SkillCore:
 
         return decorator
 
+    @overload
+    def register(self, name: str, description: str, parameters: Parameters | None = None, category: None = None) -> IntroDecorator: ...
+    @overload
+    def register(self, name: str, description: str, parameters: Parameters | None = None, category: str = "") -> CategoryDecorator: ...
+
+    def register(self, name: str, description: str, parameters: Parameters | None = None, category: str | None = None):
+        if name in self.invoker:
+            raise ValueError(f"Tool {name} already exists.")
+        info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
+        if parameters:
+            info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
+        if not category:
+            return self.intro_decorator(info)
+        else:
+            return self.category_decorator(info, category)
+
     def merge(self, others: "SkillCore"):
         conflict = (others.invoker.keys() & self.invoker.keys()) | (others.category_hooks.keys() & self.category_hooks.keys())
         if conflict:
             return conflict
         self.intro_tools.extend(others.intro_tools)
         self.manifest.update(others.manifest)
-        self.category_hooks.update(others.category_hooks)
+        for category, hooks in others.category_hooks.items():
+            if category in self.category_hooks:
+                self.category_hooks[category].extend(hooks)
+            else:
+                self.category_hooks[category] = hooks
         self.invoker.update(others.invoker)
         for category, category_id in others.__map_category_to_id.items():
             if category in self.__map_category_to_id:
@@ -109,7 +125,6 @@ class SkillCore:
                 self.__map_id_to_tools[new_category_id].extend(others.__map_id_to_tools[category_id])
                 self.__map_category_to_id[category] = new_category_id
         self.categories.update(others.categories)
-        self.chat_hooks.extend(others.chat_hooks)
 
     def delete_skill(self, category: str | None, name: str | None):
         if name is None:

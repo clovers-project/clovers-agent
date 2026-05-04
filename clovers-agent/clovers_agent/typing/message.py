@@ -28,22 +28,6 @@ class UserMessage(TypedDict):
     content: str | list[ContentSegment]
 
 
-class AssistantMessage(TypedDict):
-    """助手消息"""
-
-    role: Literal["assistant"]
-    content: str
-    tools: NotRequired[list[dict]]
-
-
-class ToolMessage(TypedDict):
-    """工具消息"""
-
-    role: Literal["tool"]
-    content: str
-    tool_call_id: str
-
-
 class ToolCallFunction(TypedDict):
     """工具调用函数"""
 
@@ -57,6 +41,22 @@ class ToolCallInfo(TypedDict):
     id: str
     type: Literal["function"]
     function: ToolCallFunction
+
+
+class AssistantMessage(TypedDict):
+    """助手消息"""
+
+    role: Literal["assistant"]
+    content: str
+    tool_calls: NotRequired[list[ToolCallInfo]]
+
+
+class ToolMessage(TypedDict):
+    """工具消息"""
+
+    role: Literal["tool"]
+    content: str
+    tool_call_id: str
 
 
 type Message = UserMessage | AssistantMessage | SystemMessage | ToolMessage

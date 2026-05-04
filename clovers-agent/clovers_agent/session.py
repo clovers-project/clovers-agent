@@ -1,8 +1,9 @@
 import asyncio
 from collections import deque, Counter
+from .api import OpenAIAPI
 from .embedding import SentenceTransformer, TopicDecoupler
 from typing import Iterable
-from .typing import Payload, Message, UserMessage, AssistantMessage
+from .typing import Payload, Message, UserMessage, AssistantMessage, SystemMessage
 from .typing.message import ContentSegment
 
 
@@ -14,135 +15,152 @@ def char_count(content: str | list[ContentSegment]):
     return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
 
 
-class ContextRecoder[A, B, *Args]:
+type Record = tuple[UserMessage, AssistantMessage, float]
+
+
+class ContextRecoder:
     """会话上下文管理器"""
 
-    records: deque[tuple[A, B, *Args]]
+    recorder: deque[Record]
 
     def __init__(self, size: int) -> None:
-        self.records = deque(maxlen=size)
+        self.recorder = deque(maxlen=size)
         self.lock = asyncio.Lock()
 
     def __iter__(self):
-        for record in self.records:
+        for record in self.recorder:
             yield record[0]
             yield record[1]
 
     def __bool__(self):
-        return bool(self.records)
+        return bool(self.recorder)
 
-    def over(self, *args):
-        self.records.append(args)
+    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
+        self.recorder.append((request, reply, timestamp))
 
     def clear(self):
-        self.records.clear()
+        self.recorder.clear()
 
 
-class Session(ContextRecoder[UserMessage, AssistantMessage, float]):
-    silence: deque[tuple[str, float]]
-    unimp_rec: deque[tuple[UserMessage, AssistantMessage, float]]
-    snap: ContextRecoder[UserMessage, AssistantMessage]
-    extra: dict
+class Session(ContextRecoder):
+    api: OpenAIAPI
+    payload: Payload
+    current_input: list[ContentSegment]
+    unit_prompts: list[str]
 
     def __init__(
         self,
         size: int,
-        unimp_size: int,
+        router_size: int,
+        unimportant_size: int,
         decouple_size: int,
         sentence_model: SentenceTransformer,
     ) -> None:
         # 标准记录
         super().__init__(size)
-        self.silence = deque()
+        self.silence_recorder: deque[tuple[str, float]] = deque()
+        self.router_recorder: deque[Record] = deque(maxlen=router_size)
         # 临时记录
-        self.snap = ContextRecoder(size)
+        self.snap: ContextRecoder = ContextRecoder(size)
         # 状态
-        self.extra = {}
+        self.extra: dict = {}
         self.usage_counter = Counter[str]()
         # 不重要信息
-        self._unimp = False
-        self.unimp_rec = deque(maxlen=unimp_size)
+        self.unimportant = False
+        self.unimportant_recorder: deque[Record] = deque(maxlen=unimportant_size)
         # 主题分离
         self.decoupler = TopicDecoupler(sentence_model)
         self.decouple_size = decouple_size
 
+    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
+        """处理完成"""
+        record = (request, reply, timestamp)
+        self.router_recorder.append(record)
+        if self.unimportant:
+            self.unimportant_recorder.append(record)
+            self.unimportant = False
+        else:
+            if self.unimportant_recorder:
+                self.recorder.extend(self.unimportant_recorder)
+                self.unimportant_recorder.clear()
+            self.recorder.append(record)
+        self.silence_recorder.clear()
+
+    def clear(self):
+        """清理记录"""
+        self.router_recorder.clear()
+        self.unimportant_recorder.clear()
+        self.silence_recorder.clear()
+
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
-        while self.records and (self.records[0][2] <= timeout):
-            self.records.popleft()
+        while self.recorder and (self.recorder[0][2] <= timeout):
+            self.recorder.popleft()
 
     def silence_filter(self, timeout: int | float):
         """过滤静默记录群聊上下文"""
-        while self.silence and (self.silence[0][1] <= timeout):
-            self.silence.popleft()
+        while self.silence_recorder and (self.silence_recorder[0][1] <= timeout):
+            self.silence_recorder.popleft()
+
+    def sync_snap(self):
+        """同步上下文到辅助AI"""
+        self.snap.clear()
+        self.snap.recorder.extend(self.recorder)
 
     def step(self, message: str):
         if sum(char_count(msg["content"]) for msg in self) < self.decouple_size:
             return False
         return self.decoupler.step(message)
 
-    def activate(self, model: str, content: list[ContentSegment]):
-        self.current_input = content  # 注入输入（可修改）
-        self.is_first_wait: bool = True
-        self.used: set[str] = set()
-        self.payload: Payload = {"model": model, "messages": [{"role": "system"}, *self]}  # type: ignore
-        for rec in self.unimp_rec:
-            self.payload["messages"].extend(rec[:2])
-        self.payload["messages"].append({"role": "user", "content": self.current_input})
-        self.skill_menu: str | None = None
+    def activate(self):
         self.usage_counter.clear()
-        self.unit_prompt: str
-        self.mark = 0
+        self.is_first_wait = True
+        self.payload["messages"].extend(self)
+        for rec in self.unimportant_recorder:
+            self.payload["messages"].extend(rec[:2])
+        self.cursor = len(self.payload["messages"])
+        self.payload["messages"].append({"role": "user", "content": self.current_input})
+        self.result = None
 
     def inactivate(self):
         self.snap.clear()
+        # 按注入顺序删除
         del self.current_input
-        del self.is_first_wait
+        del self.unit_prompts
+        del self.api
         del self.payload
-        del self.used
-        del self.skill_menu
-        del self.unit_prompt
-        del self.mark
+        del self.is_first_wait
+        del self.cursor
+        del self.result
 
     @property
-    def system_message(self):
-        return self.payload["messages"][0]
+    def system_message(self) -> SystemMessage:
+        message = self.payload["messages"][0]
+        if message["role"] == "system":
+            return message
+        raise ValueError(f"The first message must have the role 'system', but found '{message}' instead.")
 
-    def unimportant(self):
-        if self._unimp:
-            return
-        self._unimp = True
-        if not self.unimp_rec and self.records:
-            messages = self.records[-1][:2]
-        else:
-            messages = ()
-        self.replace_contaxt(messages)
+    @property
+    def router_context(self):
+        for a, b, _ in self.unimportant_recorder:
+            yield a
+            yield b
 
-    def replace_contaxt(self, messags: Iterable[Message]):
+    @property
+    def unimportant_context(self):
+        if self.unimportant_recorder:
+            for a, b, _ in self.unimportant_recorder:
+                yield a
+                yield b
+        elif self.recorder:
+            yield from self.recorder[-1][:2]
+
+    def update_context(self, messags: Iterable[Message]):
         messages = [self.system_message, *messags]
-        mark = self.mark or (len(self.records) * 2 + 1)
-        self.mark = len(messages)
-        messages.extend(self.payload["messages"][mark:])
+        cursor = len(messages)
+        messages.extend(self.payload["messages"][self.cursor :])
+        self.cursor = cursor
         self.payload["messages"] = messages
 
-    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
-        """处理完成"""
-        if self._unimp:
-            self.unimp_rec.append((request, reply, timestamp))
-            self._unimp = False
-        else:
-            if self.unimp_rec:
-                self.records.extend(self.unimp_rec)
-                self.unimp_rec.clear()
-            self.records.append((request, reply, timestamp))
-        self.silence.clear()
-
-    def clear(self):
-        """清理记录"""
-        self.unimp_rec.clear()
-        self.silence.clear()
-
-    def sync_snap(self):
-        """同步上下文到辅助AI"""
-        self.snap.clear()
-        self.snap.records.extend((x, y) for x, y, _ in self.records)
+    def complete(self, result: str):
+        self.result = result
