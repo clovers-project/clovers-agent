@@ -48,8 +48,7 @@ class OpenAIAPI:
             usage_counter.update(data.get("usage", ""))
             message = data["choices"][0]["message"]
         except Exception as e:
-            logger.error(resp.text)
-            raise e
+            raise RuntimeError(f"Failed to parse API response {resp.text}") from e
         if "content" not in message and "tool_calls" not in message:
             raise ValueError(f"API returned an invalid response: {resp.text}")
         return message

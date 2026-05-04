@@ -225,11 +225,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         try:
             name = call_info["function"]["name"]
             kwargs = json.loads(call_info["function"]["arguments"])
+            if name not in self.invoker:
+                return {"role": "tool", "tool_call_id": call_info["id"], "content": f'工具 "{name}" 不存在。'}
             return await self.invoker[name](call_info["id"], self, event, **kwargs)
-        except KeyError:
-            return {"role": "tool", "tool_call_id": call_info["id"], "content": f'工具 "{name}" 不存在。'}
         except Exception as e:
-            return {"role": "tool", "tool_call_id": call_info["id"], "content": str(e)}
+            return {"role": "tool", "tool_call_id": call_info["id"], "content": f"Error {e}"}
 
     async def function_call(self, session: Session, event: Event, call_infos: list[ToolCallInfo]):
         messages = await asyncio.gather(*(self.activate_skill(event, x) for x in call_infos))
@@ -259,8 +259,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         current_input.append({"type": "text", "text": router_prompt})
         payload = self.router_api.build_payload((*session.router_context, {"role": "user", "content": current_input}))
         payload["tools"] = self.intro_tools
-        message = await self.router_api.call_api(payload, session.usage_counter)
         try:
+            message = await self.router_api.call_api(payload, session.usage_counter)
             if "tool_calls" not in message:
                 raise ValueError(f"message must contain tool_calls, but got {message}")
             call_info = message["tool_calls"][0]

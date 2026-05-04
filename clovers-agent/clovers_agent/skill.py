@@ -91,16 +91,41 @@ class SkillCore:
         return decorator
 
     @overload
-    def register(self, name: str, description: str, parameters: Parameters | None = None, category: None = None) -> IntroDecorator: ...
+    def register(
+        self,
+        name: str,
+        description: str,
+        parameters: Parameters | None = None,
+        category: None = None,
+        required: list[str] | None = None,
+    ) -> IntroDecorator: ...
     @overload
-    def register(self, name: str, description: str, parameters: Parameters | None = None, category: str = "") -> CategoryDecorator: ...
+    def register(
+        self,
+        name: str,
+        description: str,
+        parameters: Parameters | None = None,
+        category: str = "",
+        required: list[str] | None = None,
+    ) -> CategoryDecorator: ...
 
-    def register(self, name: str, description: str, parameters: Parameters | None = None, category: str | None = None):
+    def register(
+        self,
+        name: str,
+        description: str,
+        parameters: Parameters | None = None,
+        category: str | None = None,
+        required: list[str] | None = None,
+    ):
         if name in self.invoker:
             raise ValueError(f"Tool {name} already exists.")
         info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
         if parameters:
-            info["function"]["parameters"] = {"type": "object", "properties": parameters, "required": list(parameters.keys())}
+            info["function"]["parameters"] = {
+                "type": "object",
+                "properties": parameters,
+                "required": required if required is not None else list(parameters.keys()),
+            }
         if not category:
             return self.intro_decorator(info)
         else:

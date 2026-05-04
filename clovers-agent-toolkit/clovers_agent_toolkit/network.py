@@ -1,10 +1,11 @@
 from clovers_agent import CloversAgent, Event
+from clovers_agent.utils import data_url, is_base64
 from .toolkit import TOOLS, CONFIG
 
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
 BRAVE_URL = CONFIG.BRAVE_URL
 
-TOOLS.create_category("network", "包含联网搜索、网页内容提取、图片查看等工具，用于从互联网获取信息和资源。")
+TOOLS.create_category("network", "包含联网搜索、网页内容提取、网络请求、图片查看等工具，用于从互联网获取信息和资源。")
 
 
 @TOOLS.register(
@@ -54,6 +55,42 @@ async def _(agent: CloversAgent, event: Event, webpage_url: str):
         return "获取网页失败"
 
 
+ALLOWED_TYPES = ("application/json", "text/", "application/xml")
+
+
+@TOOLS.register(
+    "http_request",
+    "使用 get/post 发起网络请求",
+    {
+        "method": {"type": "string", "description": "请求方法", "enum": ["get", "post"]},
+        "url": {"type": "string", "description": "请求的 url 地址"},
+        "headers": {"type": "object", "description": "请求头 json"},
+        "data": {"type": "object", "description": "当 method 为 get 时此参数为请求参数，当 method 为 post 时此参数为请求体 json"},
+    },
+    "network",
+    required=["method", "url"],
+)
+async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: dict = {}, data: dict = {}):
+    async_client = agent.current_session(event).api.async_client
+    method = method.lower()
+    if method == "get":
+        resp = await async_client.get(url, params=data, headers=headers)
+    elif method == "post":
+        resp = await async_client.post(url, json=data, headers=headers)
+    else:
+        return f"Invalid method: {method}"
+    content = resp.text
+    if not content:
+        return "返回结果为空"
+    content_type = resp.headers.get("Content-Type", "").lower()
+    if not any(t in content_type for t in ALLOWED_TYPES):
+        if len(content) >= 1000:
+            return "返回结果长度过长"
+        if is_base64(content):
+            return "返回结果为 base64 编码, 已拦截。"
+    return content
+
+
 @TOOLS.register(
     "view_image_url",
     "查看网络图片。当你需要查看用户提供的图片链接时，请调用此工具",
@@ -64,7 +101,5 @@ async def _(agent: CloversAgent, event: Event, image_url: str):
     if not image_url.startswith("http"):
         image_url = f"https://{image_url}"
     session = agent.current_session(event)
-    if not session.current_input:
-        return "图片查看失败"
     session.current_input.append({"type": "image_url", "image_url": {"url": image_url}})
     return "图片已放入用户上下文"
