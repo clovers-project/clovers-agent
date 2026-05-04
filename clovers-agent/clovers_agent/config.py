@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from clovers_client import Config as BaseConfig
 from typing import Any
+from .constants import ON_CHAT
 
 
 class OpenAIConfig(BaseModel):
@@ -41,8 +42,9 @@ class Config(BaseConfig):
     """语义路由上下文长度"""
     decouple_length: int = 1000
     """话题解藕长度（字数）"""
-    router_prompt: str = """\
-"""
+    router_prompt: str = f"""\
+你是一位资深的“语义分发专家”。你的任务是分析当前用户的对话意图，并从工具中定义的场景中，选出最契合当前语境的一个进行调用
+注意如果没有匹配的场景则使用 '{ON_CHAT}' 工具"""
     """语义路由提示"""
     style_prompt: str = """\
 你将在聊天群内扮演一个名为“小叶子”的群友。请严格遵守以下人格设定与用户进行对话。
