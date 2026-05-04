@@ -37,9 +37,13 @@ async def _(event: Event) -> SegmentedResult | None:
 
 
 async def format_message(result: str) -> SegmentedMessage:
-    for seg in result.split("\n"):
-        seg = seg.strip()
-        if not seg:
-            continue
-        yield Result("text", seg)
-        await asyncio.sleep(min(1 + 0.12 * len(seg), 8))
+    lines = [x for line in result.split("\n") if (x := line.strip())]
+    if len(lines) > 5:
+        yield Result("text", result)
+    else:
+        for seg in result.split("\n"):
+            seg = seg.strip()
+            if not seg:
+                continue
+            yield Result("text", seg)
+            await asyncio.sleep(min(1 + 0.12 * len(seg), 8))
