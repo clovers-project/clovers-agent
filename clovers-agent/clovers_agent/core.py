@@ -62,7 +62,6 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         self.decouple_size = config.decouple_size
         # 模型设置
         self.sessions: dict[str, Session] = {}
-        self.auxiliary = OpenAIAPI(async_client, config.auxiliary) if config.auxiliary is not None else self
         self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
         self.scheduler = scheduler
         # 注册技能
@@ -150,10 +149,9 @@ class CloversAgent(SkillCore, OpenAIAPI, ModuleLoader[SkillCore]):
         raise NotImplementedError
 
     async def summary_context(self, session: Session):
-        aux = self.auxiliary
-        payload = aux.build_payload(context=(*session, {"role": "user", "content": self.summary_prompt}))
+        payload = self.build_payload(context=(*session, {"role": "user", "content": self.summary_prompt}))
         try:
-            summary = (await aux.call_api(payload, session.usage_counter))["content"].strip()
+            summary = (await self.call_api(payload, session.usage_counter))["content"].strip()
             logger.info(f"[{self.name}][SUMMARY]")
             logger.debug(summary)
             return summary

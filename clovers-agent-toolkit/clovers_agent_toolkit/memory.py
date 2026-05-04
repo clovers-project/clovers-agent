@@ -52,9 +52,8 @@ async def _(agent: CloversAgent, event: Event, content: str):
         elif all(similarity(line, content, agent.sentence_model) < similarity_threshold for line in note.split("\n")):
             note_file.write_text(note + "\n" + content, encoding="utf-8")
         else:
-            aux = agent.auxiliary
-            payload = aux.build_payload(({"role": "user", "content": note + "\n" + content},), SCRIBE_PROMPT)
-            new_note = await aux.call_api(payload, agent.current_session(event).usage_counter)
+            payload = agent.build_payload(({"role": "user", "content": note + "\n" + content},), SCRIBE_PROMPT)
+            new_note = await agent.call_api(payload, agent.current_session(event).usage_counter)
             note_file.write_text(new_note["content"], encoding="utf-8")
         return "Done"
     except Exception as e:
@@ -130,8 +129,8 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
         f"- 观察到：{observation}\n"
         f"- 你的对用户的感受：{impression}"
     )
-    aux = agent.auxiliary
-    payload = aux.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
-    resp = await aux.call_api(payload, session.usage_counter)
+
+    payload = agent.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
+    resp = await agent.call_api(payload, session.usage_counter)
     user_profile_path.write_text(resp["content"], encoding="utf-8")
     return ""
