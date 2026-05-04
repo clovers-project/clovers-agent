@@ -6,17 +6,7 @@ from pathlib import Path
 LOCAL_PATH = Path(__file__).parent
 
 
-payload = {
-    "deepseek-v4-flash": {
-        "prompt_tokens": 1174,
-        "completion_tokens": 92,
-        "total_tokens": 1266,
-        "prompt_tokens_details": {"cached_tokens": 0},
-        "completion_tokens_details": {"reasoning_tokens": 70},
-        "prompt_cache_hit_tokens": 0,
-        "prompt_cache_miss_tokens": 1174,
-    }
-}
+payload = {}
 
 
 def main():
