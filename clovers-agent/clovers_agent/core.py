@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI
 from .skill import SkillCore
 from .session import Session
+from .utils import deep_add
 from .embedding import SentenceTransformer
 from .constants import ON_CHAT, ON_SKILL, SKILL_MENU
 from typing import Protocol
@@ -49,6 +50,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._apis = {name: OpenAIAPI(async_client, api_config) for name, api_config in config.apis.items()}
         # 文件
         path = Path(config.path)
+        self.usage_dir = path / "usages"
         self.payload_dir = path / "payloads"
         self.prompts_dir = path / "prompts"
         self.style_prompt = config.style_prompt
@@ -66,6 +68,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.unimportant_size = config.unimportant_size
         self.decouple_length = config.decouple_length
         # 模型设置
+        self.usage_counter = {}
         self.sessions: dict[str, Session] = {}
         self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
         self.scheduler = scheduler
@@ -75,7 +78,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._plugin_dirs = config.plugin_dirs
         self._skill_dirs = config.skill_dirs
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
-        self.scheduler.add_job(self.session_clear, trigger="cron", hour="*/8", misfire_grace_time=120)
+        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour="*/8", misfire_grace_time=120)
 
     def api(self, key: str):
         return self._apis.get(key, self._api)
@@ -159,12 +162,20 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
         self._category_schema["enum"] = list(self.categories.keys())
 
-    def session_clear(self):
+    def daily_tasks(self):
         timeout = time.time() - self.memory_timeout
         sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.recorder[-1][2] < timeout)
         for sessions_id in sessions_ids:
             del self.sessions[sessions_id]
         logger.info(f"[{self.name}][SESSIONS_CLEAR]")
+        self.usage_counter
+        usage_file = self.usage_dir / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        usage_file.parent.mkdir(parents=True, exist_ok=True)
+        with usage_file.open("w", encoding="utf-8") as f:
+            json.dump(self.usage_counter, f, indent=4, ensure_ascii=False)
+        usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
+        logger.info(f"[{self.name}][USAGE_TODAY] {usage}")
+        self.usage_counter.clear()
 
     @staticmethod
     def session_id(event: Event) -> str:
@@ -343,7 +354,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 logger.exception(e)
                 return
             finally:
-                logger.info(f"[{self.name}][USAGE] {dict(session.usage_counter)}")
+                deep_add(self.usage_counter, session.usage_counter)
+                usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
+                logger.info(f"[{self.name}][USAGE] {usage}")
                 session.inactivate()
             return result
 
