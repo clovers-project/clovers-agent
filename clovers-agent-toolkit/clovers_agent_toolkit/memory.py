@@ -35,10 +35,9 @@ async def _(agent: CloversAgent, event: Event):
             note_file.unlink()
             logger.error(f"笔记读取失败: {e}")
     user_profile = USER_PROFILE / f"{user_id}.md"
-    if user_profile.exists():
+    if not user_profile.exists():
         notes.append(f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行第一次更新。")
     else:
-
         if count > STRONG_REMINDER_THRESHOLD:
             notes.append(f"当前关注：（{count} 次对话前更新，请确认是否过时。）")
         elif count > REMINDER_THRESHOLD:
