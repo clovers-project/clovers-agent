@@ -328,17 +328,17 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             logger.exception(e)
 
     async def active_decision(self, session: Session, timestamp: float):
+        silence_duration = timestamp - session.last_active_time
+        if silence_duration < self.active_coldown:
+            return
+        context = "\n".join(x for x, _ in reversed(tuple(islice(reversed(session.silence_recorder), self.active_context_size))))
+        message: UserMessage = {"role": "user", "content": context}
+        if silence_duration > self.dormant_timeout:
+            return message
+        api = self.api("decision")
+        payload = api.build_payload((message,), self.active_decision_prompt)
+        payload["tools"] = DECISION_TOOL
         try:
-            silence_duration = timestamp - session.last_active_time
-            if silence_duration < self.active_coldown:
-                return
-            context = "\n".join(x for x, _ in reversed(tuple(islice(reversed(session.silence_recorder), self.active_context_size))))
-            message: UserMessage = {"role": "user", "content": context}
-            if silence_duration > self.dormant_timeout:
-                return message
-            api = self.api("decision")
-            payload = api.build_payload((message,), self.active_decision_prompt)
-            payload["tools"] = DECISION_TOOL
             resp = await api.call_api(payload, session.usage_counter)
             if silence_duration < self.active_coldown:
                 return
