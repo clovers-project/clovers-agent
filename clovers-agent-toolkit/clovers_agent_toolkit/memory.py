@@ -103,7 +103,8 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     payload = api.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
     resp = await api.call_api(payload, session.usage_counter)
     user_profile_path.write_text(resp["content"], encoding="utf-8")
-    if "update_user_profile" in session.extra:
-        if user_id in session.extra["update_user_profile"]:
-            del session.extra["update_user_profile"][user_id]
+    try:
+        del session.extra["update_user_profile"][user_id]
+    except KeyError:
+        pass
     return "OK"
