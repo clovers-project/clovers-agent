@@ -33,17 +33,22 @@ async def _(event: Event) -> SegmentedResult | None:
     result = await AGENT.chat(event)
     if result is None:
         return None
-    return Result("segmented", format_message(result))
+    session = AGENT.current_session(event)
+    if "sending_lock" not in session.extra:
+        session.extra["sending_lock"] = asyncio.Lock()
+    sending_lock = session.extra["sending_lock"]
+    return Result("segmented", format_message(result, sending_lock))
 
 
-async def format_message(result: str) -> SegmentedMessage:
-    lines = [x for line in result.split("\n") if (x := line.strip())]
-    if len(lines) > 4:
-        yield Result("text", result)
-    else:
-        for seg in result.split("\n"):
-            seg = seg.strip()
-            if not seg:
-                continue
-            yield Result("text", seg)
-            await asyncio.sleep(min(1 + 0.12 * len(seg), 8))
+async def format_message(result: str, lock: asyncio.Lock) -> SegmentedMessage:
+    async with lock:
+        lines = [x for line in result.split("\n") if (x := line.strip())]
+        if len(lines) > 4:
+            yield Result("text", result)
+        else:
+            for seg in result.split("\n"):
+                seg = seg.strip()
+                if not seg:
+                    continue
+                yield Result("text", seg)
+                await asyncio.sleep(min(1 + 0.12 * len(seg), 8))

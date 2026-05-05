@@ -304,7 +304,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         timestamp = time.time()
         now = datetime.fromtimestamp(timestamp)
         session = self.current_session(event)
-        session.extra[event.user_id] = event.nickname
+        if "nicknames" not in session.extra:
+            session.extra["nicknames"] = {}
+        session.extra["nicknames"][event.user_id] = event.nickname
         head = f"{event.nickname}[{now.strftime("%I:%M %p")}]"
         at = "".join(f"@{name} " for user_id in event.at if (name := session.extra.get(user_id))) if event.at else ""
         if "extra_context" in event.properties:
