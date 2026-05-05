@@ -50,12 +50,9 @@ class Session:
         self.decouple_size = decouple_size
 
     def __iter__(self):
-        for record in self.recorder:
-            yield record[0]
-            yield record[1]
-
-    def __bool__(self):
-        return bool(self.recorder)
+        for a, b, _ in self.recorder:
+            yield a
+            yield b
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
