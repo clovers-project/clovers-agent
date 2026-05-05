@@ -26,7 +26,7 @@ class Config(BaseConfig):
     - skill: 技能模型接入点
     - chat: 聊天模型接入点
     """
-    path: str = "./data/clovers-agent/"
+    path: str = "./data/CloversAgent/"
     """数据文件路径"""
     plugins: list[str] = []
     """插件列表"""
