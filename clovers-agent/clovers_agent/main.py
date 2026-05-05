@@ -38,7 +38,7 @@ async def _(event: Event) -> SegmentedResult | None:
 
 async def format_message(result: str) -> SegmentedMessage:
     lines = [x for line in result.split("\n") if (x := line.strip())]
-    if len(lines) > 5:
+    if len(lines) > 4:
         yield Result("text", result)
     else:
         for seg in result.split("\n"):

@@ -50,18 +50,19 @@ class Session(ContextRecoder):
 
     def __init__(
         self,
-        size: int,
+        memory_size: int,
+        silence_size: int,
         router_size: int,
         unimportant_size: int,
         decouple_size: int,
         sentence_model: SentenceTransformer,
     ) -> None:
         # 标准记录
-        super().__init__(size)
-        self.silence_recorder: deque[tuple[str, float]] = deque()
+        super().__init__(memory_size)
+        self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.router_recorder: deque[Record] = deque(maxlen=router_size)
         # 临时记录
-        self.snap: ContextRecoder = ContextRecoder(size)
+        self.snap: ContextRecoder = ContextRecoder(memory_size)
         # 状态
         self.extra: dict = {}
         self.usage_counter = {}
@@ -146,7 +147,7 @@ class Session(ContextRecoder):
 
     @property
     def unimportant_context(self):
-        if not self.unimportant_recorder:
+        if not self.unimportant_recorder and self.recorder:
             yield from self.recorder[-1][:2]
 
     def update_context(self, messags: Iterable[Message]):

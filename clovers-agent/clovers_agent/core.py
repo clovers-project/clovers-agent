@@ -62,8 +62,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.summary_prompt = config.summary_prompt
         # 配置
         self.memory_timeout = config.memory_timeout
-        self.topic_coldown = config.topic_coldown
+        self.silence_timeout = config.silence_timeout
         self.memory_size = config.memory_size
+        self.silence_size = config.silence_size
         self.router_size = config.router_size
         self.unimportant_size = config.unimportant_size
         self.decouple_length = config.decouple_length
@@ -186,6 +187,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         if session_id not in self.sessions:
             self.sessions[session_id] = Session(
                 self.memory_size,
+                self.silence_size,
                 self.router_size,
                 self.unimportant_size,
                 self.decouple_length,
@@ -328,7 +330,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.clear()
                 session.silence_recorder.append((summary, timestamp))
             session.memory_filter(timestamp - self.memory_timeout)
-            session.silence_filter(timestamp - self.topic_coldown)
+            session.silence_filter(timestamp - self.silence_timeout)
             session.silence_recorder.append((request, timestamp))
             message = list(x[0] for x in session.silence_recorder)
             message = "\n".join(message)
