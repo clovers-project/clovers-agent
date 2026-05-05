@@ -11,7 +11,7 @@ from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI
 from .skill import SkillCore
-from .session import Session
+from .session import Session, extract_plain_text
 from .utils import deep_add
 from .embedding import SentenceTransformer
 from .constants import ON_CHAT, ON_SKILL, SKILL_MENU, DECISION_TOOL
@@ -336,7 +336,13 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         if silence_duration > self.dormant_timeout:
             return message
         api = self.api("decision")
-        payload = api.build_payload((message,), self.active_decision_prompt)
+        prompts = [self.active_decision_prompt]
+        if session.recorder:
+            a, b, _ = session.recorder[-1]
+            prompts.append("上次对话：")
+            prompts.append(f"{extract_plain_text(a["content"])}")
+            prompts.append(f"[助手回复]{b["content"]}")
+        payload = api.build_payload((message,), "\n".join(prompts))
         payload["tools"] = DECISION_TOOL
         try:
             resp = await api.call_api(payload, session.usage_counter)
@@ -350,9 +356,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     async def active_reply(self, session: Session, message: UserMessage, timestamp: float):
         session.last_active_time = timestamp
         api = self.api("active")
-        prompts = (self.active_prompt, self.base_prompt)
+        prompts = (self.style_prompt, self.active_prompt)
         payload = api.build_payload((message,), "\n".join(x for x in prompts if x))
         try:
+            logger.info(f"[{self.name}][ACTIVE_REPLY]")
             resp = await api.call_api(payload, session.usage_counter)
             result = resp["content"].strip()
             session.over(message, {"role": "assistant", "content": result}, timestamp)
