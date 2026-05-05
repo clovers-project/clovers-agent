@@ -3,6 +3,7 @@ import json
 import asyncio
 import httpx
 from pathlib import Path
+from itertools import islice
 from datetime import datetime
 from clovers.core import ModuleLoader
 from clovers.logger import logger
@@ -13,7 +14,7 @@ from .skill import SkillCore
 from .session import Session
 from .utils import deep_add
 from .embedding import SentenceTransformer
-from .constants import ON_CHAT, ON_SKILL, SKILL_MENU
+from .constants import ON_CHAT, ON_SKILL, SKILL_MENU, DECISION_TOOL
 from typing import Protocol
 from .typing.json_schema import BaseJSONSchemaType
 from .typing.message import UserMessage, ContentSegment, ToolCallInfo, ToolMessage
@@ -59,10 +60,15 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.call_prompt = config.call_prompt
         self.wait_prompt = config.wait_prompt
         self.router_prompt = config.router_prompt
+        self.active_decision_prompt = config.active_decision_prompt
+        self.active_prompt = config.active_prompt
         self.summary_prompt = config.summary_prompt
         # 配置
         self.memory_timeout = config.memory_timeout
         self.silence_timeout = config.silence_timeout
+        self.active_coldown = config.active_coldown
+        self.dormant_timeout = config.dormant_timeout
+        self.active_context_size = config.active_context_size
         self.memory_size = config.memory_size
         self.silence_size = config.silence_size
         self.router_size = config.router_size
@@ -281,19 +287,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.unit_prompts.append(prompt)
         return await self.execute_turn(session, event)
 
-    async def wait_chat(self, session: Session, message: str):
-        unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
-        prompts = (self.style_prompt, self.base_prompt, self.chat_prompt, unit_prompt)
-
-        payload = self._api.build_payload(
-            (*session, {"role": "user", "content": f"{message}\n<system>\n{self.wait_prompt}\n</system>"}),
-            "\n".join(x for x in prompts if x),
-        )
-        try:
-            return (await self._api.call_api(payload, session.usage_counter))["content"].strip()
-        except Exception as e:
-            logger.exception(e)
-
     async def execute_chat(self, session: Session, event: Event, message: str):
         quote_content: list[ContentSegment] = []
         if (call := event.call("flat_context")) and (flat_context := await call):
@@ -308,7 +301,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
         chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
         session.current_input = [*quote_content, *chat_content]
-        session.usage_counter.clear()
         try:
             result = await self.router(session, event)
         except Exception as e:
@@ -323,41 +315,98 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         )
         return result
 
-    async def chat(self, event: Event):
+    async def wait_chat(self, session: Session, message: str):
+        unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
+        prompts = (self.style_prompt, self.base_prompt, self.chat_prompt, unit_prompt)
+        payload = self._api.build_payload(
+            (*session, {"role": "user", "content": f"{message}\n<system>\n{self.wait_prompt}\n</system>"}),
+            "\n".join(x for x in prompts if x),
+        )
+        try:
+            return (await self._api.call_api(payload, session.usage_counter))["content"].strip()
+        except Exception as e:
+            logger.exception(e)
+
+    async def active_decision(self, session: Session, timestamp: float):
+        try:
+            silence_duration = timestamp - session.last_active_time
+            if silence_duration < self.active_coldown:
+                return
+            context = "\n".join(x for x, _ in reversed(tuple(islice(reversed(session.silence_recorder), self.active_context_size))))
+            message: UserMessage = {"role": "user", "content": context}
+            if silence_duration > self.dormant_timeout:
+                return message
+            api = self.api("decision")
+            payload = api.build_payload((message,), self.active_decision_prompt)
+            payload["tools"] = DECISION_TOOL
+            resp = await api.call_api(payload, session.usage_counter)
+            if silence_duration < self.active_coldown:
+                return
+            if "tool_calls" in resp:
+                return message
+        except Exception as e:
+            logger.exception(e)
+
+    async def active_reply(self, session: Session, message: UserMessage, timestamp: float):
+        session.last_active_time = timestamp
+        api = self.api("active")
+        prompts = (self.active_prompt, self.base_prompt)
+        payload = api.build_payload((message,), "\n".join(x for x in prompts if x))
+        try:
+            resp = await api.call_api(payload, session.usage_counter)
+            result = resp["content"].strip()
+            session.over(message, {"role": "assistant", "content": result}, timestamp)
+            return result
+        except Exception as e:
+            logger.exception(e)
+
+    async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
         now = datetime.fromtimestamp(timestamp)
-        session = self.current_session(event)
         if "nicknames" not in session.extra:
             session.extra["nicknames"] = {}
         session.extra["nicknames"][event.user_id] = event.nickname
         head = f"{event.nickname}[{now.strftime("%I:%M %p")}]"
         at = "".join(f"@{name} " for user_id in event.at if (name := session.extra.get(user_id))) if event.at else ""
+        message = event.message
         if "extra_context" in event.properties:
-            body = f"@me {at}{event.message}\n{"\n".join(event.extra_context)}"
+            body = f"@me {at}{message}\n{"\n".join(event.extra_context)}"
         elif event.to_me:
-            body = f"@me {at}{event.message}"
+            body = f"@me {at}{message}"
         else:
-            session.silence_recorder.append((f"{head}{at}{event.message}", timestamp))
-            return
-        request = f"{head}{at}{body}"
+            session.silence_recorder.append((f"{head}{at}{message}", timestamp))
+            if not (bg_msg := await self.active_decision(session, timestamp)):
+                return
+            async with session.execute_lock, session.wait_lock:
+                return await self.active_reply(session, bg_msg, timestamp)
+        session.last_active_time = timestamp
+        request = f"{head}{body}"
         session.memory_filter(timestamp - self.memory_timeout)
         session.silence_filter(timestamp - self.silence_timeout)
         session.silence_recorder.append((request, timestamp))
         session.unit_prompts.append(f"Today:{now.strftime('%Y-%m-%d')}")
-        message = list(x[0] for x in session.silence_recorder)
-        message = "\n".join(message)
-        if session.lock.locked():
+        content = list(x[0] for x in session.silence_recorder)
+        content = "\n".join(content)
+        if session.execute_lock.locked():
+            if session.wait_lock.locked():
+                return
             async with session.wait_lock:
-                result = await self.wait_chat(session, message)
+                return await self.wait_chat(session, content)
         else:
-            async with session.lock:
+            async with session.execute_lock:
                 if session.step(body) and (summary := await self.summary_context(session)):
                     session.clear()
                     session.silence_recorder.append((summary, timestamp))
-                result = await self.execute_chat(session, event, message)
-        deep_add(self.usage_counter, session.usage_counter)
-        usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
-        logger.info(f"[{self.name}][USAGE] {usage}")
+                return await self.execute_chat(session, event, content)
+
+    async def chat(self, event: Event):
+        session = self.current_session(event)
+        session.usage_counter.clear()
+        result = await self.handle_chat(session, event)
+        if session.usage_counter:
+            deep_add(self.usage_counter, session.usage_counter)
+            usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
+            logger.info(f"[{self.name}][USAGE] {usage}")
         return result
 
 

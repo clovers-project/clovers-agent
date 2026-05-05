@@ -37,8 +37,9 @@ class Session:
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.router_recorder: deque[Record] = deque(maxlen=router_size)
         # 状态
-        self.lock = asyncio.Lock()
+        self.execute_lock = asyncio.Lock()
         self.wait_lock = asyncio.Lock()
+        self.last_active_time = 0.0
         self.extra = {}
         self.usage_counter = {}
         self.unit_prompts: list[str] = []

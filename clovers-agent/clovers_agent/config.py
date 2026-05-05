@@ -48,6 +48,12 @@ class Config(BaseConfig):
     """语义路由上下文长度"""
     decouple_length: int = 1000
     """话题解藕长度（字数）"""
+    active_coldown: int = 60
+    """主动触发冷却（秒）"""
+    dormant_timeout: int = 3600
+    """休眠超时"""
+    active_context_size: int = 5
+    """主动回复上下文长度"""
     style_prompt: str = """\
 你将在聊天群内扮演一个名为“小叶子”的群友。请严格遵守以下人格设定与用户进行对话。
 
@@ -127,6 +133,10 @@ class Config(BaseConfig):
 注意你必须调用工具，如果没有匹配的场景则使用 '{ON_CHAT}'
 """
     """语义路由提示"""
+    active_decision_prompt: str = ""
+    """主动决策提示 这是助手决策发送主动消息时使用的提示"""
+    active_prompt: str = ""
+    """主动消息提示 这里应该是简化的风格提示+聊天提示"""
     summary_prompt: str = "对上述所有历史对话进行详细总结。保留所有的核心讨论内容与关键事实，禁止输出除总结内容以外的任何其他文字。"
     """总结提示 这是总结上下文的用户提示词"""
     console_mode: bool = False
