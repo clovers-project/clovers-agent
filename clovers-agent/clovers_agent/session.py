@@ -18,35 +18,10 @@ def char_count(content: str | list[ContentSegment]):
 type Record = tuple[UserMessage, AssistantMessage, float]
 
 
-class ContextRecoder:
-    """会话上下文管理器"""
-
-    recorder: deque[Record]
-
-    def __init__(self, size: int) -> None:
-        self.recorder = deque(maxlen=size)
-        self.lock = asyncio.Lock()
-
-    def __iter__(self):
-        for record in self.recorder:
-            yield record[0]
-            yield record[1]
-
-    def __bool__(self):
-        return bool(self.recorder)
-
-    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
-        self.recorder.append((request, reply, timestamp))
-
-    def clear(self):
-        self.recorder.clear()
-
-
-class Session(ContextRecoder):
+class Session:
     api: OpenAIAPI
     payload: Payload
     current_input: list[ContentSegment]
-    unit_prompts: list[str]
 
     def __init__(
         self,
@@ -58,20 +33,29 @@ class Session(ContextRecoder):
         sentence_model: SentenceTransformer,
     ) -> None:
         # 标准记录
-        super().__init__(memory_size)
+        self.recorder: deque[Record] = deque(maxlen=memory_size)
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.router_recorder: deque[Record] = deque(maxlen=router_size)
-        # 临时记录
-        self.snap: ContextRecoder = ContextRecoder(memory_size)
         # 状态
-        self.extra: dict = {}
+        self.lock = asyncio.Lock()
+        self.wait_lock = asyncio.Lock()
+        self.extra = {}
         self.usage_counter = {}
+        self.unit_prompts: list[str] = []
         # 不重要信息
         self.unimportant = False
         self.unimportant_recorder: deque[Record] = deque(maxlen=unimportant_size)
         # 主题分离
         self.decoupler = TopicDecoupler(sentence_model)
         self.decouple_size = decouple_size
+
+    def __iter__(self):
+        for record in self.recorder:
+            yield record[0]
+            yield record[1]
+
+    def __bool__(self):
+        return bool(self.recorder)
 
     def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
         """处理完成"""
@@ -103,18 +87,12 @@ class Session(ContextRecoder):
         while self.silence_recorder and (self.silence_recorder[0][1] <= timeout):
             self.silence_recorder.popleft()
 
-    def sync_snap(self):
-        """同步上下文到辅助AI"""
-        self.snap.clear()
-        self.snap.recorder.extend(self.recorder)
-
     def step(self, message: str):
         if sum(char_count(msg["content"]) for msg in self) < self.decouple_size:
             return False
         return self.decoupler.step(message)
 
     def activate(self):
-        self.is_first_wait = True
         for rec in self.unimportant_recorder:
             self.payload["messages"].extend(rec[:2])
         self.cursor = len(self.payload["messages"])
@@ -122,13 +100,11 @@ class Session(ContextRecoder):
         self.result = None
 
     def inactivate(self):
-        self.snap.clear()
         # 按注入顺序删除
+        self.unit_prompts.clear()
         del self.current_input
-        del self.unit_prompts
         del self.api
         del self.payload
-        del self.is_first_wait
         del self.cursor
         del self.result
 

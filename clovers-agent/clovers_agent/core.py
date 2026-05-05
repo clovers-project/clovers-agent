@@ -206,25 +206,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             logger.error(f"[{self.name}][SUMMARY] {e}")
             return
 
-    async def wait_reply(self, session: Session, text: str, images: list[str] | None = None):
-        async with session.snap.lock:
-            if session.is_first_wait:
-                content = session.current_input.copy()
-                content.append({"type": "text", "text": f"<system>\n{self.wait_prompt}\n</system>"})
-                content.append({"type": "text", "text": text})
-                if images:
-                    content.extend({"type": "image_url", "image_url": {"url": x}} for x in images)
-                message: UserMessage = {"role": "user", "content": content}
-                session.is_first_wait = False
-            else:
-                message = self._api.build_message(text, images)
-            system_prompt = f"{self.style_prompt}\n{self.base_prompt}\n{self.chat_prompt}"
-            payload = self._api.build_payload((*session.snap, message), system_prompt)
-            reply = (await self._api.call_api(payload, session.usage_counter))["content"].strip()
-            if session.lock.locked():
-                session.snap.over(message, {"role": "assistant", "content": reply}, 0.0)
-            return reply
-
     async def activate_category(self, name: str, event: Event):
         hooks = self.category_hooks.get(name)
         if hooks:
@@ -300,6 +281,48 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.unit_prompts.append(prompt)
         return await self.execute_turn(session, event)
 
+    async def wait_chat(self, session: Session, message: str):
+        unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
+        prompts = (self.style_prompt, self.base_prompt, self.chat_prompt, unit_prompt)
+
+        payload = self._api.build_payload(
+            (*session, {"role": "user", "content": f"{message}\n<system>\n{self.wait_prompt}\n</system>"}),
+            "\n".join(x for x in prompts if x),
+        )
+        try:
+            return (await self._api.call_api(payload, session.usage_counter))["content"].strip()
+        except Exception as e:
+            logger.exception(e)
+
+    async def execute_chat(self, session: Session, event: Event, message: str):
+        quote_content: list[ContentSegment] = []
+        if (call := event.call("flat_context")) and (flat_context := await call):
+            quote_content.append({"type": "text", "text": "<quote>"})
+            for unit in flat_context:
+                if unit["text"]:
+                    quote_content.append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
+                if unit["images"]:
+                    quote_content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
+            quote_content.append({"type": "text", "text": "</quote>"})
+        chat_content: list[ContentSegment] = [{"type": "text", "text": message}]
+        image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
+        chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
+        session.current_input = [*quote_content, *chat_content]
+        session.usage_counter.clear()
+        try:
+            result = await self.router(session, event)
+        except Exception as e:
+            logger.exception(e)
+            return
+        finally:
+            session.inactivate()
+        session.over(
+            {"role": "user", "content": chat_content},
+            {"role": "assistant", "content": result},
+            session.silence_recorder[-1][1],
+        )
+        return result
+
     async def chat(self, event: Event):
         timestamp = time.time()
         now = datetime.fromtimestamp(timestamp)
@@ -317,52 +340,25 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             session.silence_recorder.append((f"{head}{at}{event.message}", timestamp))
             return
         request = f"{head}{at}{body}"
-        image_list = event.image_list
-        if image_list:
-            image_list = await asyncio.gather(*(self._api.download_url(image) for image in event.image_list))
-            image_list = [image for image in image_list if image]
+        session.memory_filter(timestamp - self.memory_timeout)
+        session.silence_filter(timestamp - self.silence_timeout)
+        session.silence_recorder.append((request, timestamp))
+        session.unit_prompts.append(f"Today:{now.strftime('%Y-%m-%d')}")
+        message = list(x[0] for x in session.silence_recorder)
+        message = "\n".join(message)
         if session.lock.locked():
-            if not session.silence_recorder:
-                return
-            if session.snap.lock.locked():
-                return
-            return await self.wait_reply(session, request, image_list)
-        async with session.lock:
-            if session.step(body) and (summary := await self.summary_context(session)):
-                session.clear()
-                session.silence_recorder.append((summary, timestamp))
-            session.memory_filter(timestamp - self.memory_timeout)
-            session.silence_filter(timestamp - self.silence_timeout)
-            session.silence_recorder.append((request, timestamp))
-            message = list(x[0] for x in session.silence_recorder)
-            message = "\n".join(message)
-            session.sync_snap()
-            quote_content: list[ContentSegment] = []
-            if (call := event.call("flat_context")) and (flat_context := await call):
-                quote_content.append({"type": "text", "text": "<quote>"})
-                for unit in flat_context:
-                    if unit["text"]:
-                        quote_content.append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
-                    if unit["images"]:
-                        quote_content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
-                quote_content.append({"type": "text", "text": "</quote>"})
-            chat_content: list[ContentSegment] = [{"type": "text", "text": message}]
-            chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list)
-            session.current_input = [*quote_content, *chat_content]
-            session.unit_prompts = [f"Today:{now.strftime('%Y-%m-%d')}"]
-            session.usage_counter.clear()
-            try:
-                result = await self.router(session, event)
-                session.over({"role": "user", "content": chat_content}, {"role": "assistant", "content": result}, timestamp)
-            except Exception as e:
-                logger.exception(e)
-                return
-            finally:
-                deep_add(self.usage_counter, session.usage_counter)
-                usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
-                logger.info(f"[{self.name}][USAGE] {usage}")
-                session.inactivate()
-            return result
+            async with session.wait_lock:
+                result = await self.wait_chat(session, message)
+        else:
+            async with session.lock:
+                if session.step(body) and (summary := await self.summary_context(session)):
+                    session.clear()
+                    session.silence_recorder.append((summary, timestamp))
+                result = await self.execute_chat(session, event, message)
+        deep_add(self.usage_counter, session.usage_counter)
+        usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
+        logger.info(f"[{self.name}][USAGE] {usage}")
+        return result
 
 
 async def skill_menu(agent: CloversAgent, event: Event, category: str):
