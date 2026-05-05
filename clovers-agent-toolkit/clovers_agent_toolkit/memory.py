@@ -70,7 +70,7 @@ async def _(agent: CloversAgent, event: Event, content: str):
             payload = api.build_payload(({"role": "user", "content": note + "\n" + content},), SCRIBE_PROMPT)
             new_note = await api.call_api(payload, agent.current_session(event).usage_counter)
             note_file.write_text(new_note["content"], encoding="utf-8")
-        return "Done"
+        return "OK"
     except Exception as e:
         logger.error(e)
         return f"Error: {e}"
@@ -87,7 +87,8 @@ async def _(agent: CloversAgent, event: Event, content: str):
 )
 async def _(agent: CloversAgent, event: Event, observation: str, impression: str):
     USER_PROFILE.mkdir(parents=True, exist_ok=True)
-    user_profile_path = USER_PROFILE / f"{event.user_id}.md"
+    user_id = event.user_id
+    user_profile_path = USER_PROFILE / f"{user_id}.md"
     old_profile = user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "无"
     session = agent.current_session(event)
     context = "\n".join(extract_plain_text(msg["content"]) for msg in session)
@@ -102,4 +103,7 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     payload = api.build_payload(({"role": "user", "content": user_prompt},), ARCHIVIST_PROMPT)
     resp = await api.call_api(payload, session.usage_counter)
     user_profile_path.write_text(resp["content"], encoding="utf-8")
-    return ""
+    if "update_user_profile" in session.extra:
+        if user_id in session.extra["update_user_profile"]:
+            del session.extra["update_user_profile"][user_id]
+    return "OK"
