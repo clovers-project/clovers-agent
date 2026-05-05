@@ -397,5 +397,5 @@ async def on_chat(agent: CloversAgent, event: Event):
     unit_prompt = "\n".join(x for x in (session.unit_prompts) if x)
     prompts = (agent.style_prompt, agent.base_prompt, agent.chat_prompt, unit_prompt)
     session.payload = session.api.build_payload(session, "\n".join(x for x in prompts if x))
-    session.payload["tools"] = [agent.manifest[ON_SKILL], *agent.select_tools(ON_CHAT)]
+    session.payload["tools"] = agent.select_tools(ON_CHAT).copy()
     return ""

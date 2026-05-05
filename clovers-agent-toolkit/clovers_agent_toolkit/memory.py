@@ -112,8 +112,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "update_user_profile",
-    "更新当前用户画像。当用户展现出性格、人际关系、偏好或上下文中出现可以修正或深化现有文档的语境时"
-    "应调用此工具以更新你对用户专属认知与记录。",
+    "当用户与助手约定某事、提及偏好、展现出性格、人际关系、或上下文中出现可以一定程度上修正你对用户印象的语境时应主动调用此工具。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
         "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},

@@ -5,7 +5,7 @@ from .toolkit import TOOLS, CONFIG
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
 BRAVE_URL = CONFIG.BRAVE_URL
 
-TOOLS.create_category("network", "包含联网搜索、网页内容提取、网络请求、图片查看等工具，用于从互联网获取信息和资源。")
+TOOLS.create_category("network", "包含各种联网功能，用于从互联网获取信息和资源。")
 
 
 @TOOLS.register(
@@ -92,8 +92,8 @@ async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: d
 
 
 @TOOLS.register(
-    "view_image_url",
-    "此工具会将图片注入到用户上下文，当你需要查看用户提供的图片链接请调用此工具。",
+    "fetch_image_url",
+    "此工具会将图片注入到上下文，当助手需要查看图片时调用此工具。",
     {"image_url": {"type": "string", "description": "图片的完整 URL 地址"}},
     "network",
 )
