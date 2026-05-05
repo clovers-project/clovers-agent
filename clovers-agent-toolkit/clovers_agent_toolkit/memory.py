@@ -8,34 +8,46 @@ from clovers.logger import logger
 from .toolkit import TOOLS, CONFIG
 from .workspace import get_session_id, WORKSPACE
 
+SIM_THRESHOD = CONFIG.note_similarity_threshold
+SCRIBE_PROMPT = CONFIG.scribe_prompt
+ARCHIVIST_PROMPT = CONFIG.archivist_prompt
+REMINDER_THRESHOLD = CONFIG.reminder_threshold
+STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
+USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
+
 
 @TOOLS.on_category(ON_CHAT)
 async def _(agent: CloversAgent, event: Event):
     session_id = get_session_id(agent, event)
+    extra = agent.current_session(event).extra
+    if "update_user_profile" not in extra:
+        extra["update_user_profile"] = {}
+    counter = extra["update_user_profile"]
+    user_id = event.user_id
+    count = counter[user_id] = counter.get(user_id, 0) + 1
     note_file = WORKSPACE / session_id / "NOTE.md"
-    if not note_file.exists():
-        return ""
-    try:
-        note = note_file.read_text(encoding="utf-8")
-    except Exception as e:
-        note_file.unlink()
-        logger.error(f"笔记读取失败: {e}")
-        return ""
-    return f"笔记内容\n\n{note}\n"
+    notes = []
+    if note_file.exists():
+        try:
+            note = note_file.read_text(encoding="utf-8")
+            notes.append(f"笔记内容\n\n{note}\n")
+        except Exception as e:
+            note_file.unlink()
+            logger.error(f"笔记读取失败: {e}")
+    user_profile = USER_PROFILE / f"{user_id}.md"
+    if user_profile.exists():
+        notes.append(f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行第一次更新。")
+    else:
 
+        if count > STRONG_REMINDER_THRESHOLD:
+            notes.append(f"当前关注：（上次更新为 {count} 次对话前，请确认是否需要更新。）")
+        elif count > REMINDER_THRESHOLD:
+            notes.append(f"当前关注：（上次更新为 {count} 次对话前）")
+        else:
+            notes.append(f"当前关注：")
+        notes.append(user_profile.read_text(encoding="utf-8"))
 
-SCRIBE_PROMPT = """
-你是一个专业的记忆碎片整合专家。你的任务是对一组记录进行维护和清理。
-
-请严格遵守以下准则：
-1. 每一行输出只能包含一个独立的信息点。严禁在单条信息中使用换行符或分段。
-2. 如果记录之间存在相互矛盾的信息，请仅输出在原始文本中顺序靠后的内容。严禁输出被覆盖的旧矛盾记录。
-3. 将相同、相近的信息，以及对同一事物在不同侧面的记录整合到一起。整合后的条目应涵盖所有相关细节，但需保持简洁。
-4. 对于不涉及合并或冲突的独立条目，请完全按照原文内容输出。对于修改或合并的内容，必须严格保留原文的语言风格。
-
-请开始你的任务。
-""".strip()
-similarity_threshold = CONFIG.note_similarity_threshold
+    return "\n\n".join(notes)
 
 
 @TOOLS.register(
@@ -51,7 +63,7 @@ async def _(agent: CloversAgent, event: Event, content: str):
     try:
         if not note_file.exists() or not (note := note_file.read_text(encoding="utf-8").strip()):
             note_file.write_text(content, encoding="utf-8")
-        elif all(similarity(line, content, agent.sentence_model) < similarity_threshold for line in note.split("\n")):
+        elif all(similarity(line, content, agent.sentence_model) < SIM_THRESHOD for line in note.split("\n")):
             note_file.write_text(note + "\n" + content, encoding="utf-8")
         else:
             api = agent.current_session(event).api
@@ -62,52 +74,6 @@ async def _(agent: CloversAgent, event: Event, content: str):
     except Exception as e:
         logger.error(e)
         return f"Error: {e}"
-
-
-USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
-
-ARCHIVIST_PROMPT = """
-你是一位专业、细致且观察力敏锐的“档案维护员”。你的任务是根据"触发点"信息，更新助手对用户的私密档案。
-
-### 更新要求：
-
-- 将新观察到的信息与旧档案合并。
-- 如果新旧记录存在冲突，请务必以"触发点"为准。
-- 对于因冲突被覆盖的信息，或因本次互动而要求删除的信息，请在更新后的档案中将其彻底移除，不留任何痕迹。
-- 合并重复项，使档案保持简洁、客观、准确。
-- 禁止输出除文档外的任何内容。
-
-### 处理流程：
-
-- 确定哪些维度需要更新，哪些需要保持不变，哪些需要删除。
-- 构思是否需要添加新的档案维度。
-- 筛选值得记录的“记忆碎片”，对不重要的信息进行删除。
-
-完成思考后，请按照以下格式输出更新后的档案：
-
-# 用户档案：[用户昵称]
-
-- **称呼**：(记录你应当如何称呼对方)
-- **标签**：(为用户贴上一个或几个核心关键词标签)
-- **约定**：(记录你与用户达成的任何承诺、协议或长期的互动约定)
-- **偏好**：(记录用户的话题偏好、语言风格偏好、特定观点、禁忌等)
-- **印象**：(基于长期互动和本次感受，你对该用户形成的整体印象)
-- **关系**：(描述目前你与用户的关系状态)
-- **[额外维度]**：(如有必要，请根据互动自行添加)
-
-# 记忆碎片（可选）
-(请在此处以简练的语言记录你认为值得永久保存的、具有代表性的互动瞬间或细节，必须是重要互动。如果没有，可略过此部分。)
-
-请开始更新档案。
-""".strip()
-
-
-@TOOLS.on_category(ON_CHAT)
-async def _(agent: CloversAgent, event: Event):
-    user_profile = USER_PROFILE / f"{event.user_id}.md"
-    if not user_profile.exists():
-        return f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行第一次更新。"
-    return f"当前关注：\n\n{user_profile.read_text(encoding='utf-8')}"
 
 
 @TOOLS.register(
