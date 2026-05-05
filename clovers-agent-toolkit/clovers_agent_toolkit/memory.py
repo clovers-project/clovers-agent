@@ -40,9 +40,9 @@ async def _(agent: CloversAgent, event: Event):
     else:
 
         if count > STRONG_REMINDER_THRESHOLD:
-            notes.append(f"当前关注：（上次更新为 {count} 次对话前，请确认是否需要更新。）")
+            notes.append(f"当前关注：（{count} 次对话前更新，请确认是否过时。）")
         elif count > REMINDER_THRESHOLD:
-            notes.append(f"当前关注：（上次更新为 {count} 次对话前）")
+            notes.append(f"当前关注：（{count} 次对话前更新）")
         else:
             notes.append(f"当前关注：")
         notes.append(user_profile.read_text(encoding="utf-8"))
