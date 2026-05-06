@@ -1,5 +1,16 @@
 from typing import TypedDict, Literal, NotRequired
 
+type MultimodalContentSegment = TextSegment | ImageSegment
+type MultimodalContent = list[MultimodalContentSegment]
+type UserMessage = TextUserMessage | MultimodalUserMessage
+
+
+class TextUserMessage(TypedDict):
+    """用户消息"""
+
+    role: Literal["user"]
+    content: str
+
 
 class TextSegment(TypedDict):
     type: Literal["text"]
@@ -11,7 +22,11 @@ class ImageSegment(TypedDict):
     image_url: dict[Literal["url"], str]
 
 
-type ContentSegment = TextSegment | ImageSegment
+class MultimodalUserMessage(TypedDict):
+    """用户消息"""
+
+    role: Literal["user"]
+    content: MultimodalContent
 
 
 class SystemMessage(TypedDict):
@@ -19,13 +34,6 @@ class SystemMessage(TypedDict):
 
     role: Literal["system"]
     content: str
-
-
-class UserMessage(TypedDict):
-    """用户消息"""
-
-    role: Literal["user"]
-    content: str | list[ContentSegment]
 
 
 class ToolCallFunction(TypedDict):

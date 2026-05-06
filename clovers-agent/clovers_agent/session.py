@@ -1,27 +1,29 @@
 import asyncio
+from itertools import count
 from collections import deque
 from .api import OpenAIAPI
 from .embedding import SentenceTransformer, TopicDecoupler
 from typing import Iterable
-from .typing import Payload, Message, UserMessage, AssistantMessage, SystemMessage
-from .typing.message import ContentSegment
+from .typing import Payload, Message, AssistantMessage, SystemMessage
+from .typing.message import MultimodalContent, TextUserMessage
+from .constants import SYSTEM_TAG
 
 
-def extract_plain_text(content: str | list[ContentSegment]) -> str:
+def extract_plain_text(content: str | MultimodalContent) -> str:
     return content if isinstance(content, str) else "\n".join(text["text"] for text in content if text["type"] == "text")
 
 
-def char_count(content: str | list[ContentSegment]):
+def char_count(content: str | MultimodalContent):
     return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
 
 
-type Record = tuple[UserMessage, AssistantMessage, float]
+type Record = tuple[TextUserMessage, AssistantMessage, float]
 
 
 class Session:
     api: OpenAIAPI
     payload: Payload
-    current_input: list[ContentSegment]
+    current_input: MultimodalContent
 
     def __init__(
         self,
@@ -34,6 +36,8 @@ class Session:
     ) -> None:
         # 标准记录
         self.recorder: deque[Record] = deque(maxlen=memory_size)
+        self.image_id = count()
+        self.image_recorder: deque[tuple[int, str, float]] = deque()
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.router_recorder: deque[Record] = deque(maxlen=router_size)
         # 状态
@@ -55,9 +59,21 @@ class Session:
             yield a
             yield b
 
-    def over(self, request: UserMessage, reply: AssistantMessage, timestamp: float):
+    def over(self, content: str | MultimodalContent, reply: AssistantMessage, timestamp: float):
         """处理完成"""
-        record = (request, reply, timestamp)
+        if isinstance(content, list):
+            contents: list[str] = []
+            for seg in content:
+                match seg["type"]:
+                    case "text":
+                        contents.append(seg["text"])
+                    case "image_url":
+                        url = seg["image_url"]["url"]
+                        image_id = next(self.image_id)
+                        contents.append(f" [image:{image_id}] ")
+                        self.image_recorder.append((image_id, url, timestamp))
+            content = "".join(contents)
+        record: Record = ({"role": "user", "content": content}, reply, timestamp)
         self.router_recorder.append(record)
         if self.unimportant:
             self.unimportant_recorder.append(record)
@@ -75,10 +91,15 @@ class Session:
         self.unimportant_recorder.clear()
         self.silence_recorder.clear()
 
+    def image_url(self, image_id: int) -> str | None:
+        return next((url for i, url, _ in self.image_recorder if i == image_id), None)
+
     def memory_filter(self, timeout: int | float):
         """过滤记忆"""
         while self.recorder and (self.recorder[0][2] <= timeout):
             self.recorder.popleft()
+        while self.image_recorder and (self.image_recorder[0][2] <= timeout):
+            self.image_recorder.popleft()
 
     def silence_filter(self, timeout: int | float):
         """过滤静默记录群聊上下文"""
@@ -94,7 +115,8 @@ class Session:
         for rec in self.unimportant_recorder:
             self.payload["messages"].extend(rec[:2])
         self.cursor = len(self.payload["messages"])
-        self.payload["messages"].append({"role": "user", "content": self.current_input})
+        unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x))
+        self.payload["messages"].append({"role": "user", "content": [{"type": "text", "text": unit_prompt}, *self.current_input]})
         self.result = None
 
     def inactivate(self):

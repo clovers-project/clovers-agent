@@ -34,6 +34,8 @@ class Config(BaseConfig):
     """插件路径"""
     skill_dirs: list[str] = ["./AgentSkills"]
     """技能路径"""
+    call_depth: int = 40
+    """最大调用深度"""
     memory_timeout: int = 3600 * 12
     """记忆超时时间"""
     memory_size: int = 20
@@ -44,16 +46,18 @@ class Config(BaseConfig):
     """静默储存长度"""
     unimportant_size: int = 3
     """不重要上下文记忆长度"""
+    wait_coldown: int = 20
+    """等待回复冷却（秒）"""
     router_size: int = 3
     """语义路由上下文长度"""
-    decouple_length: int = 1000
-    """话题解藕长度（字数）"""
     active_coldown: int = 300
     """主动触发冷却（秒）"""
     dormant_timeout: int = 3600
     """休眠超时"""
     active_context_size: int = 6
     """主动回复上下文长度"""
+    decouple_length: int = 1000
+    """话题解藕长度（字数）"""
     base_prompt: str = """\
 ### 格式说明
 - 消息格式为 用户名[时间]信息
@@ -105,7 +109,7 @@ class Config(BaseConfig):
 - **严禁使用连词**：**严禁**使用逻辑连词，如：“无论……都……”、“只要……就……”、“不仅……还……”、“不是……而是……”、“因为……所以……”等。
 """
     """聊天提示 这里是助手参与聊天的提示"""
-    call_prompt: str = """\
+    execute_prompt: str = """\
 你是一个专业的智能助手，你可以根据对话语境，精准识别用户意图，并调用最匹配的工具完成任务。
 
 当满足以下任一条件时，你应该停止调用工具：
@@ -125,6 +129,7 @@ class Config(BaseConfig):
 
 **禁止越权**：严禁在本次回复中尝试完成或输出任何关于“主任务”的结果。你的任务仅仅是“过渡”。
 **禁止表达局限性**：无论在什么情况下，严禁使用“我不能”、“我无法”、“我没有权限”等表达自己能力受限的词汇。
+**回复要求**：模仿真实即时聊天消息的碎片化表达，每句字数不超过 20 个字。
 
 请根据以下**策略**判断如何回复：
 
