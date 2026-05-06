@@ -6,7 +6,7 @@ from .embedding import SentenceTransformer, TopicDecoupler
 from typing import Iterable
 from .typing import Payload, Message, AssistantMessage, SystemMessage
 from .typing.message import MultimodalContent, TextUserMessage
-from .constants import SYSTEM_TAG
+from .constants import SYSTEM_TAG, VIEW_ID_IMAGE_INFO
 
 
 def extract_plain_text(content: str | MultimodalContent) -> str:
@@ -118,6 +118,11 @@ class Session:
         unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x))
         self.payload["messages"].append({"role": "user", "content": [{"type": "text", "text": unit_prompt}, *self.current_input]})
         self.result = None
+        if not self.image_recorder:
+            return
+        if "tools" not in self.payload:
+            self.payload["tools"] = []
+        self.payload["tools"].append(VIEW_ID_IMAGE_INFO)
 
     def inactivate(self):
         # 按注入顺序删除

@@ -29,6 +29,8 @@ from .constants import (
     ACTIVE_REPLY,
     ACTIVE_REPLY_DESC,
     SYSTEM_TAG,
+    BUILTIN_CATEGORY,
+    VIEW_ID_IMAGE_INFO,
 )
 
 
@@ -101,6 +103,21 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour="*/8", misfire_grace_time=120)
 
+    @property
+    def style_prompt(self) -> str:
+        """Agent 人物设定核心提示"""
+        return f"{self._style_prompt}\n{self._base_prompt}"
+
+    @property
+    def chat_prompt(self) -> str:
+        """Agent 聊天核心提示"""
+        return f"{self._style_prompt}\n{self._base_prompt}\n{self._chat_prompt}"
+
+    @property
+    def skill_prompt(self) -> str:
+        """Agent 技能调用核心提示"""
+        return f"{self._execute_prompt}\n{self._base_prompt}"
+
     def api(self, key: str):
         return self._apis.get(key, self._api)
 
@@ -132,6 +149,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
         self.register(ON_SKILL, ON_SKILL_DESC, self.skill_parameters)(on_skill)
         self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, ON_SKILL)(skill_menu)
+        self.category_decorator(VIEW_ID_IMAGE_INFO, BUILTIN_CATEGORY)(view_id_image)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()
@@ -152,21 +170,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", self._summary_prompt)
         self._active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", self._active_decision_prompt)
         self._active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", self._active_reply_prompt)
-
-    @property
-    def style_prompt(self) -> str:
-        """Agent 人物设定核心提示"""
-        return f"{self._style_prompt}\n{self._base_prompt}"
-
-    @property
-    def chat_prompt(self) -> str:
-        """Agent 聊天核心提示"""
-        return f"{self._style_prompt}\n{self._base_prompt}\n{self._chat_prompt}"
-
-    @property
-    def skill_prompt(self) -> str:
-        """Agent 技能调用核心提示"""
-        return f"{self._execute_prompt}\n{self._base_prompt}"
 
     def sync_menu(self):
         for skill in self.skills:
@@ -435,6 +438,15 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
         new_tools = agent.select_tools(category)
         session.payload["tools"].extend(x for x in new_tools if x["function"]["name"] not in used)
     return prompt or f"已获取技能：{category}"
+
+
+async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
+    session = agent.current_session(event)
+    url = session.image_url(image_id)
+    if not url:
+        return "未找到图片"
+    session.current_input.append({"type": "image_url", "image_url": {"url": url}})
+    return "将图片放入上下文"
 
 
 async def on_skill(agent: CloversAgent, event: Event, category: str):
