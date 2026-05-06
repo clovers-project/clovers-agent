@@ -9,7 +9,7 @@ from clovers.core import ModuleLoader
 from clovers.logger import logger
 from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from .api import OpenAIAPI
+from .api import OpenAIAPI, HybridOpenAIAPI
 from .skill import SkillCore, Parameters
 from .session import Session
 from .utils import deep_add
@@ -18,7 +18,7 @@ from typing import Protocol, Literal, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
-from .config import Config
+from .config import Config, HybridOpenAIConfig
 from .constants import (
     ON_CHAT,
     ON_CHAT_DESC,
@@ -30,7 +30,7 @@ from .constants import (
     ACTIVE_REPLY_DESC,
     SYSTEM_TAG,
     BUILTIN_CATEGORY,
-    VIEW_ID_IMAGE_INFO,
+    GET_IMAGE_BY_ID_INFO,
 )
 
 
@@ -59,9 +59,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         else:
             logger.info(f"[{self.name}] 已关闭")
             self.check = lambda e: False
+        self.async_client = async_client
         # 核心
-        self._api = OpenAIAPI(async_client, config.api)
-        self._apis = {name: OpenAIAPI(async_client, api_config) for name, api_config in config.apis.items()}
+        self._api = self.creat_api(config.api)
+        self._apis = {name: self.creat_api(api_config) for name, api_config in config.apis.items()}
         self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
         self.scheduler = scheduler
         # 状态
@@ -118,6 +119,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         """Agent 技能调用核心提示"""
         return f"{self._execute_prompt}\n{self._base_prompt}"
 
+    def creat_api(self, config: HybridOpenAIConfig):
+        if config.vision:
+            return HybridOpenAIAPI(self.async_client, config)
+        else:
+            return OpenAIAPI(self.async_client, config)
+
     def api(self, key: str):
         return self._apis.get(key, self._api)
 
@@ -150,7 +157,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
         self.register(ON_SKILL, ON_SKILL_DESC, self.skill_parameters)(on_skill)
         self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, ON_SKILL)(skill_menu)
-        self.category_decorator(VIEW_ID_IMAGE_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()

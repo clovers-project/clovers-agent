@@ -15,10 +15,9 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
     "network",
 )
 async def _(agent: CloversAgent, event: Event, query: list[str]):
-    session = agent.current_session(event)
     headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
     params = {"q": query, "count": 8}
-    resp = await session.api.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
+    resp = await agent.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
     if resp.status_code != 200:
         return f"搜索失败，状态码：{resp.status_code}"
     try:
@@ -43,11 +42,10 @@ async def _(agent: CloversAgent, event: Event, query: list[str]):
     "network",
 )
 async def _(agent: CloversAgent, event: Event, webpage_url: str):
-    session = agent.current_session(event)
     if not webpage_url.startswith("http"):
         webpage_url = f"https://{webpage_url}"
     try:
-        resp = await session.api.async_client.get(webpage_url)
+        resp = await agent.async_client.get(webpage_url)
         if resp.status_code != 200:
             return f"获取网页失败，状态码：{resp.status_code}"
         return resp.text
@@ -71,12 +69,11 @@ ALLOWED_TYPES = ("application/json", "text/", "application/xml")
     required=["method", "url"],
 )
 async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: dict = {}, data: dict = {}):
-    async_client = agent.current_session(event).api.async_client
     method = method.lower()
     if method == "get":
-        resp = await async_client.get(url, params=data, headers=headers)
+        resp = await agent.async_client.get(url, params=data, headers=headers)
     elif method == "post":
-        resp = await async_client.post(url, json=data, headers=headers)
+        resp = await agent.async_client.post(url, json=data, headers=headers)
     else:
         return f"Invalid method: {method}"
     content = resp.text
@@ -92,8 +89,8 @@ async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: d
 
 
 @TOOLS.register(
-    "fetch_image_url",
-    "此工具会将图片注入到上下文，当助手需要查看图片时调用此工具。",
+    "get_image_by_url",
+    "当助手需要查看一个URL图片时调用此工具。",
     {"image_url": {"type": "string", "description": "图片的完整 URL 地址"}},
     "network",
 )

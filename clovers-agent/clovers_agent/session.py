@@ -6,7 +6,7 @@ from .embedding import SentenceTransformer, TopicDecoupler
 from typing import Iterable
 from .typing import Payload, Message, AssistantMessage, SystemMessage
 from .typing.message import MultimodalContent, TextUserMessage
-from .constants import SYSTEM_TAG, VIEW_ID_IMAGE_INFO
+from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 
 
 def extract_plain_text(content: str | MultimodalContent) -> str:
@@ -122,7 +122,7 @@ class Session:
             return
         if "tools" not in self.payload:
             self.payload["tools"] = []
-        self.payload["tools"].append(VIEW_ID_IMAGE_INFO)
+        self.payload["tools"].append(GET_IMAGE_BY_ID_INFO)
 
     def inactivate(self):
         # 按注入顺序删除
