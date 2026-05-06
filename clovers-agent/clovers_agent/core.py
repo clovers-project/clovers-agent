@@ -14,7 +14,7 @@ from .skill import SkillCore, Parameters
 from .session import Session
 from .utils import deep_add
 from .embedding import SentenceTransformer
-from typing import Protocol, Literal
+from typing import Protocol, Literal, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
@@ -125,6 +125,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def check(e: Event) -> bool:
         raise NotImplementedError
 
+    @override
     def _load(self, package: str):
         tools = super()._load(package)
         if tools is None:
@@ -425,6 +426,25 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         return result
 
 
+async def on_skill(agent: CloversAgent, event: Event, category: str):
+    session = agent.current_session(event)
+    session.api = agent.api("skill")
+    session.payload = session.api.build_payload(session, agent.skill_prompt)
+    session.payload["tools"] = agent.select_tools(ON_SKILL).copy()
+    skill_prompt = await skill_menu(agent, event, category)
+    if skill_prompt:
+        session.system_message["content"] += f"\n{skill_prompt}"
+    return ""
+
+
+async def on_chat(agent: CloversAgent, event: Event):
+    session = agent.current_session(event)
+    session.api = agent.api("chat")
+    session.payload = session.api.build_payload(session, agent.chat_prompt)
+    session.payload["tools"] = agent.select_tools(ON_CHAT).copy()
+    return ""
+
+
 async def skill_menu(agent: CloversAgent, event: Event, category: str):
     session = agent.current_session(event)
     if prompts := await agent.activate_category(category, event):
@@ -447,22 +467,3 @@ async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
         return "未找到图片"
     session.current_input.append({"type": "image_url", "image_url": {"url": url}})
     return "将图片放入上下文"
-
-
-async def on_skill(agent: CloversAgent, event: Event, category: str):
-    session = agent.current_session(event)
-    session.api = agent.api("skill")
-    session.payload = session.api.build_payload(session, agent.skill_prompt)
-    session.payload["tools"] = agent.select_tools(ON_SKILL).copy()
-    skill_prompt = await skill_menu(agent, event, category)
-    if skill_prompt:
-        session.system_message["content"] += f"\n{skill_prompt}"
-    return ""
-
-
-async def on_chat(agent: CloversAgent, event: Event):
-    session = agent.current_session(event)
-    session.api = agent.api("chat")
-    session.payload = session.api.build_payload(session, agent.chat_prompt)
-    session.payload["tools"] = agent.select_tools(ON_CHAT).copy()
-    return ""

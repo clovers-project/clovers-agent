@@ -15,6 +15,25 @@ VIEW_ID_IMAGE_INFO: FunctionToolInfo = {
     "function": {
         "name": "view_id_image",
         "description": "当助手认为自己需要查看上下文中格式为 [image:image_id] 的图片时调用此方法。",
-        "parameters": {"type": "object", "properties": {"image_id": {"type": "integer"}}, "required": ["image_id"]},
+        "parameters": {
+            "type": "object",
+            "properties": {"image_id": {"type": "integer"}},
+            "required": ["image_id"],
+        },
     },
 }
+VISION_PROMPT = """\
+你是一位专业的图像分析专家。你的任务是观察并描述提供给你的图像。你的描述将作为后续的纯文本模型提供关于这些图像的上下文。
+
+对于每一张图片，请考虑以下维度：
+1. 主体与背景，各元素的颜色、材质、形状、光影效果、元素之间的空间位置关系
+2. 如果图像中包含任何文字，请准确识别并记录。
+3. 图片类型：如照片、插画、图表、截屏等。
+
+你的输出请遵循以下格式要求：
+- 如果有多张图片，请在描述中进行区分。
+- 描述应当详尽且具有逻辑性，确保可以依据描述
+- 保持客观中立。
+
+请开始你的分析和描述。
+"""

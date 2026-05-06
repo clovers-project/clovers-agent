@@ -17,10 +17,15 @@ class OpenAIConfig(BaseModel):
     """额外请求体"""
 
 
+class HybridOpenAIConfig(OpenAIConfig):
+    vision: OpenAIConfig | None = None
+    """视觉模型接入点，纯文本模型需要配置此项"""
+
+
 class Config(BaseConfig):
-    api: OpenAIConfig
+    api: HybridOpenAIConfig
     """主模型接入点"""
-    apis: dict[str, OpenAIConfig] = {}
+    apis: dict[str, HybridOpenAIConfig] = {}
     """其他模型接入点，内置的键名：
     - router: 路由模型接入点
     - skill: 技能模型接入点

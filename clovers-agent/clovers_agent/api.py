@@ -3,8 +3,11 @@ import httpx
 from clovers.logger import logger
 from collections.abc import Iterable
 from .utils import data_url, deep_add
+from typing import override
 from .typing import Message, UserMessage, AssistantMessage, Payload
-from .config import OpenAIConfig
+from .typing.message import MultimodalContent
+from .config import OpenAIConfig, HybridOpenAIConfig
+from .constants import SYSTEM_TAG, VISION_PROMPT
 
 
 class OpenAIAPI:
@@ -61,3 +64,38 @@ class OpenAIAPI:
         except Exception as e:
             logger.exception(e)
             return None
+
+
+class HybridOpenAIAPI(OpenAIAPI):
+    def __init__(self, async_client: httpx.AsyncClient, config: HybridOpenAIConfig) -> None:
+        super().__init__(async_client, config)
+        if not config.vision:
+            raise ValueError("Vision API config is required")
+        self.vision = OpenAIAPI(async_client, config.vision)
+
+    @override
+    async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
+        message = payload["messages"][-1]
+        if message["role"] == "user" and isinstance(content := message["content"], list):
+            contents: list[str] = []
+            images: MultimodalContent = []
+            for seg in content:
+                match seg["type"]:
+                    case "text":
+                        contents.append(seg["text"])
+                    case "image_url":
+                        images.append(seg)
+            if images and (desc := await self.call_vision(images, usage_counter)):
+                contents.append("\n")
+                contents.append(SYSTEM_TAG.format(desc))
+                contents.append("\n")
+            message["content"] = "".join(contents)  # type: ignore 这里需要原地修改
+        return await super().call_api(payload, usage_counter)
+
+    async def call_vision(self, images: MultimodalContent, usage_counter: dict):
+        try:
+            payload = self.vision.build_payload(({"role": "user", "content": images},), VISION_PROMPT)
+            resp = await self.vision.call_api(payload, usage_counter)
+            return resp["content"].strip()
+        except Exception as e:
+            logger.exception(e)
