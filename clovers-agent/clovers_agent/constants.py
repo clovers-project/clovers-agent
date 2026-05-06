@@ -14,7 +14,7 @@ GET_IMAGE_BY_ID_INFO: FunctionToolInfo = {
     "type": "function",
     "function": {
         "name": "get_image_by_id",
-        "description": "当助手认为自己需要查看上下文中格式为 [image:image_id] 的图片时调用此方法。",
+        "description": "上下文中的图片已替换成格式为 [image:image_id] 的标签，当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此方法。",
         "parameters": {
             "type": "object",
             "properties": {
