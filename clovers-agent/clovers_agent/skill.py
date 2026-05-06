@@ -13,16 +13,16 @@ from .typing.json_schema import JSONSchemaType
 if TYPE_CHECKING:
     from .core import CloversAgent, Event
 
+
 type IntroDecorator = Callable[[ToolFunction], ToolFunction]
 type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], Coro[str] | str]
 type WrappedToolFunction[**P] = Callable[Concatenate[str, CloversAgent, Event, P], Coro[ToolMessage]]
 type CategoryDecorator = Callable[[ToolFunction], WrappedToolFunction]
-type SkillMD = tuple[str, str, SkillCore.Parameters | None, str]
+type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
+type SkillMD = tuple[str, str, Parameters | None, str]
 
 
 class SkillCore:
-    type Parameters = dict[str, JSONSchemaType]
-
     def __init__(self) -> None:
         self.category_id = count()
         self.intro_tools: list[FunctionToolInfo] = []

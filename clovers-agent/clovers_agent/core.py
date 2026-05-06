@@ -10,15 +10,24 @@ from clovers.logger import logger
 from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI
-from .skill import SkillCore
+from .skill import SkillCore, Parameters
 from .session import Session, extract_plain_text
 from .utils import deep_add
 from .embedding import SentenceTransformer
-from .constants import ON_CHAT, ON_SKILL, SKILL_MENU, DECISION_TOOL
-from typing import Protocol
+from typing import Protocol, Literal
 from .typing.json_schema import BaseJSONSchemaType
 from .typing.message import UserMessage, ContentSegment, ToolCallInfo, ToolMessage
 from .config import Config
+from .constants import (
+    ON_CHAT,
+    ON_CHAT_DESC,
+    ON_SKILL,
+    ON_SKILL_DESC,
+    SKILL_MENU,
+    SKILL_MENU_DESC,
+    ACTIVE_REPLY,
+    ACTIVE_REPLY_DESC,
+)
 
 
 class Event(BaseEvent, Protocol):
@@ -54,15 +63,15 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.usage_dir = path / "usages"
         self.payload_dir = path / "payloads"
         self.prompts_dir = path / "prompts"
-        self.style_prompt = config.style_prompt
         self.base_prompt = config.base_prompt
+        self.router_prompt = config.router_prompt
+        self.style_prompt = config.style_prompt
         self.chat_prompt = config.chat_prompt
         self.call_prompt = config.call_prompt
         self.wait_prompt = config.wait_prompt
-        self.router_prompt = config.router_prompt
-        self.active_decision_prompt = config.active_decision_prompt
-        self.active_prompt = config.active_prompt
         self.summary_prompt = config.summary_prompt
+        self.active_decision_prompt = config.active_decision_prompt
+        self.active_reply_prompt = config.active_prompt
         # 配置
         self.memory_timeout = config.memory_timeout
         self.silence_timeout = config.silence_timeout
@@ -84,7 +93,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._plugins = config.plugins
         self._plugin_dirs = config.plugin_dirs
         self._skill_dirs = config.skill_dirs
-        self._category_schema: BaseJSONSchemaType = {"type": "string"}
+        self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour="*/8", misfire_grace_time=120)
 
     def api(self, key: str):
@@ -115,21 +124,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     def skill_init(self):
         SkillCore.__init__(self)
-        self.register(
-            ON_CHAT,
-            "当前对话为闲聊、讨论与简单提问、或无法分配至其他工具时，调用此方法。",
-        )(on_chat)
-        self.register(
-            ON_SKILL,
-            "当用户的指令涉及外部调用时，调用此方法以进入技能执行环境。",
-            {"category": self._category_schema},
-        )(on_skill)
-        self.register(
-            SKILL_MENU,
-            "获取更多技能，如果助手无法独自完成用户指令，则需要调用此方法获取更多技能。",
-            {"category": self._category_schema},
-            ON_SKILL,
-        )(skill_menu)
+        self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
+        self.register(ON_SKILL, ON_SKILL_DESC, self.skill_parameters)(on_skill)
+        self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, ON_SKILL)(skill_menu)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()
@@ -141,13 +138,15 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             readme_md.write_text(f"删除 README.md 则会从 {self.prompts_dir.as_posix()} 读取 prompt 配置", encoding="utf-8")
         else:
             logger.info(f"[{self.name}][LOADING PROMPTS]")
-        self.style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", self.style_prompt)
         self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", self.base_prompt)
+        self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", self.router_prompt)
+        self.style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", self.style_prompt)
         self.chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", self.chat_prompt)
         self.call_prompt = self.load_prompt(self.prompts_dir / "CALL.md", self.call_prompt)
         self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", self.wait_prompt)
-        self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", self.router_prompt)
         self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", self.summary_prompt)
+        self.active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", self.active_decision_prompt)
+        self.active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", self.active_reply_prompt)
 
     def sync_menu(self):
         for skill in self.skills:
@@ -166,8 +165,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 name_set.add(name)
             logger.info(f'[{self.name}][SKILLS] "{category or name}" loaded')
         self.skills = *((category, None) for category in category_set), *((None, name) for name in name_set)
-        self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
-        self._category_schema["enum"] = list(self.categories.keys())
+        self.skill_parameters["category"]["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
+        self.skill_parameters["category"]["enum"] = list(self.categories.keys())
 
     def daily_tasks(self):
         timeout = time.time() - self.memory_timeout
@@ -331,19 +330,13 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         silence_duration = timestamp - session.last_active_time
         if silence_duration < self.active_coldown:
             return
-        context = "\n".join(x for x, _ in reversed(tuple(islice(reversed(session.silence_recorder), self.active_context_size))))
-        message: UserMessage = {"role": "user", "content": context}
+        context = [x for x, _ in islice(reversed(session.silence_recorder), self.active_context_size)]
+        message: UserMessage = {"role": "user", "content": "\n".join(reversed(context))}
         if silence_duration > self.dormant_timeout:
             return message
         api = self.api("decision")
-        prompts = [self.active_decision_prompt]
-        if session.recorder:
-            a, b, _ = session.recorder[-1]
-            prompts.append("上次对话：")
-            prompts.append(f"{extract_plain_text(a["content"])}")
-            prompts.append(f"[助手回复]{b["content"]}")
-        payload = api.build_payload((message,), "\n".join(prompts))
-        payload["tools"] = DECISION_TOOL
+        payload = api.build_payload((message,), "\n".join(self.active_decision_prompt))
+        payload["tools"] = [{"type": "function", "function": {"name": ACTIVE_REPLY, "description": ACTIVE_REPLY_DESC}}]
         try:
             resp = await api.call_api(payload, session.usage_counter)
             if silence_duration < self.active_coldown:
@@ -356,7 +349,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     async def active_reply(self, session: Session, message: UserMessage, timestamp: float):
         session.last_active_time = timestamp
         api = self.api("active")
-        prompts = (self.style_prompt, self.active_prompt)
+        prompts = (self.style_prompt, self.active_reply_prompt)
         payload = api.build_payload((message,), "\n".join(x for x in prompts if x))
         try:
             logger.info(f"[{self.name}][ACTIVE_REPLY]")
@@ -382,7 +375,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             body = f"@me {at}{message}"
         else:
             session.silence_recorder.append((f"{head}{at}{message}", timestamp))
-            if not (bg_msg := await self.active_decision(session, timestamp)):
+            if event.at or not (bg_msg := await self.active_decision(session, timestamp)):
                 return
             async with session.execute_lock, session.wait_lock:
                 return await self.active_reply(session, bg_msg, timestamp)
