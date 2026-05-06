@@ -75,8 +75,8 @@ class HybridOpenAIAPI(OpenAIAPI):
 
     @override
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        message = payload["messages"][-1]
-        if message["role"] == "user" and isinstance(content := message["content"], list):
+        message = next((x for x in reversed(payload["messages"]) if x["role"] == "user"), None)
+        if message and isinstance(content := message["content"], list):
             texts = []
             has_image = False
             for seg in content:
@@ -87,6 +87,7 @@ class HybridOpenAIAPI(OpenAIAPI):
                         has_image = True
             contents = []
             if has_image and (desc := await self.call_vision(content, usage_counter)):
+                print(desc)
                 contents.append(SYSTEM_TAG.format(desc))
                 contents.append("\n")
             contents.append("".join(texts))
