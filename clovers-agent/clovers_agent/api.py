@@ -77,24 +77,25 @@ class HybridOpenAIAPI(OpenAIAPI):
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
         message = payload["messages"][-1]
         if message["role"] == "user" and isinstance(content := message["content"], list):
-            contents: list[str] = []
-            images: MultimodalContent = []
+            texts = []
+            has_image = False
             for seg in content:
                 match seg["type"]:
                     case "text":
-                        contents.append(seg["text"])
+                        texts.append(seg["text"])
                     case "image_url":
-                        images.append(seg)
-            if images and (desc := await self.call_vision(images, usage_counter)):
-                contents.append("\n")
+                        has_image = True
+            contents = []
+            if has_image and (desc := await self.call_vision(content, usage_counter)):
                 contents.append(SYSTEM_TAG.format(desc))
                 contents.append("\n")
+            contents.append("".join(texts))
             message["content"] = "".join(contents)  # type: ignore 这里需要原地修改
         return await super().call_api(payload, usage_counter)
 
-    async def call_vision(self, images: MultimodalContent, usage_counter: dict):
+    async def call_vision(self, content: MultimodalContent, usage_counter: dict):
         try:
-            payload = self.vision.build_payload(({"role": "user", "content": images},), VISION_PROMPT)
+            payload = self.vision.build_payload(({"role": "user", "content": content},), VISION_PROMPT)
             resp = await self.vision.call_api(payload, usage_counter)
             return resp["content"].strip()
         except Exception as e:
