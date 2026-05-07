@@ -59,6 +59,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.usage_dir = path / "usages"
         self.payload_dir = path / "payloads"
         self.prompts_dir = path / "prompts"
+        self.init_prompts()
         # 配置
         self.call_depth = CONFIG.call_depth
         self.wait_coldown = CONFIG.wait_coldown
@@ -117,23 +118,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             md.write_text(prompt, encoding="utf-8")
         return prompt
 
-    def skill_init(self):
-        SkillCore.__init__(self)
-        self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
-        self.register(ON_SKILL, ON_SKILL_DESC, self.skill_parameters)(on_skill)
-        self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, ON_SKILL)(skill_menu)
-        self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
-        self.load_from_list(self._plugins)
-        self.load_from_dirs(self._plugin_dirs)
-        self.sync_menu()
-        readme_md = self.prompts_dir / "README.md"
-        if readme_md.exists():
-            return
-        if not self.prompts_dir.exists():
-            self.prompts_dir.mkdir(parents=True, exist_ok=True)
-            readme_md.write_text(f"删除 README.md 则会从 {self.prompts_dir.as_posix()} 读取 prompt 配置", encoding="utf-8")
-        else:
-            logger.info(f"[{self.name}][LOADING PROMPTS]")
+    def init_prompts(self):
+        logger.info(f"[{self.name}][LOADING PROMPTS]")
         self._base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
         self._router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
         self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
@@ -143,6 +129,16 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
         self._active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", PROMPTS.active_decision_prompt)
         self._active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", PROMPTS.active_reply_prompt)
+
+    def skill_init(self):
+        SkillCore.__init__(self)
+        self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
+        self.register(ON_SKILL, ON_SKILL_DESC, self.skill_parameters)(on_skill)
+        self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, ON_SKILL)(skill_menu)
+        self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.load_from_list(self._plugins)
+        self.load_from_dirs(self._plugin_dirs)
+        self.sync_menu()
 
     def sync_menu(self):
         for skill in self.skills:
