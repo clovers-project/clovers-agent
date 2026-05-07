@@ -90,7 +90,6 @@ class HybridOpenAIAPI(OpenAIAPI):
                     has_image = True
         contents = []
         if has_image and (desc := await self.call_vision(content, usage_counter)):
-            print(desc)
             contents.append(VISION_TAG.format(desc))
             contents.append("\n")
         contents.append("".join(texts))

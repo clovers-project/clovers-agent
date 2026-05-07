@@ -87,6 +87,8 @@ class Session:
 
     def clear(self):
         """清理记录"""
+        self.recorder.clear()
+        self.image_recorder.clear()
         self.router_recorder.clear()
         self.unimportant_recorder.clear()
         self.silence_recorder.clear()
@@ -116,7 +118,8 @@ class Session:
             self.payload["messages"].extend(rec[:2])
         self.cursor = len(self.payload["messages"])
         unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
-        self.payload["messages"].append({"role": "user", "content": [{"type": "text", "text": unit_prompt}, *self.current_input]})
+        self.current_input.insert(0, {"type": "text", "text": unit_prompt})
+        self.payload["messages"].append({"role": "user", "content": self.current_input})
         self.result = None
         if not self.image_recorder:
             return
