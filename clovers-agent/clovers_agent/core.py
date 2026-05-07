@@ -103,7 +103,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._plugin_dirs = config.plugin_dirs
         self._skill_dirs = config.skill_dirs
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
-        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour="*/8", misfire_grace_time=120)
+        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
     @property
     def style_prompt(self) -> str:
