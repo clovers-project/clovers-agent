@@ -6,7 +6,7 @@ from typing import override
 from .typing import Message, UserMessage, AssistantMessage, Payload
 from .typing.message import MultimodalContent
 from .config import OpenAIConfig, HybridOpenAIConfig
-from .constants import SYSTEM_TAG, VISION_PROMPT
+from .constants import VISION_TAG, VISION_PROMPT
 
 
 class OpenAIAPI:
@@ -41,7 +41,7 @@ class OpenAIAPI:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
         from .session import extract_plain_text
 
-        print("\n".join(f"[{i}{x["role"]}]:\n{extract_plain_text(x["content"])}" for i, x in enumerate(payload["messages"])))
+        print("\n".join(f"[{i}][{x["role"]}]:\n{extract_plain_text(x["content"])}" for i, x in enumerate(payload["messages"])))
         if resp.status_code != 200:
             logger.error(resp.text)
             resp.raise_for_status()
@@ -90,7 +90,7 @@ class HybridOpenAIAPI(OpenAIAPI):
             contents = []
             if has_image and (desc := await self.call_vision(content, usage_counter)):
                 print(desc)
-                contents.append(SYSTEM_TAG.format(desc))
+                contents.append(VISION_TAG.format(desc))
                 contents.append("\n")
             contents.append("".join(texts))
             payload["messages"][index] = {"role": "user", "content": "".join(contents)}
