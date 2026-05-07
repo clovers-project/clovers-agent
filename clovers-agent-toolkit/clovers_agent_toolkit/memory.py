@@ -6,7 +6,7 @@ from clovers_agent.embedding import similarity
 from clovers_agent.constants import ON_CHAT
 from clovers.logger import logger
 from .toolkit import TOOLS, CONFIG
-from .workspace import get_session_id, WORKSPACE
+from .workspace import WORKSPACE
 
 SIM_THRESHOD = CONFIG.note_similarity_threshold
 SCRIBE_PROMPT = CONFIG.scribe_prompt
@@ -18,14 +18,13 @@ USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 
 @TOOLS.on_category(ON_CHAT)
 async def _(agent: CloversAgent, event: Event):
-    session_id = get_session_id(agent, event)
     extra = agent.current_session(event).extra
     if "update_user_profile" not in extra:
         extra["update_user_profile"] = {}
     counter = extra["update_user_profile"]
     user_id = event.user_id
     count = counter[user_id] = counter.get(user_id, 0) + 1
-    note_file = WORKSPACE / session_id / "NOTE.md"
+    note_file = WORKSPACE / agent.session_id(event) / "NOTE.md"
     notes = []
     if note_file.exists():
         try:
@@ -57,8 +56,7 @@ async def _(agent: CloversAgent, event: Event):
     ON_CHAT,
 )
 async def _(agent: CloversAgent, event: Event, content: str):
-    session_id = get_session_id(agent, event)
-    note_file = WORKSPACE / session_id / "NOTE.md"
+    note_file = WORKSPACE / agent.session_id(event) / "NOTE.md"
     note_file.parent.mkdir(parents=True, exist_ok=True)
     try:
         if not note_file.exists() or not (note := note_file.read_text(encoding="utf-8").strip()):

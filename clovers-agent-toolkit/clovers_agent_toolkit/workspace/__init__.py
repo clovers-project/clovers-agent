@@ -9,15 +9,8 @@ WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
 README = WORKSPACE / "README.md"
 
 
-def get_session_id(agent: CloversAgent, event: Event) -> str: ...
-
-
-if CONFIG.session_workspace:
-    get_session_id = lambda agent, event: agent.session_id(event)
-else:
-    get_session_id = lambda agent, event: "public"
-
-shell_dict: dict[str, Shell] = {}
+def format_path(path: str):
+    return f".{path[10:]}" if path.startswith("/workspace") else path.lstrip("/\\")
 
 
 @TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
@@ -27,15 +20,16 @@ async def _(agent: CloversAgent, event: Event):
     if not README.exists():
         README.write_text("Clovers Agent Workspace")
     if CONFIG.use_shell:
-        session_id = get_session_id(agent, event)
-        if session_id in shell_dict:
-            shell_dict[session_id].workdir = "/workspace"
-        else:
+        session_id = agent.session_id(event)
+        session = agent.current_session(event)
+        if "shell" not in session.extra:
             try:
-                shell_dict[session_id] = Shell(session_id, WORKSPACE)
+                shell = Shell(session_id, WORKSPACE)
             except Exception as e:
                 logger.error(e)
                 return f"workspace 已初始化, shell 初始化失败，此工作区无法执行命令。\n当前工作目录: /workspace"
+            session.extra["shell"] = shell
+        session.extra["shell"].workdir = "/workspace"
         return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
     else:
         return f"workspace 已初始化\n当前工作目录: /workspace"
@@ -50,11 +44,9 @@ if CONFIG.use_shell:
         "workspace",
     )
     async def _(agent: CloversAgent, event: Event, command: str):
-        session_id = get_session_id(agent, event)
-        if session_id not in shell_dict:
+        extra = agent.current_session(event).extra
+        if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
             return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
-        shell = shell_dict[session_id]
-        logger.info(f"[CloversAgentShell][{session_id}]> {command if (idx := command.find("\n")) == -1 else f"{command[:idx]}..."}")
         output = await shell.execute(command)
         return f"{output}\n当前工作目录: {shell.workdir}"
 
@@ -67,8 +59,7 @@ else:
         "workspace",
     )
     async def _(agent: CloversAgent, event: Event, path: str):
-        session_id = get_session_id(agent, event)
-        folder = WORKSPACE / session_id / path
+        folder = WORKSPACE / agent.session_id(event) / format_path(path)
         if not folder.exists():
             return f"路径 '{path}' 不存在。"
         files = []
@@ -96,14 +87,10 @@ def read_text(file: Path):
     "workspace",
 )
 async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
-    session_id = get_session_id(agent, event)
-    workspace = WORKSPACE / session_id
+    workspace = WORKSPACE / agent.session_id(event)
     md = []
     for file_path in filepaths:
-        if file_path.startswith("/workspace"):
-            file = workspace / f"./{file_path[10:]}"
-        else:
-            file = workspace / file_path
+        file = workspace / format_path(file_path)
         if not file.is_relative_to(workspace):
             md.append(f"{file_path} 非工作区文件")
         if not file.exists():
@@ -123,12 +110,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
     "workspace",
 )
 async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str):
-    session_id = get_session_id(agent, event)
-    workspace = WORKSPACE / session_id
-    if file_path.startswith("/workspace"):
-        file = workspace / f"./{file_path[10:]}"
-    else:
-        file = workspace / file_path
+    file = WORKSPACE / agent.session_id(event) / format_path(file_path)
     file.parent.mkdir(parents=True, exist_ok=True)
     try:
         file.write_text(file_content, encoding="utf-8")
@@ -145,12 +127,8 @@ async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str
     "workspace",
 )
 async def _(agent: CloversAgent, event: Event, file_path: str):
-    session_id = get_session_id(agent, event)
-    workspace = WORKSPACE / session_id
-    if file_path.startswith("/workspace"):
-        file = workspace / f"./{file_path[10:]}"
-    else:
-        file = workspace / file_path
+    workspace = WORKSPACE / agent.session_id(event)
+    file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
         return f"{file_path} 非工作区文件"
     if not file.exists():

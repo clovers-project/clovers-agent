@@ -8,8 +8,6 @@ class Config(BaseConfig):
     # use_shell: Literal["docker", "local"] = "docker"
     use_shell: bool = True
     """是否使用shell"""
-    session_workspace: bool = True
-    """为每个会话创建一个工作空间"""
     note_similarity_threshold: float = 0.6
     """笔记内容相似度阈值"""
     scribe_prompt: str = """\
