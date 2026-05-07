@@ -315,7 +315,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         if "nicknames" not in session.extra:
             session.extra["nicknames"] = {}
         session.extra["nicknames"][event.user_id] = event.nickname
-        head = f"{event.nickname}[{now.strftime("%I:%M %p")}]"
         at = "".join(f"@{name} " for user_id in event.at if (name := session.extra.get(user_id))) if event.at else ""
         message = event.message
         if "extra_context" in event.properties:
@@ -323,7 +322,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         elif event.to_me:
             body = f"@me {at}{message}"
         else:
-            session.silence_recorder.append((f"{head}{at}{message}", timestamp))
+            session.silence_recorder.append((f"[{event.nickname}]{at}{message}", timestamp))
             if event.at or not await self.active_decision(session, timestamp):
                 return
             async with session.execute_lock, session.wait_lock:
@@ -336,7 +335,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.last_active_time = timestamp
                 session.over(content, {"role": "assistant", "content": result}, timestamp)
                 return result
-        request = f"{head}{body}"
+        request = f"[{event.nickname}]{body}"
         session.refresh(timestamp)
         session.silence_recorder.append((request, timestamp))
         content = "\n".join(x for x, _ in session.silence_recorder)
@@ -371,7 +370,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
             session.current_input = [*quote_content, *chat_content]
-            session.unit_prompts.append(f"Today:{self.today}")
+            session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             try:
                 result = await self.router(session, event)
             except Exception as e:

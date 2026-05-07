@@ -1,18 +1,15 @@
 from pathlib import Path
 from clovers_agent import CloversAgent, Event
-from clovers_agent.main import CONFIG as AGENT_CONFIG
+from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.session import extract_plain_text
 from clovers_agent.embedding import similarity
 from clovers_agent.constants import ON_CHAT
 from clovers.logger import logger
-from .toolkit import TOOLS, CONFIG
-from .workspace import WORKSPACE
+from .constants import WRITE_NOTE_PROMPT, UPDATE_USER_PROFILE_PROMPT
+from ..toolkit import TOOLS, CONFIG
+from ..workspace import WORKSPACE
 
 SIM_THRESHOD = CONFIG.note_similarity_threshold
-WRITE_NOTE_DESC = CONFIG.write_note_desc
-WRITE_NOTE_PROMPT = CONFIG.write_note_prompt
-UPDATE_USER_PROFILE_DESC = CONFIG.update_user_profile_desc
-UPDATE_USER_PROFILE_PROMPT = CONFIG.update_user_profile_prompt
 REMINDER_THRESHOLD = CONFIG.reminder_threshold
 STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
@@ -53,7 +50,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "write_note",
-    WRITE_NOTE_DESC,
+    "当**助手**认为上下文中出现了重要或需要长期记录信息时调用",
     {"content": {"type": "string", "description": "笔记内容。内容应为简洁清晰的陈述句。"}},
     ON_CHAT,
 )
@@ -78,7 +75,7 @@ async def _(agent: CloversAgent, event: Event, content: str):
 
 @TOOLS.register(
     "update_user_profile",
-    UPDATE_USER_PROFILE_DESC,
+    "当用户与让助手记住某事，或用户展现出性格、人际关系、或**助手对该用户的印象**与文档产生差异时应*主动*调用此工具。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
         "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},

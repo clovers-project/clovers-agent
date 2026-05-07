@@ -3,5 +3,5 @@ from . import network as _
 from . import workspace as _
 from . import memory as _
 
-__version__ = "0.2.10"
+__version__ = "0.2.12"
 __all__ = ["TOOLS"]

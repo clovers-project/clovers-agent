@@ -143,8 +143,9 @@ class PromptsConfig(BaseModel):
     """主动决策提示 这是助手决策发送主动消息时使用的提示"""
     active_reply_prompt: str = """\
 你会收到一段群聊历史记录，格式为"[用户名]消息"，你的回复绝不包含 [用户名] 前缀
-- 注意这些消息是群友之间的讨论，所有讨论均与你无关，你的回复风格应为参与话题。
-- 模仿真实即时聊天消息的碎片化表达，每句字数不超过 20 个字。
+- 这些消息是群友之间的讨论，**请注意这些消息并非与你对话**。
+- 你的回复应为参与话题的语气。
+- 模仿真实即时聊天消息的碎片化表达，字数不超过 20 个字。
 """
     """主动消息提示 这里应该是简化的风格+格式+聊天提示"""
 
@@ -154,9 +155,9 @@ class ConstantConfig(BaseModel):
     system_tag: str = "<system>\n{}\n</system>"
     # 内置路由路由指令
     on_chat: str = "on_chat"
-    on_chat_desc: str = f"当前对话为闲聊、讨论、简单指令、以聊天为目的的工具调用任务、或无法分配至其他工具时，调用此方法"
+    on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此方法"
     on_skill: str = "on_skill"
-    on_skill_desc: str = "当用户的指令为复杂任务时调用此方法。"
+    on_skill_desc: str = "当用户的指令为明确涉及大量工具调用的复杂任务时，调用此方法。"
     active_reply: str = "active_reply"
     active_reply_desc: str = "如决策主动回复则调用此方法以进入回复环境"
     # 内置工具
