@@ -355,13 +355,13 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.silence_recorder.append((summary, timestamp))
             quote_content: MultimodalContent = []
             if (call := event.call("flat_context")) and (flat_context := await call):
-                quote_content.append({"type": "text", "text": "<quote>"})
+                quote_content.append({"type": "text", "text": "<quote>\n"})
                 for unit in flat_context:
                     if unit["text"]:
                         quote_content.append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
                     if unit["images"]:
                         quote_content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
-                quote_content.append({"type": "text", "text": "</quote>"})
+                quote_content.append({"type": "text", "text": "\n</quote>"})
             chat_content: MultimodalContent = [{"type": "text", "text": content}]
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
