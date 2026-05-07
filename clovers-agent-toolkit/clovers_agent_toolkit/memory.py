@@ -29,8 +29,9 @@ async def _(agent: CloversAgent, event: Event):
     notes = []
     if note_file.exists():
         try:
-            note = note_file.read_text(encoding="utf-8")
-            notes.append(f"笔记内容\n\n{note}\n")
+            note = note_file.read_text(encoding="utf-8").strip()
+            if note:
+                notes.append(f"笔记内容\n\n{note}\n")
         except Exception as e:
             note_file.unlink()
             logger.error(f"笔记读取失败: {e}")

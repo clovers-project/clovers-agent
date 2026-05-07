@@ -242,7 +242,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             logger.error(f"[{self.name}][SUMMARY] {e}")
             return
 
-    async def activate_category(self, name: str, event: Event):
+    async def activate_category(self, name: str, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
         if hooks:
             prompts = []
@@ -306,9 +306,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
             category = ON_CHAT
             await on_chat(self, event)
-        session.activate()
         if category_prompts := await self.activate_category(category, event):
             session.unit_prompts.extend(category_prompts)
+        session.activate()
         return await self.execute_turn(session, event)
 
     async def active_decision(self, session: Session, timestamp: float):
@@ -379,7 +379,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         session.memory_filter(timestamp - self.memory_timeout)
         session.silence_filter(timestamp - self.silence_timeout)
         session.silence_recorder.append((request, timestamp))
-        session.unit_prompts.append(f"Today:{now.strftime('%Y-%m-%d')}")
         content = "\n".join(x for x, _ in session.silence_recorder)
         if session.execute_lock.locked():
             if session.wait_lock.locked():
@@ -394,6 +393,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                     logger.exception(e)
                     return
                 session.last_active_time = timestamp
+                return result
         async with session.execute_lock:
             if session.step(body) and (summary := await self.summary_context(session)):
                 session.clear()
@@ -411,6 +411,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
             session.current_input = [*quote_content, *chat_content]
+            session.unit_prompts.append(f"Today:{now.strftime('%Y-%m-%d')}")
             try:
                 result = await self.router(session, event)
             except Exception as e:
@@ -449,6 +450,7 @@ async def on_chat(agent: CloversAgent, event: Event):
     session.api = agent.api("chat")
     session.payload = session.api.build_payload(session, agent.chat_prompt)
     session.payload["tools"] = agent.select_tools(ON_CHAT).copy()
+    session.payload["tools"].append(agent.manifest[SKILL_MENU])
     return ""
 
 

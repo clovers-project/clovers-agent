@@ -39,10 +39,9 @@ class OpenAIAPI:
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
-        from .session import extract_plain_text
-
-        print("\n".join(f"[{i}][{x["role"]}]:\n{extract_plain_text(x["content"])}" for i, x in enumerate(payload["messages"])))
+        logger.info("\n".join(pretty_payload(payload)))
         if resp.status_code != 200:
+            logger.error("\n".join(pretty_payload(payload)))
             logger.error(resp.text)
             resp.raise_for_status()
         try:
@@ -105,3 +104,23 @@ class HybridOpenAIAPI(OpenAIAPI):
             return resp["content"].strip()
         except Exception as e:
             logger.exception(e)
+
+
+def pretty_payload(payload: Payload):
+    if "tools" in payload:
+        yield f"[TOOLS]:{[x["function"]["name"] for x in  payload["tools"]]}"
+    for i, message in enumerate(payload["messages"]):
+        prefix = f"[MESSAGE:{i}][{message['role'].upper()}]\n"
+        match message["role"]:
+            case "system":
+                yield prefix + message["content"]
+            case "user":
+                if isinstance(message["content"], str):
+                    yield prefix + message["content"]
+                else:
+                    yield prefix + "".join(x["text"] if x["type"] == "text" else f"[IMAGE]" for x in message["content"])
+            case "assistant":
+                content = prefix + message.get("content", "")
+                if "tool_calls" in message:
+                    content += "".join(f"\n[CALL][{x["function"]["name"]}]{x["function"]["arguments"]}" for x in message["tool_calls"])
+                yield content
