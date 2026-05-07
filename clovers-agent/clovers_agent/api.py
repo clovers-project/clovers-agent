@@ -76,25 +76,28 @@ class HybridOpenAIAPI(OpenAIAPI):
 
     @override
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        index = next((i for i, x in enumerate(reversed(payload["messages"])) if x["role"] == "user"), -1)
-        index = -1 - index
-        if index is not None and isinstance(content := payload["messages"][index]["content"], list):
-            texts = []
-            has_image = False
-            for seg in content:
-                match seg["type"]:
-                    case "text":
-                        texts.append(seg["text"])
-                    case "image_url":
-                        has_image = True
-            contents = []
-            if has_image and (desc := await self.call_vision(content, usage_counter)):
-                print(desc)
-                contents.append(VISION_TAG.format(desc))
-                contents.append("\n")
-            contents.append("".join(texts))
-            payload["messages"][index] = {"role": "user", "content": "".join(contents)}
-        return await super().call_api(payload, usage_counter)
+        message = next((x for x in reversed(payload["messages"]) if x["role"] == "user"))
+        # 最后一条 UserMessage 是 current_input
+        if isinstance(content := message["content"], str):
+            return await super().call_api(payload, usage_counter)
+        texts = []
+        has_image = False
+        for seg in content:
+            match seg["type"]:
+                case "text":
+                    texts.append(seg["text"])
+                case "image_url":
+                    has_image = True
+        contents = []
+        if has_image and (desc := await self.call_vision(content, usage_counter)):
+            print(desc)
+            contents.append(VISION_TAG.format(desc))
+            contents.append("\n")
+        contents.append("".join(texts))
+        message["content"] = "".join(contents)  # type: ignore
+        result = await super().call_api(payload, usage_counter)
+        message["content"] = content  # type: ignore 临时用一下 payload
+        return result
 
     async def call_vision(self, content: MultimodalContent, usage_counter: dict):
         try:
