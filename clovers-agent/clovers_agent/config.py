@@ -26,7 +26,7 @@ class Config(BaseConfig):
     api: HybridOpenAIConfig
     """主模型接入点"""
     apis: dict[str, HybridOpenAIConfig] = {}
-    """其他模型接入点，内置的键名：
+    """模型接入点配置，内置的键名：
     - router: 路由模型接入点
     - decision: 语义决策模型接入点
     - active: 主动触发模型接入点

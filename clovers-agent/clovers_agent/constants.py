@@ -3,9 +3,9 @@ from .typing import FunctionToolInfo
 SYSTEM_TAG = "<system>\n{}\n</system>"
 BUILTIN_CATEGORY = "builtin"
 ON_CHAT = "on_chat"
-ON_CHAT_DESC = "当前对话为闲聊、讨论与简单提问、或无法分配至其他工具时，调用此方法"
+ON_CHAT_DESC = "当前对话为闲聊、讨论与简单提问、或无法分配至其他工具时调用此方法"
 ON_SKILL = "on_skill"
-ON_SKILL_DESC = "当用户的指令为执行具体任务时调用此方法以进入技能执行环境。"
+ON_SKILL_DESC = "当用户的指令为非聊天性质的具体任务时调用此方法。"
 SKILL_MENU = "skill_menu"
 SKILL_MENU_DESC = "如果助手无法独自完成用户指令，则需要调用此方法获取更多技能。"
 ACTIVE_REPLY = "active_reply"
@@ -28,6 +28,7 @@ GET_IMAGE_BY_ID_INFO: FunctionToolInfo = {
         },
     },
 }
+VISION_TAG = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
 VISION_PROMPT = """\
 你是一位专业的视觉分析专家。
 你的任务是观察用户提供的一个或多个图像，并将其内容转化为详尽、准确且具有逻辑性的文字描述。

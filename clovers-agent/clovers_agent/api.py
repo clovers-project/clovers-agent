@@ -1,4 +1,3 @@
-import json
 import httpx
 from clovers.logger import logger
 from collections.abc import Iterable
@@ -40,8 +39,10 @@ class OpenAIAPI:
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
+        from .session import extract_plain_text
+
+        print("\n".join(f"[{i}{x["role"]}]:\n{extract_plain_text(x["content"])}" for i, x in enumerate(payload["messages"])))
         if resp.status_code != 200:
-            logger.error(json.dumps(payload, indent=4, ensure_ascii=False))
             logger.error(resp.text)
             resp.raise_for_status()
         try:
@@ -75,8 +76,9 @@ class HybridOpenAIAPI(OpenAIAPI):
 
     @override
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        message = next((x for x in reversed(payload["messages"]) if x["role"] == "user"), None)
-        if message and isinstance(content := message["content"], list):
+        index = next((i for i, x in enumerate(reversed(payload["messages"])) if x["role"] == "user"), -1)
+        index = -1 - index
+        if index is not None and isinstance(content := payload["messages"][index]["content"], list):
             texts = []
             has_image = False
             for seg in content:
@@ -91,7 +93,7 @@ class HybridOpenAIAPI(OpenAIAPI):
                 contents.append(SYSTEM_TAG.format(desc))
                 contents.append("\n")
             contents.append("".join(texts))
-            message["content"] = "".join(contents)  # type: ignore 这里需要原地修改
+            payload["messages"][index] = {"role": "user", "content": "".join(contents)}
         return await super().call_api(payload, usage_counter)
 
     async def call_vision(self, content: MultimodalContent, usage_counter: dict):
