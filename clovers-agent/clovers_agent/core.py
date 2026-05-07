@@ -107,17 +107,17 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     @property
     def style_prompt(self) -> str:
         """Agent 人物设定核心提示"""
-        return f"{self._style_prompt}\n{self._base_prompt}"
+        return "\n".join(x for x in (self._style_prompt, self._base_prompt) if x)
 
     @property
     def chat_prompt(self) -> str:
         """Agent 聊天核心提示"""
-        return f"{self._style_prompt}\n{self._base_prompt}\n{self._chat_prompt}"
+        return "\n".join(x for x in (self._style_prompt, self._base_prompt, self._chat_prompt) if x)
 
     @property
     def skill_prompt(self) -> str:
         """Agent 技能调用核心提示"""
-        return f"{self._execute_prompt}\n{self._base_prompt}"
+        return "\n".join(x for x in (self._execute_prompt, self._base_prompt) if x)
 
     def creat_api(self, config: HybridOpenAIConfig):
         if config.vision:
@@ -335,7 +335,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         api = self.api("active")
         payload = api.build_payload(
             ({"role": "user", "content": content},),
-            f"{self._style_prompt}\n{self._active_reply_prompt}",
+            "\n".join(x for x in (self.style_prompt, self._active_reply_prompt) if x),
         )
         logger.info(f"[{self.name}][ACTIVE_REPLY]")
         resp = await api.call_api(payload, session.usage_counter)

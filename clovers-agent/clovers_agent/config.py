@@ -28,8 +28,11 @@ class Config(BaseConfig):
     apis: dict[str, HybridOpenAIConfig] = {}
     """其他模型接入点，内置的键名：
     - router: 路由模型接入点
+    - decision: 语义决策模型接入点
+    - active: 主动触发模型接入点
     - skill: 技能模型接入点
     - chat: 聊天模型接入点
+    - wait: 等待回复模型接入点
     """
     path: str = "./data/CloversAgent/"
     """数据文件路径"""
