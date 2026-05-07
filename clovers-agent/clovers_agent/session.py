@@ -6,6 +6,7 @@ from .embedding import SentenceTransformer, TopicDecoupler
 from typing import Iterable
 from .typing import Payload, Message, AssistantMessage, SystemMessage
 from .typing.message import MultimodalContent, TextUserMessage
+from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 
 
@@ -25,21 +26,15 @@ class Session:
     payload: Payload
     current_input: MultimodalContent
 
-    def __init__(
-        self,
-        memory_size: int,
-        silence_size: int,
-        router_size: int,
-        unimportant_size: int,
-        decouple_size: int,
-        sentence_model: SentenceTransformer,
-    ) -> None:
+    def __init__(self, sentence_model: SentenceTransformer) -> None:
         # 标准记录
-        self.recorder: deque[Record] = deque(maxlen=memory_size)
-        self.image_id = count()
+        self.recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.memory_size)
+        self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=SESSION_CONFIG.silence_size)
         self.image_recorder: deque[tuple[int, str, float]] = deque()
-        self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
-        self.router_recorder: deque[Record] = deque(maxlen=router_size)
+        self.image_id = count()
+        self.router_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.router_size)
+        self.memory_timeout = SESSION_CONFIG.memory_timeout
+        self.silence_timeout = SESSION_CONFIG.silence_timeout
         # 状态
         self.execute_lock = asyncio.Lock()
         self.wait_lock = asyncio.Lock()
@@ -49,10 +44,10 @@ class Session:
         self.unit_prompts: list[str] = []
         # 不重要信息
         self.unimportant = False
-        self.unimportant_recorder: deque[Record] = deque(maxlen=unimportant_size)
+        self.unimportant_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.unimportant_size)
         # 主题分离
         self.decoupler = TopicDecoupler(sentence_model)
-        self.decouple_size = decouple_size
+        self.decouple_length = SESSION_CONFIG.decouple_length
 
     def __iter__(self):
         for a, b, _ in self.recorder:
@@ -96,20 +91,19 @@ class Session:
     def image_url(self, image_id: int) -> str | None:
         return next((url for i, url, _ in self.image_recorder if i == image_id), None)
 
-    def memory_filter(self, timeout: int | float):
-        """过滤记忆"""
+    def refresh(self, timestamp: float):
+        """刷新记忆"""
+        timeout = timestamp - self.memory_timeout
         while self.recorder and (self.recorder[0][2] <= timeout):
             self.recorder.popleft()
         while self.image_recorder and (self.image_recorder[0][2] <= timeout):
             self.image_recorder.popleft()
-
-    def silence_filter(self, timeout: int | float):
-        """过滤静默记录群聊上下文"""
+        timeout = timestamp - self.silence_timeout
         while self.silence_recorder and (self.silence_recorder[0][1] <= timeout):
             self.silence_recorder.popleft()
 
     def step(self, message: str):
-        if sum(char_count(msg["content"]) for msg in self) < self.decouple_size:
+        if sum(char_count(msg["content"]) for msg in self) < self.decouple_length:
             return False
         return self.decoupler.step(message)
 

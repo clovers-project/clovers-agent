@@ -18,7 +18,7 @@ from typing import Protocol, Literal, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
-from .config import Config, HybridOpenAIConfig
+from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     ON_CHAT,
     ON_CHAT_DESC,
@@ -41,67 +41,35 @@ class Event(BaseEvent, Protocol):
 class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     """OpenAI API"""
 
-    def __init__(self, name: str, async_client: httpx.AsyncClient, scheduler: AsyncIOScheduler, config: Config) -> None:
+    def __init__(self, name: str, async_client: httpx.AsyncClient, scheduler: AsyncIOScheduler) -> None:
         ModuleLoader.__init__(self, ["TOOLS"], SkillCore)
         self.name = name
-        # clovers 设置
-        if config.whitelist:
-            whitelist = set(config.whitelist)
-            logger.info(f"[{self.name}] 检查规则设置为白名单模式：{whitelist}")
-            self.check = lambda e: e.group_id is not None and e.group_id in whitelist
-        elif config.blacklist:
-            blacklist = set(config.blacklist)
-            logger.info(f"[{self.name}] 检查规则设置为黑名单模式：{blacklist}")
-            self.check = lambda e: e.group_id is not None and e.group_id not in blacklist
-        elif config.console_mode:
-            logger.info(f"[{self.name}] 启动控制台模式")
-            self.check = lambda e: True
-        else:
-            logger.info(f"[{self.name}] 已关闭")
-            self.check = lambda e: False
         self.async_client = async_client
         # 核心
-        self._api = self.creat_api(config.api)
-        self._apis = {name: self.creat_api(api_config) for name, api_config in config.apis.items()}
-        self.sentence_model = SentenceTransformer(config.sentence_model, cache_folder=config.sentence_model_cache)
+        self._api = self.creat_api(CONFIG.api)
+        self._apis = {name: self.creat_api(api_config) for name, api_config in CONFIG.apis.items()}
+        self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
         self.scheduler = scheduler
         # 状态
         self.usage_counter = {}
         self.sessions: dict[str, Session] = {}
         self.today = datetime.now().strftime("%Y-%m-%d")
         # 文件
-        path = Path(config.path)
+        path = Path(CONFIG.path)
         self.usage_dir = path / "usages"
         self.payload_dir = path / "payloads"
         self.prompts_dir = path / "prompts"
         # 配置
-        self.call_depth = config.call_depth
-        self.memory_timeout = config.memory_timeout
-        self.memory_size = config.memory_size
-        self.silence_timeout = config.silence_timeout
-        self.silence_size = config.silence_size
-        self.unimportant_size = config.unimportant_size
-        self.wait_coldown = config.wait_coldown
-        self.router_size = config.router_size
-        self.active_coldown = config.active_coldown
-        self.dormant_timeout = config.dormant_timeout
-        self.active_context_size = config.active_context_size
-        self.decouple_length = config.decouple_length
-        # prompt
-        self._base_prompt = config.base_prompt
-        self._router_prompt = config.router_prompt
-        self._style_prompt = config.style_prompt
-        self._chat_prompt = config.chat_prompt
-        self._execute_prompt = config.execute_prompt
-        self._wait_prompt = config.wait_prompt
-        self._summary_prompt = config.summary_prompt
-        self._active_decision_prompt = config.active_decision_prompt
-        self._active_reply_prompt = config.active_prompt
+        self.call_depth = CONFIG.call_depth
+        self.wait_coldown = CONFIG.wait_coldown
+        self.active_coldown = CONFIG.active_coldown
+        self.dormant_timeout = CONFIG.dormant_timeout
+        self.active_context_size = CONFIG.active_context_size
         # 技能
         self.skills = tuple()
-        self._plugins = config.plugins
-        self._plugin_dirs = config.plugin_dirs
-        self._skill_dirs = config.skill_dirs
+        self._plugins = CONFIG.plugins
+        self._plugin_dirs = CONFIG.plugin_dirs
+        self._skill_dirs = CONFIG.skill_dirs
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
@@ -128,10 +96,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     def api(self, key: str):
         return self._apis.get(key, self._api)
-
-    @staticmethod
-    def check(e: Event) -> bool:
-        raise NotImplementedError
 
     @override
     def _load(self, package: str):
@@ -170,15 +134,15 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             readme_md.write_text(f"删除 README.md 则会从 {self.prompts_dir.as_posix()} 读取 prompt 配置", encoding="utf-8")
         else:
             logger.info(f"[{self.name}][LOADING PROMPTS]")
-        self._base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", self._base_prompt)
-        self._router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", self._router_prompt)
-        self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", self._style_prompt)
-        self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", self._chat_prompt)
-        self._execute_prompt = self.load_prompt(self.prompts_dir / "EXECUTE.md", self._execute_prompt)
-        self._wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", self._wait_prompt)
-        self._summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", self._summary_prompt)
-        self._active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", self._active_decision_prompt)
-        self._active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", self._active_reply_prompt)
+        self._base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
+        self._router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
+        self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
+        self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
+        self._execute_prompt = self.load_prompt(self.prompts_dir / "EXECUTE.md", PROMPTS.execute_prompt)
+        self._wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
+        self._summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
+        self._active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", PROMPTS.active_decision_prompt)
+        self._active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", PROMPTS.active_reply_prompt)
 
     def sync_menu(self):
         for skill in self.skills:
@@ -202,8 +166,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     def daily_tasks(self):
         timestamp = time.time()
-        timeout = timestamp - self.memory_timeout
-        sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timeout)
+        sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
         for sessions_id in sessions_ids:
             del self.sessions[sessions_id]
         logger.info(f"[{self.name}][SESSIONS_CLEAR]")
@@ -226,14 +189,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def current_session(self, event: Event):
         session_id = self.session_id(event)
         if session_id not in self.sessions:
-            self.sessions[session_id] = Session(
-                self.memory_size,
-                self.silence_size,
-                self.router_size,
-                self.unimportant_size,
-                self.decouple_length,
-                self.sentence_model,
-            )
+            self.sessions[session_id] = Session(self.sentence_model)
         return self.sessions[session_id]
 
     async def summary_context(self, session: Session):
@@ -381,8 +337,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.over(content, {"role": "assistant", "content": result}, timestamp)
                 return result
         request = f"{head}{body}"
-        session.memory_filter(timestamp - self.memory_timeout)
-        session.silence_filter(timestamp - self.silence_timeout)
+        session.refresh(timestamp)
         session.silence_recorder.append((request, timestamp))
         content = "\n".join(x for x, _ in session.silence_recorder)
         if session.execute_lock.locked():
@@ -472,13 +427,13 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
         new_tools = agent.select_tools(category)
         session.payload["tools"].extend(x for x in new_tools if x["function"]["name"] not in used)
-    return prompt or f"已获取技能：{category}"
+    return prompt or f"Skills for '{category}' have been loaded."
 
 
 async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
     session = agent.current_session(event)
     url = session.image_url(image_id)
     if not url:
-        return "未找到图片"
+        return f"Error: [image:{image_id}] is missing."
     session.current_input.append({"type": "image_url", "image_url": {"url": url}})
-    return "将图片放入上下文"
+    return "OK"
