@@ -10,7 +10,8 @@ class Config(BaseConfig):
     """是否使用shell"""
     note_similarity_threshold: float = 0.6
     """笔记内容相似度阈值"""
-    scribe_prompt: str = """\
+    write_note_desc: str = "当**助手**认为上下文中出现了重要或需要长期记录信息时调用"
+    write_note_prompt: str = """\
 你是一个专业的记忆碎片整合专家。你的任务是对一组记录进行维护和清理。
 
 请严格遵守以下准则：
@@ -21,7 +22,9 @@ class Config(BaseConfig):
 
 请开始你的任务。
 """
-    archivist_prompt: str = """\
+    update_user_profile_desc: str = """\
+当用户与让助手记住某事，或用户展现出性格、人际关系、或**助手对该用户的印象**与文档产生差异时应*主动*调用此工具。"""
+    update_user_profile_prompt: str = """\
 你是一位专业、细致且观察力敏锐的“档案维护员”。你的任务是根据"触发点"信息，更新助手对用户的私密档案。
 
 ### 更新要求：
