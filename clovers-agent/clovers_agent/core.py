@@ -115,6 +115,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             prompt = md.read_text("utf-8")
         else:
             prompt = default_prompt
+            md.parent.mkdir(parents=True, exist_ok=True)
             md.write_text(prompt, encoding="utf-8")
         return prompt
 
