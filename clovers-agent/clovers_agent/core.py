@@ -68,6 +68,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         # 状态
         self.usage_counter = {}
         self.sessions: dict[str, Session] = {}
+        self.today = datetime.now().strftime("%Y-%m-%d")
         # 文件
         path = Path(config.path)
         self.usage_dir = path / "usages"
@@ -200,19 +201,23 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.skill_parameters["category"]["enum"] = list(self.categories.keys())
 
     def daily_tasks(self):
-        timeout = time.time() - self.memory_timeout
+        timestamp = time.time()
+        timeout = timestamp - self.memory_timeout
         sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timeout)
         for sessions_id in sessions_ids:
             del self.sessions[sessions_id]
         logger.info(f"[{self.name}][SESSIONS_CLEAR]")
-        self.usage_counter
-        usage_file = self.usage_dir / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
+        logger.info(f"[{self.name}][USAGE_TODAY] {usage}")
+        self.save_usage()
+        self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+        self.usage_counter.clear()
+
+    def save_usage(self):
+        usage_file = self.usage_dir / f"{self.today}.json"
         usage_file.parent.mkdir(parents=True, exist_ok=True)
         with usage_file.open("w", encoding="utf-8") as f:
             json.dump(self.usage_counter, f, indent=4, ensure_ascii=False)
-        usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
-        logger.info(f"[{self.name}][USAGE_TODAY] {usage}")
-        self.usage_counter.clear()
 
     @staticmethod
     def session_id(event: Event) -> str:
@@ -411,7 +416,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
             session.current_input = [*quote_content, *chat_content]
-            session.unit_prompts.append(f"Today:{now.strftime('%Y-%m-%d')}")
+            session.unit_prompts.append(f"Today:{self.today}")
             try:
                 result = await self.router(session, event)
             except Exception as e:
@@ -431,6 +436,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             deep_add(self.usage_counter, session.usage_counter)
             usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
             logger.info(f"[{self.name}][USAGE] {usage}")
+            self.save_usage()
         return result
 
 
