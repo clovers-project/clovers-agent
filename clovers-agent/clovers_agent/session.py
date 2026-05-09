@@ -3,7 +3,7 @@ from itertools import count
 from collections import deque
 from .api import OpenAIAPI
 from .embedding import SentenceTransformer, TopicDecoupler
-from typing import Iterable
+from collections.abc import Iterable
 from .typing import Payload, Message, AssistantMessage, SystemMessage
 from .typing.message import MultimodalContent, TextUserMessage
 from .config import SESSION as SESSION_CONFIG

@@ -12,8 +12,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .skill import SkillCore, Parameters
 from .session import Session
-from .utils import deep_add
 from .embedding import SentenceTransformer
+from .utils import deep_add
 from typing import Protocol, Literal, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo
 from .typing.message import MultimodalContent
