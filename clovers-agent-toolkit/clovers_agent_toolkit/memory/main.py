@@ -35,16 +35,14 @@ async def _(agent: CloversAgent, event: Event):
             logger.error(f"笔记读取失败: {e}")
     user_profile = USER_PROFILE / f"{user_id}.md"
     if not user_profile.exists():
-        notes.append(f"当前关注：\n\n# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行第一次更新。")
+        notes.append(f"# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行第一次更新。")
     else:
-        if count > STRONG_REMINDER_THRESHOLD:
-            notes.append(f"当前关注：（{count} 次对话前更新，请确认是否过时。）")
-        elif count > REMINDER_THRESHOLD:
-            notes.append(f"当前关注：（{count} 次对话前更新）")
-        else:
-            notes.append(f"当前关注：")
         notes.append(user_profile.read_text(encoding="utf-8"))
-
+        if count > STRONG_REMINDER_THRESHOLD:
+            notes.append(f"档案在 {count} 次对话前更新，请确认用户档案是否过时。")
+        elif count > REMINDER_THRESHOLD:
+            notes.append(f"档案在 {count} 次对话前更新")
+        notes.append("注意用户档案为助手对该用户的私密印象，禁止向用户透露。")
     return "\n\n".join(notes)
 
 
@@ -75,7 +73,7 @@ async def _(agent: CloversAgent, event: Event, content: str):
 
 @TOOLS.register(
     "update_user_profile",
-    "当用户与让助手记住某事，或用户展现出性格、人际关系、或**助手对该用户的印象**与文档产生差异时应*主动*调用此工具。",
+    "当用户与让助手记住某事，或用户展现出性格、人际关系、或**助手对该用户当前的印象**与现有文档产生差异时应*主动*调用此工具。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
         "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},
