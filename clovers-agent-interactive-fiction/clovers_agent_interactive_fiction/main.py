@@ -166,6 +166,9 @@ async def interactive_fiction(event: Event, handle: TempHandle):
         payload = api.build_payload(({"role": "user", "content": content},), HE_IF_PROMPT)
         resp = await api.call_api(payload, session.usage_counter)
         return Result("text", resp["content"].strip())
+    except Exception as e:
+        logger.exception(e)
+        return Result("text", "互动文游发生错误，请重试。")
     finally:
         if session.usage_counter:
             deep_add(agent.usage_counter, session.usage_counter)
