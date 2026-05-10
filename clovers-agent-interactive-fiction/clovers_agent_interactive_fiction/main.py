@@ -81,8 +81,7 @@ class IFData:
         self.theme: str = theme
         self.story: list[str] = []
         self.step: int = 0
-        # self.finish: int = random.randint(6, 10)
-        self.finish = 6
+        self.finish: int = random.randint(6, 10)
         self.next_correct = next_correct
         self.options: list[str] = []
         self.update_timestamp: float = 0.0
