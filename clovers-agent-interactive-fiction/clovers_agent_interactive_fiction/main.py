@@ -2,8 +2,8 @@ import random
 import time
 import json
 from clovers import TempHandle, Result
+from clovers.logger import logger
 from clovers_agent import CloversAgent, Event
-from clovers_agent.core import on_chat
 from clovers_agent.main import PLUGIN
 from clovers_agent.constants import ON_CHAT
 from .toolkit import TOOLS
@@ -105,7 +105,7 @@ class IFData:
 
 @TOOLS.register(
     CREATE_IF,
-    "如果用户希望开启一场互动文字游戏则调用此方法。",
+    "调用此方法以创建一个互动文游。此方法会使对话进入互动文游流程，当用户希望开启一段文游时必须调用此方法。",
     {"theme": {"type": "string", "description": "故事的主题，如用户未指定主题则无此参数。"}},
     ON_CHAT,
     [],
@@ -113,17 +113,9 @@ class IFData:
 async def _(agent: CloversAgent, event: Event, theme: str | None = None):
     session = agent.current_session(event)
     if not theme:
-        session.unit_prompts.append("用户未指定故事主题，请询问用户。可提供一些待选主题。")
-        return await on_chat(agent, event)
-
-    if IF_KEY in session.extra:
-        if_data = cast(IFData, session.extra[IF_KEY])
-        if time.time() - if_data.update_timestamp > IF_TIMEOUT:
-            del session.extra[IF_KEY]
-            return await on_chat(agent, event)
-        else:
-            session.unit_prompts.append(f"若用户想创建一个新游戏，则告知当前主题为 {if_data.theme} 的互动文游正在进行中，请勿重复创建。")
-        return await on_chat(agent, event)
+        return "用户未指定故事主题，请询问用户。可提供一些待选主题。"
+    if IF_KEY in session.extra and time.time() - (if_data := cast(IFData, session.extra[IF_KEY])).update_timestamp < IF_TIMEOUT:
+        return f"当前主题为 {if_data.theme} 的互动文游正在进行中，请勿重复创建。"
     api = agent.api(IF_KEY)
     payload = api.build_payload(({"role": "user", "content": f"请以 {theme} 为主题创建一个故事开头"},), CREATE_IF_PROMPT)
     payload["response_format"] = RESP_FORMAT
@@ -135,8 +127,7 @@ async def _(agent: CloversAgent, event: Event, theme: str | None = None):
         if_data = IFData(theme, random.randint(0, 2))  # type: ignore
         if_data.story.append(story)
         if_data.options = options
-        await event.send("text", story)
-        session.unit_prompts.append(f"游戏已开始，请用户输入 A,B,C 选择剧情分支")
+        a, b, c = options
         session.extra[IF_KEY] = if_data
         group_id = event.group_id
         PLUGIN.temp_handle(
@@ -145,24 +136,28 @@ async def _(agent: CloversAgent, event: Event, theme: str | None = None):
             rule=lambda e: e.group_id == group_id,
             state=(agent, if_data),
         )(interactive_fiction)
-    except Exception:
-        session.unit_prompts.append("游戏创建失败，请重新开始。")
-    return await on_chat(agent, event)
+        session.complete(f"{story}\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
+        return ""
+    except Exception as e:
+        logger.exception(e)
+        return "游戏创建失败，请重新开始。"
 
 
 async def interactive_fiction(event: Event, handle: TempHandle):
     agent, data = cast(tuple[CloversAgent, IFData], handle.state)
     char = event.message[0].upper()
+    session = agent.current_session(event)
     try:
         index = "ABC".index(char)
     except ValueError:
+        session.unit_prompts.append(f"用户进行了以 {data.theme} 为主题的互动文游。当前剧情\n{data.story[-1]}")
         return
     opt = data.options[index]
     story = "\n".join(data.story)
-    data.update_timestamp = time.time()
-    session = agent.current_session(event)
-    api = agent.api(IF_KEY)
     content = f"目前的故事进度为\n{story}\n用户的选择为\n{opt}。"
+    data.update_timestamp = time.time()
+    api = agent.api(IF_KEY)
+
     if data.step > 2 and index != data.next_correct:
         payload = api.build_payload(({"role": "user", "content": content},), BE_IF_PROMPT)
         resp = await api.call_api(payload, session.usage_counter)
@@ -177,8 +172,9 @@ async def interactive_fiction(event: Event, handle: TempHandle):
         options: list[str] = resp_data["options"]
         a, b, c = options
         data.story.append(opt)
+        data.story.append(story)
         data.options = options
-        return Result("text", f"{story}\n请用户输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
+        return Result("text", f"{story}\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
     del session.extra[IF_KEY]
     handle.finish()
     payload = api.build_payload(({"role": "user", "content": content},), HE_IF_PROMPT)
