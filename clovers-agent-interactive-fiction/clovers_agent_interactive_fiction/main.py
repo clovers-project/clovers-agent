@@ -117,7 +117,7 @@ async def _(agent: CloversAgent, event: Event, theme: str):
             rule=lambda e: e.group_id == group_id,
             state=(agent, if_data),
         )(interactive_fiction)
-        session.complete(f"{story}\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
+        session.complete(f"{story}\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}\nQ: 退出游戏")
         return ""
     except Exception as e:
         logger.exception(e)
@@ -129,6 +129,11 @@ async def interactive_fiction(event: Event, handle: TempHandle):
         agent, data = cast(tuple[CloversAgent, IFData], handle.state)
         char = event.message[0].upper()
         session = agent.current_session(event)
+        if char == "Q":
+            if IF_KEY in session.extra:
+                del session.extra[IF_KEY]
+            handle.finish()
+            return Result("text", "游戏已结束。")
         try:
             index = "ABC".index(char)
         except ValueError:
@@ -159,8 +164,9 @@ async def interactive_fiction(event: Event, handle: TempHandle):
             data.story.append(story)
             data.options = options
             data.next_correct = random.randint(0, 2)
-            return Result("text", f"{story}\n\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
-        del session.extra[IF_KEY]
+            return Result("text", f"{story}\n\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}\nQ: 退出游戏")
+        if IF_KEY in session.extra:
+            del session.extra[IF_KEY]
         handle.finish()
         payload = api.build_payload(({"role": "user", "content": content},), HE_IF_PROMPT)
         resp = await api.call_api(payload, session.usage_counter)
