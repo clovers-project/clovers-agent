@@ -90,7 +90,7 @@ class IFData:
 
 @TOOLS.register(
     "create_interactive_fiction",
-    "创建一个互动文游。此方法会进入互动文游流程，当用户指令为开启一段文游时必须调用此方法",
+    "创建一个互动文游，当用户想要开启一段文游时必须调用此方法",
     {"theme": {"type": "string", "description": "描述文游主题。如未指定则需要向用户询问"}},
     ON_CHAT,
 )
