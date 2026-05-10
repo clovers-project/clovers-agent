@@ -15,7 +15,7 @@ IF_KEY = "interactive_fiction"
 IF_TIMEOUT = 120
 
 RESP_PROMPT = """\
-- 正文部分在300字至500字之间。
+- 正文部分在200字至400字之间。
 - 之后提供三个不同的选项，让用户决定接下来的剧情走向。
 - 每个选项都应该是独特的，代表不同的行动方向或性格抉择。
 - 输出格式为 JSON，包含以下字段：
@@ -81,7 +81,8 @@ class IFData:
         self.theme: str = theme
         self.story: list[str] = []
         self.step: int = 0
-        self.finish: int = random.randint(7, 10)
+        # self.finish: int = random.randint(6, 10)
+        self.finish = 6
         self.next_correct = next_correct
         self.options: list[str] = []
         self.update_timestamp: float = 0.0
@@ -132,11 +133,11 @@ async def interactive_fiction(event: Event, handle: TempHandle):
         try:
             index = "ABC".index(char)
         except ValueError:
-            session.unit_prompts.append(f"用户进行了以 {data.theme} 为主题的互动文游。当前剧情\n{data.story[-1]}")
+            if data.update_timestamp < IF_TIMEOUT:
+                session.unit_prompts.append(f"用户进行了以 {data.theme} 为主题的互动文游。当前剧情\n{data.story[-1]}")
             return
         opt = data.options[index]
-        story = "\n".join(data.story)
-        content = f"目前的故事进度为\n{story}\n用户的选择为\n{opt}。"
+        content = f"目前的故事进度为\n{"\n".join(data.story)}\n用户的选择为\n{opt}。"
         data.update_timestamp = time.time()
         api = agent.api(IF_KEY)
         if data.step > 1 and index != data.next_correct:
@@ -146,7 +147,8 @@ async def interactive_fiction(event: Event, handle: TempHandle):
         data.step += 1
         if data.step < data.finish:
             payload = api.build_payload(
-                ({"role": "user", "content": f"当前发展程度为 {data.step}/{data.finish}\n{content}"},), KEEP_IF_PROMPT
+                ({"role": "user", "content": f"{content}\n\n当前发展程度为 {data.step}/{data.finish}"},),
+                KEEP_IF_PROMPT,
             )
             payload["response_format"] = {"type": "json_object"}
             resp = await api.call_api(payload, session.usage_counter)
@@ -158,7 +160,7 @@ async def interactive_fiction(event: Event, handle: TempHandle):
             data.story.append(story)
             data.options = options
             data.next_correct = random.randint(0, 2)
-            return Result("text", f"{story}\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
+            return Result("text", f"{story}\n\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
         del session.extra[IF_KEY]
         handle.finish()
         payload = api.build_payload(({"role": "user", "content": content},), HE_IF_PROMPT)
@@ -167,6 +169,7 @@ async def interactive_fiction(event: Event, handle: TempHandle):
     finally:
         if session.usage_counter:
             deep_add(agent.usage_counter, session.usage_counter)
+            session.usage_counter.clear()
             usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
             logger.info(f"[{agent.name}][IF_USAGE] {usage}")
             agent.save_usage()

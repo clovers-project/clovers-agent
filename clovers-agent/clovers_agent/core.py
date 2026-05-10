@@ -381,10 +381,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     async def chat(self, event: Event):
         session = self.current_session(event)
-        session.usage_counter.clear()
         result = await self.handle_chat(session, event)
         if session.usage_counter:
             deep_add(self.usage_counter, session.usage_counter)
+            session.usage_counter.clear()
             usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
             logger.info(f"[{self.name}][USAGE] {usage}")
             self.save_usage()
