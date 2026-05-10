@@ -5,6 +5,7 @@ from clovers import TempHandle, Result
 from clovers.logger import logger
 from clovers_agent import CloversAgent, Event
 from clovers_agent.main import PLUGIN
+from clovers_agent.utils import deep_add
 from clovers_agent.constants import ON_CHAT
 from .toolkit import TOOLS
 from typing import cast, Literal
@@ -13,27 +14,34 @@ from clovers_agent.typing.payload import ResponseFormat
 IF_KEY = "interactive_fiction"
 IF_TIMEOUT = 120
 CREATE_IF = "create_interactive_fiction"
-CREATE_IF_PROMPT = """\
+
+RESP_PROMPT = """\
+- 正文部分在300字至500字之间。
+- 之后提供三个不同的选项，让用户决定接下来的剧情走向。
+- 每个选项都应该是独特的，代表不同的行动方向或性格抉择。
+- 输出格式为 JSON，包含以下字段：
+  - content: 剧情内容
+  - options: 三个剧情发展选项，本字段为一个长度为3的列表，每个元素是一个字符串
+"""
+
+
+CREATE_IF_PROMPT = f"""\
 你是一位才华横溢的互动小说家。你的任务是根据用户指定的主题创作一个引人入胜的互动故事开端。
 
 请按照以下要求进行创作：
 
 - 围绕主题编写一个具有吸引力的故事开头。
-- 文笔要生动，字数在 600-1000 字之间。
-- 之后提供三个不同的选项，让用户决定接下来的剧情走向。
-- 每个选项都应该是独特的，代表不同的行动方向或性格抉择。
+{RESP_PROMPT}
 
 请开始你的创作。
 """
-KEEP_IF_PROMPT = """\
+KEEP_IF_PROMPT = f"""\
 你是一位才华横溢的互动故事主持人和小说家。你的任务是根据提供的故事内容和发展程度，为用户续写一个引人入胜的互动故事。
 
 ### 写作要求
 - 请紧接上述情节，依据用户的选择进行续写。你需要展开细节，通过环境描写、心理活动和对话来丰富故事。
 - 确保情节发展合理，保持与前文一致的叙述风格、语调和角色性格。
-- 续写的正文部分在600字至1000字之间。
-- 之后提供三个不同的选项，让用户决定接下来的剧情走向。
-- 每个选项都应该是独特的，代表不同的行动方向或性格抉择。
+{RESP_PROMPT}
 
 请开始你的创作。
 """
@@ -69,29 +77,6 @@ HE_IF_PROMPT = """\
 """
 
 
-RESP_FORMAT: ResponseFormat = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "fiction",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "故事续写的内容。"},
-                "options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "续写三个接下来的发展方向",
-                    "maxItems": 3,
-                    "minItems": 3,
-                },
-            },
-            "required": ["content", "options"],
-        },
-    },
-}
-
-
 class IFData:
     def __init__(self, theme: str, next_correct: Literal[0, 1, 2]):
         self.theme: str = theme
@@ -106,22 +91,19 @@ class IFData:
 @TOOLS.register(
     CREATE_IF,
     "调用此方法以创建一个互动文游。此方法会使对话进入互动文游流程，当用户希望开启一段文游时必须调用此方法。",
-    {"theme": {"type": "string", "description": "故事的主题，如用户未指定主题则无此参数。"}},
+    {"theme": {"type": "string", "description": "详细描述文游主题。如未指定则需要向用户询问"}},
     ON_CHAT,
-    [],
 )
-async def _(agent: CloversAgent, event: Event, theme: str | None = None):
+async def _(agent: CloversAgent, event: Event, theme: str):
     session = agent.current_session(event)
-    if not theme:
-        return "用户未指定故事主题，请询问用户。可提供一些待选主题。"
     if IF_KEY in session.extra and time.time() - (if_data := cast(IFData, session.extra[IF_KEY])).update_timestamp < IF_TIMEOUT:
         return f"当前主题为 {if_data.theme} 的互动文游正在进行中，请勿重复创建。"
     api = agent.api(IF_KEY)
     payload = api.build_payload(({"role": "user", "content": f"请以 {theme} 为主题创建一个故事开头"},), CREATE_IF_PROMPT)
-    payload["response_format"] = RESP_FORMAT
+    payload["response_format"] = {"type": "json_object"}
     try:
         resp = await api.call_api(payload, session.usage_counter)
-        resp_data = json.loads(resp["content"].strip())
+        resp_data = json.loads(resp["content"])
         story: str = resp_data["content"]
         options: list[str] = resp_data["options"]
         if_data = IFData(theme, random.randint(0, 2))  # type: ignore
@@ -144,39 +126,48 @@ async def _(agent: CloversAgent, event: Event, theme: str | None = None):
 
 
 async def interactive_fiction(event: Event, handle: TempHandle):
-    agent, data = cast(tuple[CloversAgent, IFData], handle.state)
-    char = event.message[0].upper()
-    session = agent.current_session(event)
     try:
-        index = "ABC".index(char)
-    except ValueError:
-        session.unit_prompts.append(f"用户进行了以 {data.theme} 为主题的互动文游。当前剧情\n{data.story[-1]}")
-        return
-    opt = data.options[index]
-    story = "\n".join(data.story)
-    content = f"目前的故事进度为\n{story}\n用户的选择为\n{opt}。"
-    data.update_timestamp = time.time()
-    api = agent.api(IF_KEY)
-
-    if data.step > 2 and index != data.next_correct:
-        payload = api.build_payload(({"role": "user", "content": content},), BE_IF_PROMPT)
+        agent, data = cast(tuple[CloversAgent, IFData], handle.state)
+        char = event.message[0].upper()
+        session = agent.current_session(event)
+        try:
+            index = "ABC".index(char)
+        except ValueError:
+            session.unit_prompts.append(f"用户进行了以 {data.theme} 为主题的互动文游。当前剧情\n{data.story[-1]}")
+            return
+        opt = data.options[index]
+        story = "\n".join(data.story)
+        content = f"目前的故事进度为\n{story}\n用户的选择为\n{opt}。"
+        data.update_timestamp = time.time()
+        api = agent.api(IF_KEY)
+        if data.step > 1 and index != data.next_correct:
+            payload = api.build_payload(({"role": "user", "content": content},), BE_IF_PROMPT)
+            resp = await api.call_api(payload, session.usage_counter)
+            return Result("text", resp["content"].strip())
+        data.step += 1
+        if data.step < data.finish:
+            payload = api.build_payload(
+                ({"role": "user", "content": f"当前发展程度为 {data.step}/{data.finish}\n{content}"},), KEEP_IF_PROMPT
+            )
+            payload["response_format"] = {"type": "json_object"}
+            resp = await api.call_api(payload, session.usage_counter)
+            resp_data = json.loads(resp["content"].strip())
+            story: str = resp_data["content"]
+            options: list[str] = resp_data["options"]
+            a, b, c = options
+            data.story.append(opt)
+            data.story.append(story)
+            data.options = options
+            data.next_correct = random.randint(0, 2)
+            return Result("text", f"{story}\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
+        del session.extra[IF_KEY]
+        handle.finish()
+        payload = api.build_payload(({"role": "user", "content": content},), HE_IF_PROMPT)
         resp = await api.call_api(payload, session.usage_counter)
         return Result("text", resp["content"].strip())
-    data.step += 1
-    if data.step < data.finish:
-        payload = api.build_payload(({"role": "user", "content": f"当前发展程度为 {data.step}/{data.finish}\n{content}"},), KEEP_IF_PROMPT)
-        payload["response_format"] = RESP_FORMAT
-        resp = await api.call_api(payload, session.usage_counter)
-        resp_data = json.loads(resp["content"].strip())
-        story: str = resp_data["content"]
-        options: list[str] = resp_data["options"]
-        a, b, c = options
-        data.story.append(opt)
-        data.story.append(story)
-        data.options = options
-        return Result("text", f"{story}\n请输入 A,B,C 选择剧情分支\nA: {a}\nB: {b}\nC: {c}")
-    del session.extra[IF_KEY]
-    handle.finish()
-    payload = api.build_payload(({"role": "user", "content": content},), HE_IF_PROMPT)
-    resp = await api.call_api(payload, session.usage_counter)
-    return Result("text", resp["content"].strip())
+    finally:
+        if session.usage_counter:
+            deep_add(agent.usage_counter, session.usage_counter)
+            usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
+            logger.info(f"[{agent.name}][IF_USAGE] {usage}")
+            agent.save_usage()

@@ -23,9 +23,14 @@ class JsonSchemaFormat(TypedDict):
     schema: JSONSchemaType
 
 
-class ResponseFormat(TypedDict):
+class ResponseFormatJsonSchema(TypedDict):
     type: Literal["json_schema"]
     json_schema: JsonSchemaFormat
+
+
+type ResponseFormatJsonObject = dict[Literal["type"], Literal["json_object"]]
+
+type ResponseFormat = ResponseFormatJsonSchema | ResponseFormatJsonObject
 
 
 class Payload(TypedDict):
