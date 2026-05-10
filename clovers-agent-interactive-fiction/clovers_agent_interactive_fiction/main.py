@@ -13,7 +13,6 @@ from clovers_agent.typing.payload import ResponseFormat
 
 IF_KEY = "interactive_fiction"
 IF_TIMEOUT = 120
-CREATE_IF = "create_interactive_fiction"
 
 RESP_PROMPT = """\
 - 正文部分在300字至500字之间。
@@ -89,9 +88,9 @@ class IFData:
 
 
 @TOOLS.register(
-    CREATE_IF,
-    "调用此方法以创建一个互动文游。此方法会使对话进入互动文游流程，当用户希望开启一段文游时必须调用此方法。",
-    {"theme": {"type": "string", "description": "详细描述文游主题。如未指定则需要向用户询问"}},
+    "create_interactive_fiction",
+    "创建一个互动文游。此方法会进入互动文游流程，当用户指令为开启一段文游时必须调用此方法",
+    {"theme": {"type": "string", "description": "描述文游主题。如未指定则需要向用户询问"}},
     ON_CHAT,
 )
 async def _(agent: CloversAgent, event: Event, theme: str):
