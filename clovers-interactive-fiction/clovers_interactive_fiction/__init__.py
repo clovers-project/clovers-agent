@@ -1,3 +1,3 @@
-from .main import TOOLS
+from .main import PLUGIN
 
-__all__ = ["TOOLS"]
+__all__ = ["PLUGIN"]

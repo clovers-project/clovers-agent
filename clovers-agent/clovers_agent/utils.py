@@ -1,11 +1,12 @@
 import base64
 import puremagic
+import re
+
+B64_PATTERN = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
 
 
 def is_base64(s: str) -> bool:
-    import re
-
-    return bool(len(s) % 4 == 0 and re.compile(r"^[A-Za-z0-9+/]*={0,2}$").match(s))
+    return bool(len(s) % 4 == 0 and B64_PATTERN.match(s))
 
 
 def data_url(data: bytes) -> str:

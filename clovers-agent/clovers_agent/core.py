@@ -14,6 +14,7 @@ from .skill import SkillCore, Parameters
 from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add
+from collections.abc import Callable
 from typing import Protocol, Literal, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo
 from .typing.message import MultimodalContent
@@ -50,16 +51,21 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._apis = {name: self.creat_api(api_config) for name, api_config in CONFIG.apis.items()}
         self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
         self.scheduler = scheduler
-        # 状态
-        self.usage_counter = {}
-        self.sessions: dict[str, Session] = {}
-        self.today = datetime.now().strftime("%Y-%m-%d")
         # 文件
         path = Path(CONFIG.path)
         self.usage_dir = path / "usages"
         self.payload_dir = path / "payloads"
         self.prompts_dir = path / "prompts"
         self.init_prompts()
+        # 状态
+        self.today = datetime.now().strftime("%Y-%m-%d")
+        self.sessions: dict[str, Session] = {}
+        usage_file = self.usage_file
+        if usage_file.exists():
+            with usage_file.open("r", encoding="utf-8") as f:
+                self.usage_counter = json.load(f)
+        else:
+            self.usage_counter = {}
         # 配置
         self.call_depth = CONFIG.call_depth
         self.wait_coldown = CONFIG.wait_coldown
@@ -73,6 +79,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._skill_dirs = CONFIG.skill_dirs
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
+
+    @property
+    def usage_file(self):
+        return self.usage_dir / f"{self.today}.json"
 
     @property
     def style_prompt(self) -> str:
@@ -169,15 +179,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         logger.info(f"[{self.name}][SESSIONS_CLEAR]")
         usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
         logger.info(f"[{self.name}][USAGE_TODAY] {usage}")
-        self.save_usage()
         self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
         self.usage_counter.clear()
-
-    def save_usage(self):
-        usage_file = self.usage_dir / f"{self.today}.json"
-        usage_file.parent.mkdir(parents=True, exist_ok=True)
-        with usage_file.open("w", encoding="utf-8") as f:
-            json.dump(self.usage_counter, f, indent=4, ensure_ascii=False)
 
     @staticmethod
     def session_id(event: Event) -> str:
@@ -379,15 +382,22 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
             return result
 
+    def update_usage(self, session: Session):
+        if not session.usage_counter:
+            return
+        deep_add(self.usage_counter, session.usage_counter)
+        usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
+        session.usage_counter.clear()
+        logger.info(f"[{self.name}][USAGE] {usage}")
+        usage_file = self.usage_file
+        usage_file.parent.mkdir(parents=True, exist_ok=True)
+        with usage_file.open("w", encoding="utf-8") as f:
+            json.dump(self.usage_counter, f, indent=4, ensure_ascii=False)
+
     async def chat(self, event: Event):
         session = self.current_session(event)
         result = await self.handle_chat(session, event)
-        if session.usage_counter:
-            deep_add(self.usage_counter, session.usage_counter)
-            session.usage_counter.clear()
-            usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
-            logger.info(f"[{self.name}][USAGE] {usage}")
-            self.save_usage()
+        self.update_usage(session)
         return result
 
 
