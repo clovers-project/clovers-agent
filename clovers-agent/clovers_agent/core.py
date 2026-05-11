@@ -382,12 +382,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
             return result
 
-    def update_usage(self, session: Session):
-        if not session.usage_counter:
+    def update_usage(self, usage_counter: dict):
+        if not usage_counter:
             return
-        deep_add(self.usage_counter, session.usage_counter)
-        usage = {k: v.get("total_tokens") for k, v in session.usage_counter.items()}
-        session.usage_counter.clear()
+        deep_add(self.usage_counter, usage_counter)
+        usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
+        usage_counter.clear()
         logger.info(f"[{self.name}][USAGE] {usage}")
         usage_file = self.usage_file
         usage_file.parent.mkdir(parents=True, exist_ok=True)
@@ -397,7 +397,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     async def chat(self, event: Event):
         session = self.current_session(event)
         result = await self.handle_chat(session, event)
-        self.update_usage(session)
+        self.update_usage(session.usage_counter)
         return result
 
 
