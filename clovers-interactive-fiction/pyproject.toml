@@ -1,5 +1,5 @@
 [project]
-name = "clovers-agent-interactive-fiction"
+name = "clovers-interactive-fiction"
 version = "0.0.1"
 description = "Add your description here"
 readme = "README.md"
