@@ -314,8 +314,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         now = datetime.fromtimestamp(timestamp)
         if "nicknames" not in session.extra:
             session.extra["nicknames"] = {}
-        session.extra["nicknames"][event.user_id] = event.nickname
-        at = "".join(f"@{name} " for user_id in event.at if (name := session.extra.get(user_id))) if event.at else ""
+        nicknames = session.extra["nicknames"]
+        nicknames[event.user_id] = event.nickname
+        at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
         message = event.message
         if "extra_context" in event.properties:
             body = f"@me {at}{message}\n{"\n".join(event.extra_context)}"

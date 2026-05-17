@@ -62,4 +62,4 @@ async def format_message(result: str, lock: asyncio.Lock) -> SegmentedMessage:
                 if not seg:
                     continue
                 yield Result("text", seg)
-                await asyncio.sleep(min(1 + 0.12 * len(seg), 8))
+                await asyncio.sleep(min(0.12 * len(seg), 8))

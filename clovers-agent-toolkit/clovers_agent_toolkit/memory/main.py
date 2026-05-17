@@ -14,13 +14,15 @@ REMINDER_THRESHOLD = CONFIG.reminder_threshold
 STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 
+UPDATE_USER_PROFILE = "update_user_profile"
+
 
 @TOOLS.on_category(ON_CHAT)
 async def _(agent: CloversAgent, event: Event):
     extra = agent.current_session(event).extra
-    if "update_user_profile" not in extra:
-        extra["update_user_profile"] = {}
-    counter = extra["update_user_profile"]
+    if UPDATE_USER_PROFILE not in extra:
+        extra[UPDATE_USER_PROFILE] = {}
+    counter = extra[UPDATE_USER_PROFILE]
     user_id = event.user_id
     count = counter[user_id] = counter.get(user_id, 0) + 1
     note_file = WORKSPACE / agent.session_id(event) / "NOTE.md"
@@ -35,14 +37,16 @@ async def _(agent: CloversAgent, event: Event):
             logger.error(f"笔记读取失败: {e}")
     user_profile = USER_PROFILE / f"{user_id}.md"
     if not user_profile.exists():
-        notes.append(f"# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行第一次更新。")
+        notes.append(f"""\
+# 用户档案：{event.nickname}
+
+目前尚无该用户档案，请在**上下文足够充分**时进行使用 '{UPDATE_USER_PROFILE}' 工具进行第一次更新。""")
     else:
         notes.append(user_profile.read_text(encoding="utf-8"))
         if count > STRONG_REMINDER_THRESHOLD:
-            notes.append(f"档案在 {count} 次对话前更新，请确认用户档案是否过时。")
+            notes.append(f"档案在 {count} 次对话前更新，请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
         elif count > REMINDER_THRESHOLD:
-            notes.append(f"档案在 {count} 次对话前更新")
-        notes.append("注意用户档案为助手对该用户的私密印象，禁止向用户透露。")
+            notes.append(f"档案在 {count} 次对话前更新，请确认用户档案是否过时。")
     return "\n\n".join(notes)
 
 
@@ -72,7 +76,7 @@ async def _(agent: CloversAgent, event: Event, content: str):
 
 
 @TOOLS.register(
-    "update_user_profile",
+    UPDATE_USER_PROFILE,
     "当用户与让助手记住某事，或用户展现出性格、人际关系、或**助手对该用户当前的印象**与现有文档产生差异时应*主动*调用此工具。",
     {
         "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
@@ -99,7 +103,7 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     resp = await api.call_api(payload, session.usage_counter)
     user_profile_path.write_text(resp["content"], encoding="utf-8")
     try:
-        del session.extra["update_user_profile"][user_id]
+        del session.extra[UPDATE_USER_PROFILE][user_id]
     except KeyError:
         pass
     return "OK"
