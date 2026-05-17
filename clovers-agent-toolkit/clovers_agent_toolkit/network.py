@@ -68,7 +68,14 @@ ALLOWED_TYPES = ("application/json", "text/", "application/xml")
     "network",
     required=["method", "url"],
 )
-async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: dict = {}, data: dict = {}):
+async def _(
+    agent: CloversAgent,
+    event: Event,
+    method: str,
+    url: str,
+    headers: dict | None = None,
+    data: dict | None = None,
+):
     method = method.lower()
     if method == "get":
         resp = await agent.async_client.get(url, params=data, headers=headers)

@@ -51,9 +51,9 @@ async def _(agent: CloversAgent, event: Event):
 
 
 @TOOLS.register(
-    "write_note",
-    "当**助手**认为上下文中出现了重要或需要长期记录信息时调用",
-    {"content": {"type": "string", "description": "笔记内容。内容应为简洁清晰的陈述句。"}},
+    "archive_memory",
+    "用于将当前上下文中的关键事实、约定、备忘事项等具有长期保存价值的信息进行持久化归档。当识别到此类信息时，应主动调用此工具",
+    {"content": {"type": "string", "description": "需要归档的记忆内容。请使用客观、简洁的陈述句，避免冗余修饰"}},
     ON_CHAT,
 )
 async def _(agent: CloversAgent, event: Event, content: str):
@@ -77,9 +77,9 @@ async def _(agent: CloversAgent, event: Event, content: str):
 
 @TOOLS.register(
     UPDATE_USER_PROFILE,
-    "当用户与让助手记住某事，或用户展现出性格、人际关系、或**助手对该用户当前的印象**与现有文档产生差异时应*主动*调用此工具。",
+    "用于更新助手对用户的印象档案。当用户约定称呼、展现偏好、或你对该用户的印象需要修正时，应主动调用此工具",
     {
-        "observation": {"type": "string", "description": "从上下文中你观察到的重点信息（性格、癖好、言行风格等）"},
+        "observation": {"type": "string", "description": "从对话中提取的关键观察（如用户性格特征、偏好变化、言行风格等）。"},
         "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},
     },
     ON_CHAT,
