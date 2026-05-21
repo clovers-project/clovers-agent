@@ -43,18 +43,24 @@ class SessionConfig(BaseModel):
 
 class PromptsConfig(BaseModel):
     base_prompt: str = """\
-### 格式说明
-- 消息格式为 [用户名]信息
-- 当消息以 @assistant 开头时，代表用户直接与你对话，其他消息为用户之间的对话
-- 你应该根据上下文中的[用户名]注意每条消息由谁发出
-- 最后一条信息的内容为“[当前用户]当前消息”，你应该针对当前消息进行回复
-- 你的回复绝不包含 [用户名] 前缀
-- 你每条回复的对象会发生变化，请注意区分
+### Format Specifications
+1. The message you receive is a chat log formatted as a set of `<user Name>content</user>` tags.
+2. When the content begins with `@assistant`, it indicates that the user is interacting with you directly. All other messages represent conversations among users.
+3. Pay close attention to which user sent each message based on the username in the context to avoid any confusion.
+4. The most recent message in the log is the current message. Your response must be targeted directly at this message.
+5. Your response **must not** include any of the XML-style tags used in the input. Deliver only the raw response text.
 """
     """基础系统提示，建议不要修改"""
     router_prompt: str = f"""\
-分析当前用户的对话意图，并从工具中定义的场景中，选出最契合当前语境的一个进行调用
-请注意无论你收到的消息内容是什么，你都必须调用工具。
+You are an AI Intent Analysis Specialist. Your task is to examine a group chat conversation and determine which "Scene" (defined as a tool) most accurately matches the current user's intent.
+
+### Rules
+1. Messages are wrapped in `<user Name>...</user>` or `<assistant>...</assistant>`. Tags marked as `assistant` represent your previous responses. All other tags represent human users.
+2. You must focus your decision-making on the last message.
+3. Use the messages preceding the last one only to understand the background, tone, and specific references of the current conversation.
+4. Regardless of the message content, you **must** select and call the most relevant tool from the provided list. Your only output should be the analysis and the tool call.
+
+Please begin your analysis now.
 """
     """语义路由提示"""
     style_prompt: str = """\
@@ -114,9 +120,9 @@ class PromptsConfig(BaseModel):
     """总结提示 这是总结上下文的用户提示词"""
     active_decision_prompt: str = """\
 你的任务是观察群聊中的对话，并决定是否加入讨论。
-你收到的消息格式为 [用户名]信息，这些消息是群友之间的讨论而非与助手对话
+你收到的消息格式为`<user Name>content</user>`，这些消息是群友之间的讨论而非与助手对话
 最后一条消息是当前消息，只应该关注当前消息，其他消息仅帮助你理解上下文。
-如果你决定参与则调用 "active_reply" 方法，否则请仅输出 "[PASS]"。
+如果你决定参与则调用 "active_reply" 方法，否则请仅输出 "PASS"。
 
 ### 应该参与
 - 当群友产生疑惑需要帮助时
@@ -130,12 +136,12 @@ class PromptsConfig(BaseModel):
 """
     """主动决策提示 这是助手决策发送主动消息时使用的提示"""
     active_reply_prompt: str = """\
-你会收到一段群聊历史记录，格式为"[用户名]消息"
+你会收到一段群聊历史记录，格式为`<user Name>content</user>`
 注意这些消息是群友之间的互相讨论，**并非**专门在向你提问。你需要根据话题自然地接话。
 ### 回复准则
-- 你应该根据上下文中的[用户名]注意每条消息由谁发出
-- 你的回复绝不包含 [用户名] 前缀
-- 最后一条信息的内容为“[当前用户]当前消息”，你应该针对当前消息进行回复
+- 你应该根据上下文中的用户名注意每条消息由谁发出
+- 最后一条信息消息为当前消息，你的回复应针对当前消息
+- 你的回复为纯消息，绝不包含任何上述格式
 - 模仿真实即时聊天消息的碎片化表达，字数不超过 20 个字。
 """
     """主动消息提示 这里应该是简化的风格+格式+聊天提示"""

@@ -131,8 +131,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
         self._wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
         self._summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
-        self._active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", PROMPTS.active_decision_prompt)
-        self._active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", PROMPTS.active_reply_prompt)
+        self.active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", PROMPTS.active_decision_prompt)
+        self.active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", PROMPTS.active_reply_prompt)
 
     def skill_init(self):
         SkillCore.__init__(self)
@@ -241,9 +241,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             return await on_chat(self, event)
         try:
             api = self.api("router")
-
+            record = "".join(f"{a}\n{ASSISTANT_TAG.format(b)}\n" for a, b in session.router_recorder)
             payload = api.build_payload(
-                (*session.router_context, {"role": "user", "content": session.current_input}),
+                ({"role": "user", "content": [{"type": "text", "text": record}, *session.current_input]},),
                 self.router_prompt,
             )
             payload["tools"] = self.intro_tools
@@ -274,7 +274,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             return False
         message: UserMessage = {"role": "user", "content": "\n".join(reversed(contents))}
         api = self.api("decision")
-        payload = api.build_payload((message,), "\n".join(self._active_decision_prompt))
+        payload = api.build_payload((message,), "\n".join(self.active_decision_prompt))
         payload["tools"] = [{"type": "function", "function": {"name": ACTIVE_REPLY, "description": ACTIVE_REPLY_DESC}}]
         try:
             resp = await api.call_api(payload, session.usage_counter)
@@ -287,7 +287,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         api = self.api("active")
         payload = api.build_payload(
             ({"role": "user", "content": content},),
-            "\n".join(x for x in (self.style_prompt, self._active_reply_prompt) if x),
+            "\n".join(x for x in (self.style_prompt, self.active_reply_prompt) if x),
         )
         logger.info(f"[{self.name}][ACTIVE_REPLY]")
         resp = await api.call_api(payload, session.usage_counter)
