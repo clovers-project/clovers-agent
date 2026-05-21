@@ -39,7 +39,6 @@ class OpenAIAPI:
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
         resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
-        logger.info("\n".join(pretty_payload(payload)))
         if resp.status_code != 200:
             logger.error("\n".join(pretty_payload(payload)))
             logger.error(resp.text)

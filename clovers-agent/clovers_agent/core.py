@@ -129,8 +129,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
         self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
         self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
-        self._wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
-        self._summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
+        self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
+        self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
         self.active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", PROMPTS.active_decision_prompt)
         self.active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", PROMPTS.active_reply_prompt)
 
@@ -185,9 +185,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         return self.sessions[session_id]
 
     async def summary_context(self, session: Session):
-        payload = self._api.build_payload(context=(*session, {"role": "user", "content": self._summary_prompt}))
+        api = self.api("summary")
+        payload = api.build_payload((*session, {"role": "user", "content": self.summary_prompt}))
         try:
-            summary = (await self._api.call_api(payload, session.usage_counter))["content"].strip()
+            summary = (await api.call_api(payload, session.usage_counter))["content"].strip()
             logger.info(f"[{self.name}][SUMMARY]")
             logger.debug(summary)
             return summary
@@ -295,7 +296,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     async def wait_chat(self, session: Session, content: str):
         api = self.api("wait")
-        wait_prompt = f"{content}\n{SYSTEM_TAG.format(self._wait_prompt)}"
+        wait_prompt = f"{content}\n{SYSTEM_TAG.format(self.wait_prompt)}"
         payload = api.build_payload((*session, {"role": "user", "content": wait_prompt}), self.style_prompt)
         resp = await api.call_api(payload, session.usage_counter)
         return resp["content"].strip()
