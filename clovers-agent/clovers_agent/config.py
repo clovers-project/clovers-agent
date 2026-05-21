@@ -44,7 +44,7 @@ class SessionConfig(BaseModel):
 class PromptsConfig(BaseModel):
     base_prompt: str = """\
 ### Format Specifications
-1. The message you receive is a chat log formatted as a set of `<user Name>content</user>` tags.
+1. The message you receive is a chat log formatted as a list of `<user name="xxx">content</user>` tags.
 2. When the content begins with `@assistant`, it indicates that the user is interacting with you directly. All other messages represent conversations among users.
 3. Pay close attention to which user sent each message based on the username in the context to avoid any confusion.
 4. The most recent message in the log is the current message. Your response must be targeted directly at this message.
@@ -55,10 +55,11 @@ class PromptsConfig(BaseModel):
 You are an AI Intent Analysis Specialist. Your task is to examine a group chat conversation and determine which "Scene" (defined as a tool) most accurately matches the current user's intent.
 
 ### Rules
-1. Messages are wrapped in `<user Name>...</user>` or `<assistant>...</assistant>`. Tags marked as `assistant` represent your previous responses. All other tags represent human users.
-2. You must focus your decision-making on the last message.
-3. Use the messages preceding the last one only to understand the background, tone, and specific references of the current conversation.
-4. Regardless of the message content, you **must** select and call the most relevant tool from the provided list. Your only output should be the analysis and the tool call.
+1. Messages are wrapped in `<user name="xxx">...</user>` or `<assistant>...</assistant>`.
+2. Tags marked as "user" represent human users, with the "name" attribute identifying the specific speaker.
+3. Tags marked as `assistant` represent your previous responses.
+4. Use the messages preceding the last one only to understand the background, tone, and specific references of the current conversation. You must focus your decision-making on the last message.
+5. Regardless of the message content, you **must** select and call the most relevant tool from the provided list. Your only output should be the analysis and the tool call.
 
 Please begin your analysis now.
 """
@@ -120,7 +121,7 @@ Please begin your analysis now.
     """总结提示 这是总结上下文的用户提示词"""
     active_decision_prompt: str = """\
 你的任务是观察群聊中的对话，并决定是否加入讨论。
-你收到的消息格式为`<user Name>content</user>`，这些消息是群友之间的讨论而非与助手对话
+你收到的消息格式为`<user name="xxx">content</user>`，这些消息是群友之间的讨论而非与助手对话
 最后一条消息是当前消息，只应该关注当前消息，其他消息仅帮助你理解上下文。
 如果你决定参与则调用 "active_reply" 方法，否则请仅输出 "PASS"。
 
@@ -136,7 +137,7 @@ Please begin your analysis now.
 """
     """主动决策提示 这是助手决策发送主动消息时使用的提示"""
     active_reply_prompt: str = """\
-你会收到一段群聊历史记录，格式为`<user Name>content</user>`
+你会收到一段群聊历史记录，格式为`<user name="xxx">content</user>`
 注意这些消息是群友之间的互相讨论，**并非**专门在向你提问。你需要根据话题自然地接话。
 ### 回复准则
 - 你应该根据上下文中的用户名注意每条消息由谁发出
@@ -151,7 +152,7 @@ class ConstantConfig(BaseModel):
     # 用户嵌入系统提示词
     system_tag: str = "<system>\n{}\n</system>"
     # 用户名标签
-    user_tag: str = "<user {}>\n{}\n</user>"
+    user_tag: str = '<user name="{}">\n{}\n</user>'
     # 模型回复标签
     assistant_tag: str = "<assistant>\n{}\n</assistant>"
     # 内置路由路由指令
