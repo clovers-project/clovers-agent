@@ -45,7 +45,7 @@ class PromptsConfig(BaseModel):
     base_prompt: str = """\
 ### 格式说明
 - 消息格式为 [用户名]信息
-- 当消息以 @me 开头时，代表用户直接与你对话，其他消息为用户之间的对话
+- 当消息以 @assistant 开头时，代表用户直接与你对话，其他消息为用户之间的对话
 - 你应该根据上下文中的[用户名]注意每条消息由谁发出
 - 最后一条信息的内容为“[当前用户]当前消息”，你应该针对当前消息进行回复
 - 你的回复绝不包含 [用户名] 前缀
@@ -143,7 +143,11 @@ class PromptsConfig(BaseModel):
 
 class ConstantConfig(BaseModel):
     # 用户嵌入系统提示词
-    system_tag: str = "<system>{}</system>"
+    system_tag: str = "<system>\n{}\n</system>"
+    # 用户名标签
+    user_tag: str = "<user {}>\n{}\n</user>"
+    # 模型回复标签
+    assistant_tag: str = "<assistant>\n{}\n</assistant>"
     # 内置路由路由指令
     on_chat: str = "on_chat"
     on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此方法"
@@ -158,7 +162,7 @@ class ConstantConfig(BaseModel):
 上下文中的图片已替换成格式为 [image:image_id] 的标签，当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此方法。"""
     get_image_by_id_image_id: str = "注意不要向用户透露有关图片标签的事实，image_id 只能在上下文中获取。"
     # 视觉相关配置
-    vision_tag: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">{}</vision>'
+    vision_tag: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
     vision_prompt: str = """\
 你是一位专业的视觉分析专家。
 你的任务是观察用户提供的一个或多个图像，并将其内容转化为详尽、准确且具有逻辑性的文字描述。

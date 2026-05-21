@@ -20,13 +20,15 @@ from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
+    SYSTEM_TAG,
+    USER_TAG,
+    ASSISTANT_TAG,
     ON_CHAT,
     ON_CHAT_DESC,
     SKILL_MENU,
     SKILL_MENU_DESC,
     ACTIVE_REPLY,
     ACTIVE_REPLY_DESC,
-    SYSTEM_TAG,
     BUILTIN_CATEGORY,
     GET_IMAGE_BY_ID_INFO,
 )
@@ -124,7 +126,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def init_prompts(self):
         logger.info(f"[{self.name}][LOADING PROMPTS]")
         self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
-        self._router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
+        self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
         self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
         self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
         self._wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
@@ -239,9 +241,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             return await on_chat(self, event)
         try:
             api = self.api("router")
+
             payload = api.build_payload(
                 (*session.router_context, {"role": "user", "content": session.current_input}),
-                "\n".join(x for x in (self._router_prompt, self.base_prompt) if x),
+                self.router_prompt,
             )
             payload["tools"] = self.intro_tools
             message = await api.call_api(payload, session.usage_counter)
@@ -307,11 +310,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
         message = event.message
         if "extra_context" in event.properties:
-            body = f"@me {at}{message}\n{"\n".join(event.extra_context)}"
+            body = f"@assistant {at}{message}\n{"\n".join(event.extra_context)}"
         elif event.to_me:
-            body = f"@me {at}{message}"
+            body = f"@assistant {at}{message}"
         else:
-            session.silence_recorder.append((f"[{event.nickname}]{at}{message}", timestamp))
+            body = f"{at}{message}"
+            session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
             if event.at or not await self.active_decision(session, timestamp):
                 return
             async with session.execute_lock, session.wait_lock:
@@ -324,9 +328,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.last_active_time = timestamp
                 session.over(content, {"role": "assistant", "content": result}, timestamp)
                 return result
-        request = f"[{event.nickname}]{body}"
         session.refresh(timestamp)
-        session.silence_recorder.append((request, timestamp))
+        session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
         content = "\n".join(x for x, _ in session.silence_recorder)
         if session.execute_lock.locked():
             if session.wait_lock.locked():

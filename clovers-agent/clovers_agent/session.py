@@ -32,7 +32,7 @@ class Session:
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=SESSION_CONFIG.silence_size)
         self.image_recorder: deque[tuple[int, str, float]] = deque()
         self.image_id = count()
-        self.router_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.router_size)
+        self.router_recorder: deque[tuple[str, str]] = deque(maxlen=SESSION_CONFIG.router_size)
         self.memory_timeout = SESSION_CONFIG.memory_timeout
         self.silence_timeout = SESSION_CONFIG.silence_timeout
         # 状态
@@ -69,7 +69,7 @@ class Session:
                         self.image_recorder.append((image_id, url, timestamp))
             content = "".join(contents)
         record: Record = ({"role": "user", "content": content}, reply, timestamp)
-        self.router_recorder.append(record)
+        self.router_recorder.append((content, reply["content"]))
         if self.unimportant:
             self.unimportant_recorder.append(record)
             self.unimportant = False
@@ -136,12 +136,6 @@ class Session:
         if message["role"] == "system":
             return message
         raise ValueError(f"The first message must have the role 'system', but found '{message}' instead.")
-
-    @property
-    def router_context(self):
-        for a, b, _ in self.router_recorder:
-            yield a
-            yield b
 
     @property
     def unimportant_context(self):

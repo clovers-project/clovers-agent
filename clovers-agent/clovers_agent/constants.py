@@ -3,6 +3,8 @@ from .config import CONSTANT
 
 # constant
 SYSTEM_TAG = CONSTANT.system_tag
+USER_TAG = CONSTANT.user_tag
+ASSISTANT_TAG = CONSTANT.assistant_tag
 ON_CHAT = CONSTANT.on_chat
 ON_CHAT_DESC = CONSTANT.on_chat_desc
 ACTIVE_REPLY = CONSTANT.active_reply
