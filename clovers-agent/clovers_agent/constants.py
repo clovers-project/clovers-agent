@@ -5,8 +5,6 @@ from .config import CONSTANT
 SYSTEM_TAG = CONSTANT.system_tag
 ON_CHAT = CONSTANT.on_chat
 ON_CHAT_DESC = CONSTANT.on_chat_desc
-ON_SKILL = CONSTANT.on_skill
-ON_SKILL_DESC = CONSTANT.on_chat_desc
 ACTIVE_REPLY = CONSTANT.active_reply
 ACTIVE_REPLY_DESC = CONSTANT.active_reply_desc
 BUILTIN_CATEGORY = CONSTANT.builtin_category

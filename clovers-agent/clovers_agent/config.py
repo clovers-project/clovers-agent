@@ -96,21 +96,6 @@ class PromptsConfig(BaseModel):
 - **严禁使用连词**：**严禁**使用逻辑连词，如：“无论……都……”、“只要……就……”、“不仅……还……”、“不是……而是……”、“因为……所以……”等。
 """
     """聊天提示 这里是助手参与聊天的提示"""
-    execute_prompt: str = """\
-你是一个专业的智能助手，你可以根据对话语境，精准识别用户意图，并调用最匹配的工具完成任务。
-
-当满足以下任一条件时，你应该停止调用工具：
-
-- **信息足够**：已获得回答用户问题所需的全部数据。
-- **操作闭环**：任务已成功完成。
-- **无法实现**：确认现有工具无法满足用户需求，或已尝试所有可能的方法。
-
-并回复一个**详细**且**高质量**的任务总结。
-
-- 说明你做了什么，获得了什么结果。
-- 如果任务成功，解释结果的意义；如果任务失败，解释原因。
-"""
-    """调用提示 这是助手执行任务时的提示"""
     wait_prompt: str = """\
 该用户指令正在后台处理，你的当前的目标是根据以下要求提供“过渡性回复”，以维持对话的连贯性。
 
@@ -158,12 +143,10 @@ class PromptsConfig(BaseModel):
 
 class ConstantConfig(BaseModel):
     # 用户嵌入系统提示词
-    system_tag: str = "<system>\n{}\n</system>"
+    system_tag: str = "<system>{}</system>"
     # 内置路由路由指令
     on_chat: str = "on_chat"
     on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此方法"
-    on_skill: str = "on_skill"
-    on_skill_desc: str = "当用户的指令为明确涉及大量工具调用的复杂任务时，调用此方法。"
     active_reply: str = "active_reply"
     active_reply_desc: str = "如决策主动回复则调用此方法以进入回复环境"
     # 内置工具
@@ -175,7 +158,7 @@ class ConstantConfig(BaseModel):
 上下文中的图片已替换成格式为 [image:image_id] 的标签，当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此方法。"""
     get_image_by_id_image_id: str = "注意不要向用户透露有关图片标签的事实，image_id 只能在上下文中获取。"
     # 视觉相关配置
-    vision_tag: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
+    vision_tag: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">{}</vision>'
     vision_prompt: str = """\
 你是一位专业的视觉分析专家。
 你的任务是观察用户提供的一个或多个图像，并将其内容转化为详尽、准确且具有逻辑性的文字描述。

@@ -14,7 +14,6 @@ from .skill import SkillCore, Parameters
 from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add
-from collections.abc import Callable
 from typing import Protocol, Literal, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo
 from .typing.message import MultimodalContent
@@ -23,8 +22,6 @@ from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     ON_CHAT,
     ON_CHAT_DESC,
-    ON_SKILL,
-    ON_SKILL_DESC,
     SKILL_MENU,
     SKILL_MENU_DESC,
     ACTIVE_REPLY,
@@ -87,17 +84,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     @property
     def style_prompt(self) -> str:
         """Agent 人物设定核心提示"""
-        return "\n".join(x for x in (self._style_prompt, self._base_prompt) if x)
+        return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
 
     @property
     def chat_prompt(self) -> str:
         """Agent 聊天核心提示"""
-        return "\n".join(x for x in (self._style_prompt, self._base_prompt, self._chat_prompt) if x)
-
-    @property
-    def skill_prompt(self) -> str:
-        """Agent 技能调用核心提示"""
-        return "\n".join(x for x in (self._execute_prompt, self._base_prompt) if x)
+        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
 
     def creat_api(self, config: HybridOpenAIConfig):
         if config.vision:
@@ -131,11 +123,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     def init_prompts(self):
         logger.info(f"[{self.name}][LOADING PROMPTS]")
-        self._base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
+        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
         self._router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
         self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
         self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
-        self._execute_prompt = self.load_prompt(self.prompts_dir / "EXECUTE.md", PROMPTS.execute_prompt)
         self._wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
         self._summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
         self._active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", PROMPTS.active_decision_prompt)
@@ -144,8 +135,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def skill_init(self):
         SkillCore.__init__(self)
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
-        self.register(ON_SKILL, ON_SKILL_DESC, self.skill_parameters)(on_skill)
-        self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, ON_SKILL)(skill_menu)
+        self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, BUILTIN_CATEGORY)(skill_menu)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
@@ -245,13 +235,15 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         raise TimeoutError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
 
     async def router(self, session: Session, event: Event):
-        api = self.api("router")
-        payload = api.build_payload(
-            (*session.router_context, {"role": "user", "content": session.current_input}),
-            "\n".join(x for x in (self._router_prompt, self._base_prompt) if x),
-        )
-        payload["tools"] = self.intro_tools
+        if len(self.intro_tools) < 2:
+            return await on_chat(self, event)
         try:
+            api = self.api("router")
+            payload = api.build_payload(
+                (*session.router_context, {"role": "user", "content": session.current_input}),
+                "\n".join(x for x in (self._router_prompt, self.base_prompt) if x),
+            )
+            payload["tools"] = self.intro_tools
             message = await api.call_api(payload, session.usage_counter)
             if "tool_calls" not in message:
                 raise ValueError(f"message must contain tool_calls, but got {message}")
@@ -265,12 +257,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 await coro
         except Exception as e:
             logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
-            category = ON_CHAT
-            await on_chat(self, event)
-        if category_prompts := await self.activate_category(category, event):
-            session.unit_prompts.extend(category_prompts)
-        session.activate()
-        return await self.execute_turn(session, event)
+            category = await on_chat(self, event)
+        return category
 
     async def active_decision(self, session: Session, timestamp: float):
         silence_duration = timestamp - session.last_active_time
@@ -373,7 +361,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             session.current_input = [*quote_content, *chat_content]
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             try:
-                result = await self.router(session, event)
+                category = await self.router(session, event)
+                if category_prompts := await self.activate_category(category, event):
+                    session.unit_prompts.extend(category_prompts)
+                session.activate()
+                result = await self.execute_turn(session, event)
             except Exception as e:
                 logger.exception(e)
                 return
@@ -402,24 +394,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         return result
 
 
-async def on_skill(agent: CloversAgent, event: Event, category: str):
-    session = agent.current_session(event)
-    session.api = agent.api("skill")
-    session.payload = session.api.build_payload(session, agent.skill_prompt)
-    session.payload["tools"] = agent.select_tools(ON_SKILL).copy()
-    skill_prompt = await skill_menu(agent, event, category)
-    if skill_prompt:
-        session.system_message["content"] += f"\n{skill_prompt}"
-    return ""
-
-
 async def on_chat(agent: CloversAgent, event: Event):
     session = agent.current_session(event)
     session.api = agent.api("chat")
     session.payload = session.api.build_payload(session, agent.chat_prompt)
-    session.payload["tools"] = agent.select_tools(ON_CHAT).copy()
-    session.payload["tools"].append(agent.manifest[SKILL_MENU])
-    return ""
+    session.payload["tools"] = [*agent.select_tools(ON_CHAT), agent.manifest[SKILL_MENU]]
+    return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
 
 
 async def skill_menu(agent: CloversAgent, event: Event, category: str):
@@ -429,7 +409,7 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
     else:
         prompt = ""
     if "tools" not in session.payload:
-        session.payload["tools"] = [*agent.select_tools(ON_SKILL), *agent.select_tools(category)]
+        session.payload["tools"] = [agent.manifest[SKILL_MENU], *agent.select_tools(category)]
     else:
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
         new_tools = agent.select_tools(category)
