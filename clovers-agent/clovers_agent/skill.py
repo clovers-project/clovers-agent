@@ -187,21 +187,22 @@ class SkillCore:
         if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
             self.delete_skill(None, skill_md[0])
             return self.load_skill_md(skill_md, None)
-        elif skill_path.is_dir() and (skill_file := skill_path / "SKILL.md").exists() and (skill_md := parse_skill(skill_file)):
-            module = load_module_from_path(skill_md[0], skill_path / "skill.py")
-            other_mds = [md for file in skill_path.glob("*.md") if not file.samefile(skill_file) if (md := parse_skill(file))]
-            if not other_mds:
-                self.delete_skill(None, skill_md[0])
-                return self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
-            else:
-                category, desc, _, content = skill_md
-                self.delete_skill(category, None)
-                register = self.create_category(category, desc)
-                if skill_func := skill_wrapper(content, getattr(module, category, None)):
-                    register(skill_func)
-                for md in other_mds:
-                    self.load_skill_md(md, category, getattr(module, md[0], None))
-                return category, None
+        md_file = skill_path / "SKILL.md"
+        if not (md_file.exists() and (skill_md := parse_skill(md_file))):
+            return
+        module = load_module_from_path(skill_md[0], skill_path / "skill.py")
+        other_mds = [md for file in skill_path.glob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
+        if not other_mds:
+            self.delete_skill(None, skill_md[0])
+            return self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
+        category, desc, _, content = skill_md
+        self.delete_skill(category, None)
+        register = self.create_category(category, desc)
+        if skill_func := skill_wrapper(content, getattr(module, category, None)):
+            register(skill_func)
+        for md in other_mds:
+            self.load_skill_md(md, category, getattr(module, md[0], None))
+        return category, None
 
 
 def load_module_from_path(module_name: str, file: Path):
