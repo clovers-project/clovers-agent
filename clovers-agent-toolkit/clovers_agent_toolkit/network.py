@@ -1,9 +1,13 @@
+import asyncio
+import httpx
 from clovers_agent import CloversAgent, Event
 from clovers_agent.utils import is_base64
+from clovers.logger import logger
 from .toolkit import TOOLS, CONFIG
 
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
 BRAVE_URL = CONFIG.BRAVE_URL
+RETRY_DELAYS = (0.5, 1.0, 1.5, 2.0, None)
 
 TOOLS.create_category("network", "包含各种联网功能，用于从互联网获取信息和资源。")
 
@@ -14,25 +18,36 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
     {"query": {"type": "string", "description": "搜索关键词"}},
     "network",
 )
-async def _(agent: CloversAgent, event: Event, query: list[str]):
+async def _(agent: CloversAgent, event: Event, query: str):
     headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
     params = {"q": query, "count": 8}
-    resp = await agent.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
-    if resp.status_code != 200:
-        return f"搜索失败，状态码：{resp.status_code}"
-    try:
-        results = resp.json()["web"]["results"]
-    except KeyError:
-        return "服务器错误，请稍后再试。"
-    if not results:
-        return f"未找到关于 '{query}' 的相关搜索结果。"
-    md_output = [f"### 关于 '{query}' 的搜索结果：\n"]
-    for idx, item in enumerate(results, 1):
-        title = item.get("title", "无标题")
-        link = item.get("url", "#")
-        snippet = item.get("description", "无摘要")
-        md_output.append(f"{idx}. **[{title}]({link})**\n   摘要: {snippet}\n")
-    return "\n".join(md_output)
+    for delay in RETRY_DELAYS:
+        try:
+            resp = await agent.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
+            resp.raise_for_status()
+            try:
+                results = resp.json()["web"]["results"]
+            except KeyError:
+                return "服务器错误，请稍后再试。"
+            if not results:
+                return f"未找到关于 '{query}' 的相关搜索结果。"
+            md_output = [f"### 关于 '{query}' 的搜索结果：\n"]
+            for idx, item in enumerate(results, 1):
+                title = item.get("title", "无标题")
+                link = item.get("url", "#")
+                snippet = item.get("description", "无摘要")
+                md_output.append(f"{idx}. **[{title}]({link})**\n   摘要: {snippet}\n")
+            return "\n".join(md_output)
+        except httpx.RequestError as e:
+            logger.warning(f"搜索失败：{e}")
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
+            logger.warning(f"搜索失败，状态码：{status_code}")
+            if status_code < 500 and status_code != 429:
+                return f"搜索失败，状态码：{status_code}"
+        if delay:
+            await asyncio.sleep(delay)
+    return "搜索失败，请稍后重试。"
 
 
 @TOOLS.register(
