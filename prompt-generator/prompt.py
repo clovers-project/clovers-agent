@@ -6,13 +6,7 @@ from pathlib import Path
 LOCAL_PATH = Path(__file__).parent
 
 TASK = """\
-写一段中文提示词，要求模型分析当前用户的对话意图，并从工具中定义的场景中，选出最契合当前语境的一个进行调用
-接下来模型会收到一段群聊信息，格式如下
-<user 用户名>信息</user>
-<assistant>信息</assistant>
-当闭合标签为 assistant 时表示该条信息是模型发送的，其余信息是用户之间的讨论
-模型应只关注最后一条消息进行决策其余的只作为提供上下文
-无论模型收到的消息内容是什么都必须调用工具。
+写一段提示词，要求模型使用搜索工具搜索当日A股股票资讯，筛选出100个热点股票，返回一个JSON数组，数组的元素为 `[股票代码] 股票名称` 形式的字符串
 """
 
 
@@ -48,8 +42,9 @@ def main():
         CONFIG["url"].lstrip("/") + "/chat/completions",
         json={"model": CONFIG["model"], "messages": messages},
         headers={"Authorization": f"Bearer {CONFIG['api_key']}", "Content-Type": "application/json"},
-    ).json()["choices"][0]["message"]["content"]
-    PROMPT = message_format(message)
+    ).json()
+    print(message)
+    PROMPT = message_format(message["choices"][0]["message"]["content"])
     (LOCAL_PATH / "PROMPT.md").write_text(PROMPT, encoding="utf-8")
     print(PROMPT)
 

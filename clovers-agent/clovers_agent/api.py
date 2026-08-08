@@ -1,4 +1,5 @@
 import httpx
+import asyncio
 from clovers.logger import logger
 from collections.abc import Iterable
 from .utils import data_url, deep_add
@@ -7,6 +8,8 @@ from .typing import Message, UserMessage, AssistantMessage, Payload
 from .typing.message import MultimodalContent
 from .config import OpenAIConfig, HybridOpenAIConfig
 from .constants import VISION_TAG, VISION_PROMPT
+
+RETRY_DELAYS = (0.5, 1.0, None)
 
 
 class OpenAIAPI:
@@ -38,20 +41,29 @@ class OpenAIAPI:
         return payload
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
-        if resp.status_code != 200:
-            logger.error("\n".join(pretty_payload(payload)))
-            logger.error(resp.text)
-            resp.raise_for_status()
-        try:
-            data = resp.json()
-            deep_add(usage_counter, {payload["model"]: data.get("usage")})
-            message = data["choices"][0]["message"]
-        except Exception as e:
-            raise RuntimeError(f"Failed to parse API response {resp.text}") from e
-        if "content" not in message and "tool_calls" not in message:
-            raise ValueError(f"API returned an invalid response: {resp.text}")
-        return message
+        for delay in RETRY_DELAYS:
+            try:
+                resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                deep_add(usage_counter, {payload["model"]: data.get("usage")})
+                message = data["choices"][0]["message"]
+                if "content" not in message and "tool_calls" not in message:
+                    raise ValueError(f"API returned an invalid response: {resp.text}")
+                return message
+            except httpx.RequestError as e:
+                logger.exception(e)
+            except httpx.HTTPStatusError as e:
+                status_code = e.response.status_code
+                if status_code < 500 and status_code != 429:
+                    logger.error(f"Payload:\n{'\n'.join(pretty_payload(payload))}\nResponse:\n{e.response.text}")
+                    raise RuntimeError(f"API client error (HTTP {status_code})") from e
+                logger.exception(e)
+            except Exception as e:
+                raise RuntimeError(f"Response validation failed: {e}") from e
+            if delay:
+                await asyncio.sleep(delay)
+        raise RuntimeError("API retries exhausted")
 
     async def download_url(self, url: str):
         if not url.startswith("http"):

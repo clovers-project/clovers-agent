@@ -114,7 +114,6 @@ class Session:
         unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
         self.current_input.insert(0, {"type": "text", "text": unit_prompt})
         self.payload["messages"].append({"role": "user", "content": self.current_input})
-        self.result = None
         if not self.image_recorder:
             return
         if "tools" not in self.payload:
@@ -128,7 +127,6 @@ class Session:
         del self.api
         del self.payload
         del self.cursor
-        del self.result
 
     @property
     def system_message(self) -> SystemMessage:
@@ -148,6 +146,3 @@ class Session:
         messages.extend(self.payload["messages"][self.cursor :])
         self.cursor = cursor
         self.payload["messages"] = messages
-
-    def complete(self, result: str):
-        self.result = result

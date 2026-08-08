@@ -15,7 +15,7 @@ from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add
 from typing import Protocol, Literal, override
-from .typing import UserMessage, ToolMessage, ToolCallInfo
+from .typing import UserMessage, ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
@@ -218,23 +218,18 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         except Exception as e:
             return {"role": "tool", "tool_call_id": call_info["id"], "content": f"Error {e}"}
 
-    async def call_unit(self, session: Session, event: Event):
-        message = await session.api.call_api(session.payload, session.usage_counter)
-        if not (tool_calls := message.get("tool_calls")):
-            return message["content"]
-        session.payload["messages"].append(message)
-        messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
-        session.payload["messages"].extend(messages)
-        return session.result
-
-    async def execute_turn(self, session: Session, event: Event):
+    async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):
         for _ in range(self.call_depth):
-            if result := await self.call_unit(session, event):
-                return result
-        payload_file = self.payload_dir / self.session_id(event) / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            message = await api.call_api(payload, usage_counter)
+            if not (tool_calls := message.get("tool_calls")):
+                return message["content"]
+            payload["messages"].append(message)
+            messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
+            payload["messages"].extend(messages)
+        payload_file = self.payload_dir / self.session_id(event) / f"{datetime.now().strftime('%Y%m%d-%H%M%S')} {id(payload)}.json"
         payload_file.parent.mkdir(parents=True, exist_ok=True)
         with payload_file.open("w", encoding="utf-8") as f:
-            json.dump(session.payload, f, indent=4, ensure_ascii=False)
+            json.dump(payload, f, indent=4, ensure_ascii=False)
         raise TimeoutError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
 
     async def router(self, session: Session, event: Event):
@@ -369,7 +364,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 if category_prompts := await self.activate_category(category, event):
                     session.unit_prompts.extend(category_prompts)
                 session.activate()
-                result = await self.execute_turn(session, event)
+                result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
             except Exception as e:
                 logger.exception(e)
                 return
