@@ -14,7 +14,7 @@ from .skill import SkillCore, Parameters
 from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add
-from typing import Protocol, Literal, override
+from typing import Protocol, Literal, Never, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
@@ -203,7 +203,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         return self.sessions[session_id]
 
     @staticmethod
-    def complete(message: str) -> str:
+    def complete(message: str) -> Never:
         raise TurnComplete(message)
 
     async def activate_category(self, name: str, event: Event) -> list[str] | None:
@@ -224,11 +224,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             kwargs = json.loads(call_info["function"]["arguments"])
             if name not in self.invoker:
                 return {"role": "tool", "tool_call_id": call_info["id"], "content": f'工具 "{name}" 不存在。'}
-            return await self.invoker[name](call_info["id"], self, event, **kwargs)
+            content = await self.invoker[name](self, event, **kwargs)
+            return {"role": "tool", "tool_call_id": call_info["id"], "content": content}
         except TurnComplete:
             raise
         except Exception as e:
-            return {"role": "tool", "tool_call_id": call_info["id"], "content": f"Error {e}"}
+            return {"role": "tool", "tool_call_id": call_info["id"], "content": f"工具发生内部错误，请稍后再试。"}
 
     async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):
         for _ in range(self.call_depth):
@@ -263,12 +264,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 raise ValueError(f"message must contain tool_calls, but got {message}")
             call_info = message["tool_calls"][0]
             category = call_info["function"]["name"]
-            intro = self.intro_invoker[category]
             kwargs = json.loads(call_info["function"]["arguments"])
             logger.info(f"[{self.name}][ROUTER] {category} {kwargs}")
-            coro = intro(self, event, *kwargs)
-            if not isinstance(coro, str):
-                await coro
+            await self.intro_invoker[category](self, event, *kwargs)
         except Exception as e:
             logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
             category = await on_chat(self, event)

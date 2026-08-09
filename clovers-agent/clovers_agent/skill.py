@@ -3,21 +3,19 @@ import importlib.util
 import frontmatter
 from pathlib import Path
 from itertools import count
+from functools import wraps
 from clovers.logger import logger
 from collections.abc import Callable
-from typing import Concatenate, overload, TYPE_CHECKING
+from typing import Concatenate, TYPE_CHECKING
 from clovers.base import Coro
-from .typing import ToolMessage, FunctionToolInfo
+from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 
 if TYPE_CHECKING:
     from .core import CloversAgent, Event
 
-
-type IntroDecorator = Callable[[ToolFunction], ToolFunction]
-type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], Coro[str] | str]
-type WrappedToolFunction[**P] = Callable[Concatenate[str, CloversAgent, Event, P], Coro[ToolMessage]]
-type CategoryDecorator = Callable[[ToolFunction], WrappedToolFunction]
+type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], str | Coro[str]]
+type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], Coro[str]]
 type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
 type SkillMD = tuple[str, str, Parameters | None, str]
 
@@ -26,7 +24,7 @@ class SkillCore:
     def __init__(self) -> None:
         self.category_id = count()
         self.intro_tools: list[FunctionToolInfo] = []
-        self.intro_invoker: dict[str, ToolFunction] = {}
+        self.intro_invoker: dict[str, WrappedToolFunction] = {}
         self.manifest: dict[str, FunctionToolInfo] = {}
         self.invoker: dict[str, WrappedToolFunction] = {}
         self.__map_category_to_id: dict[str, int] = {}
@@ -54,18 +52,30 @@ class SkillCore:
         self.categories[category] = description
         return self.on_category(category)
 
-    def intro_decorator(self, info: FunctionToolInfo) -> IntroDecorator:
+    @staticmethod
+    def tool_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
+        @wraps(func)
+        async def wrapper(agent: CloversAgent, event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+            logger.info(f"[{agent.name}][CALL][{name}] called")
+            logger.debug(kwargs)
+            content = coro if isinstance(coro := func(agent, event, *args, **kwargs), str) else await coro
+            logger.debug(f"[{name}][RETURNED] {content}")
+            return content
+
+        return wrapper
+
+    def intro_decorator(self, info: FunctionToolInfo):
         def decorator(func):
             name = info["function"]["name"]
             self.intro_tools.append(info)
             self.manifest[name] = info
-            self.intro_invoker[name] = func
+            self.intro_invoker[name] = self.tool_wrapper(name, func)
             return func
 
         return decorator
 
-    def category_decorator(self, info: FunctionToolInfo, category: str) -> CategoryDecorator:
-        def decorator(func):
+    def category_decorator(self, info: FunctionToolInfo, category: str):
+        def decorator(func: ToolFunction):
             name = info["function"]["name"]
             category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
             self.__map_category_to_id[category] = category_id
@@ -73,41 +83,10 @@ class SkillCore:
                 self.__map_id_to_tools[category_id] = []
             self.__map_id_to_tools[category_id].append(info)
             self.manifest[name] = info
-
-            async def wrapper(tool_call_id, agent: CloversAgent, event, /, **kwargs) -> ToolMessage:
-                logger.info(f"[{agent.name}][CALL][{name}] called")
-                logger.debug(kwargs)
-                try:
-                    content = coro if isinstance(coro := func(agent, event, **kwargs), str) else await coro
-                except Exception as e:
-                    logger.exception(e)
-                    content = "Error"
-                logger.debug(f"[{name}][RETURNED] {content}")
-                return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
-
-            self.invoker[name] = wrapper
-            return wrapper
+            self.invoker[name] = self.tool_wrapper(name, func)
+            return func
 
         return decorator
-
-    @overload
-    def register(
-        self,
-        name: str,
-        description: str,
-        parameters: Parameters | None = None,
-        category: None = None,
-        required: list[str] | None = None,
-    ) -> IntroDecorator: ...
-    @overload
-    def register(
-        self,
-        name: str,
-        description: str,
-        parameters: Parameters | None = None,
-        category: str = "",
-        required: list[str] | None = None,
-    ) -> CategoryDecorator: ...
 
     def register(
         self,
