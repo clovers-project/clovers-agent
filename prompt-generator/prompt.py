@@ -6,7 +6,7 @@ from pathlib import Path
 LOCAL_PATH = Path(__file__).parent
 
 TASK = """\
-写一段提示词，要求模型使用搜索工具分析指定股票，形成一个详细的报告和投资建议,入场建议，上行目标和止损位等
+写一段中文提示词，让ai针对用户提供的股票代码，利用搜索工具 `web_search` 和网页查看工具 `web_extractor` 获取该股票和其行业的相关新闻，并撰写一份专业基本面分析。
 """
 
 

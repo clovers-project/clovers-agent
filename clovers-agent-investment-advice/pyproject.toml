@@ -1,0 +1,15 @@
+[project]
+name = "clovers-agent-investment-advice"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.12, <4.0.0"
+dependencies = [
+    "clovers-agent>=0.2.10",
+    "akshare>=1.18.83",
+    "pandas>=3.0.5",
+]
+
+
+[tool.uv.sources]
+clovers-agent = { workspace = true }

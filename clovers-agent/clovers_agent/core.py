@@ -38,6 +38,12 @@ class Event(BaseEvent, Protocol):
     extra_context: list[str] = []
 
 
+class TurnComplete(Exception):
+    def __init__(self, data: str) -> None:
+        super().__init__()
+        self.data = data
+
+
 class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     """OpenAI API"""
 
@@ -174,16 +180,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
         self.usage_counter.clear()
 
-    @staticmethod
-    def session_id(event: Event) -> str:
-        return event.group_id or f"private-{event.user_id}"
-
-    def current_session(self, event: Event):
-        session_id = self.session_id(event)
-        if session_id not in self.sessions:
-            self.sessions[session_id] = Session(self.sentence_model)
-        return self.sessions[session_id]
-
     async def summary_context(self, session: Session):
         api = self.api("summary")
         payload = api.build_payload((*session, {"role": "user", "content": self.summary_prompt}))
@@ -195,6 +191,20 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         except Exception as e:
             logger.error(f"[{self.name}][SUMMARY] {e}")
             return
+
+    @staticmethod
+    def session_id(event: Event) -> str:
+        return event.group_id or f"private-{event.user_id}"
+
+    def current_session(self, event: Event):
+        session_id = self.session_id(event)
+        if session_id not in self.sessions:
+            self.sessions[session_id] = Session(self.sentence_model)
+        return self.sessions[session_id]
+
+    @staticmethod
+    def complete(message: str) -> str:
+        raise TurnComplete(message)
 
     async def activate_category(self, name: str, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
@@ -215,6 +225,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             if name not in self.invoker:
                 return {"role": "tool", "tool_call_id": call_info["id"], "content": f'工具 "{name}" 不存在。'}
             return await self.invoker[name](call_info["id"], self, event, **kwargs)
+        except TurnComplete:
+            raise
         except Exception as e:
             return {"role": "tool", "tool_call_id": call_info["id"], "content": f"Error {e}"}
 
@@ -223,8 +235,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             message = await api.call_api(payload, usage_counter)
             if not (tool_calls := message.get("tool_calls")):
                 return message["content"]
+            try:
+                messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
+            except TurnComplete as e:
+                return e.data
             payload["messages"].append(message)
-            messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
             payload["messages"].extend(messages)
         payload_file = self.payload_dir / self.session_id(event) / f"{datetime.now().strftime('%Y%m%d-%H%M%S')} {id(payload)}.json"
         payload_file.parent.mkdir(parents=True, exist_ok=True)

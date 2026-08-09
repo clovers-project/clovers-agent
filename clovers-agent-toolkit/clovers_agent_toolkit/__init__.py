@@ -1,4 +1,4 @@
-__version__ = "0.2.12"
+__version__ = "0.2.18"
 __all__ = ["TOOLS"]
 
 from .toolkit import TOOLS
