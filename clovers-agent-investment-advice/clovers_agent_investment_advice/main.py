@@ -55,7 +55,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     "analyze_stock",
-    "用于分析指定股票，形成一个包含基本面，技术面，风险评估的详细报告。此工具会进行完全分析，若使用此工具则不需要调用其他工具。",
+    "用于分析指定股票，形成一个包含基本面，技术面，风险评估的详细报告。此工具会进行完全分析，若使用此工具则禁止调用其他工具。",
     {"symbol": {"type": "string", "description": "股票代码"}},
     category="stock_market_analysis",
 )

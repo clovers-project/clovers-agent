@@ -53,7 +53,7 @@ class SkillCore:
         return self.on_category(category)
 
     @staticmethod
-    def tool_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
+    def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
         @wraps(func)
         async def wrapper(agent: CloversAgent, event, /, *args: P.args, **kwargs: P.kwargs) -> str:
             logger.info(f"[{agent.name}][CALL][{name}] called")
@@ -69,7 +69,7 @@ class SkillCore:
             name = info["function"]["name"]
             self.intro_tools.append(info)
             self.manifest[name] = info
-            self.intro_invoker[name] = self.tool_wrapper(name, func)
+            self.intro_invoker[name] = self.invoker_wrapper(name, func)
             return func
 
         return decorator
@@ -83,7 +83,7 @@ class SkillCore:
                 self.__map_id_to_tools[category_id] = []
             self.__map_id_to_tools[category_id].append(info)
             self.manifest[name] = info
-            self.invoker[name] = self.tool_wrapper(name, func)
+            self.invoker[name] = self.invoker_wrapper(name, func)
             return func
 
         return decorator
@@ -202,7 +202,12 @@ def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunctio
     if not content:
         return func
     if func:
-        return lambda agent, event, **kwargs: func(agent, event, content=content, **kwargs)
+
+        @wraps(func)
+        def wrapper(agent, event, **kwargs):
+            return func(agent, event, content=content, **kwargs)
+
+        return wrapper
     return lambda agent, event: content
 
 
@@ -211,7 +216,7 @@ def parse_skill(skill_path: Path) -> SkillMD | None:
         skill = frontmatter.loads(skill_path.read_text("utf-8"))
         name = skill["name"]
         desc = skill["description"]
-        parameters: SkillCore.Parameters | None = skill.get("parameters")  # type: ignore
+        parameters: Parameters | None = skill.get("parameters")  # type: ignore
         content = skill.content.strip()
     except Exception as e:
         logger.exception(e)
