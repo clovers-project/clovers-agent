@@ -2,9 +2,16 @@ import akshare as ak
 import pandas as pd
 import asyncio
 from datetime import datetime, timedelta
+from pathlib import Path
+from collections.abc import Callable
+from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent import CloversAgent, Event
 from clovers_agent.api import OpenAIAPI
 from clovers.logger import logger
+
+WORKSPACE = Path(AGENT_CONFIG.path) / "stock_market_analysis"
+STOCK_CODES_CSV = WORKSPACE / "stock_codes.csv"
+UPDATE_LOCK = asyncio.Lock()
 
 
 def format_large_num(val):
@@ -85,6 +92,94 @@ async def get_stock_quotes(symbol: str):
         )
     )
     return "\n\n".join(report)
+
+
+def format_stock_code(symbol: str) -> str:
+    """
+    将股票代码格式化为带交易所前缀的代码。
+
+    Args:
+        symbol (str): 纯数字股票代码，如 "600000"
+
+    Returns:
+        str: 带前缀的代码，如 "sh600000"
+
+    Examples:
+        >>> format_stock_code("600000")
+        'sh600000'
+        >>> format_stock_code("000001")
+        'sz000001'
+        >>> format_stock_code("920000")
+        'bj920000'
+    """
+    symbol = "".join(x for x in symbol if x in "0123456789")
+    symbol_l = len(symbol)
+    if symbol_l < 6:
+        symbol = symbol.zfill(6)
+    elif symbol_l > 6:
+        raise ValueError(f"股票代码长度不能超过6位: {symbol}")
+    if symbol in ("001696", "001896"):
+        return f"sz{symbol}"
+    if symbol.startswith(("600", "601", "603", "605", "688")):
+        return f"sh{symbol}"
+    elif symbol.startswith(("000", "002", "300", "200")):
+        return f"sz{symbol}"
+    elif symbol.startswith("920"):
+        return f"bj{symbol}"
+    else:
+        raise ValueError(f"无法识别的股票代码: {symbol}")
+
+
+async def update_stock_symbol_data():
+    """
+    更新股票代码数据
+    """
+    async with UPDATE_LOCK:
+        # 获取所有股票代码
+        stock_codes = await asyncio.to_thread(ak.stock_info_a_code_name)
+        stock_codes = stock_codes.rename(columns={"code": "symbol"})
+        stock_codes["name"] = stock_codes["name"].astype(str).str.replace(" ", "")
+        stock_codes.to_csv(STOCK_CODES_CSV, index=False, encoding="utf-8")
+        return stock_codes
+
+
+async def query_stock_symbol(column: str, value: str):
+    """
+    根据股票名称或代码查询股票信息
+    """
+    if not STOCK_CODES_CSV.exists():
+        stock_codes = await update_stock_symbol_data()
+    else:
+        stock_codes = pd.read_csv(STOCK_CODES_CSV, dtype=str, encoding="utf-8")
+    query_fn: Callable[[pd.DataFrame], pd.DataFrame]
+    if column == "symbol":
+        value = "".join(x for x in value if x in "0123456789")
+        if not value:  # 忽略空值
+            return None
+        symbol_l = len(value)
+        if symbol_l < 6:
+            value = value.zfill(6)
+        elif symbol_l > 6:
+            return None
+        query_fn = lambda df: df[df["symbol"] == value]
+    elif column == "name":
+        query_fn = lambda df: df[df["name"].astype(str).str.contains(value, regex=False)]
+    else:
+        return None
+    result = query_fn(stock_codes)
+    if result.empty:
+        now = datetime.now()
+        today_9am = now.replace(hour=9, minute=0, second=0, microsecond=0).timestamp()
+        yest_15pm = today_9am - 18 * 3600
+        st_mtime = STOCK_CODES_CSV.stat().st_mtime
+        if st_mtime < yest_15pm or (st_mtime < today_9am and now.timestamp() > today_9am):
+            stock_codes = await update_stock_symbol_data()
+            result = query_fn(stock_codes)
+            if result.empty:
+                return None
+        else:
+            return None
+    return "\n".join(f"{format_stock_code(info['symbol'])} {info['name']}" for info in result.to_dict(orient="records"))
 
 
 STOCK_SCREENING_PROMPT = """\

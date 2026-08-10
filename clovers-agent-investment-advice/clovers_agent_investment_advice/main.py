@@ -1,14 +1,9 @@
 import json
 import asyncio
-from pathlib import Path
 from datetime import datetime
 from clovers_agent import CloversAgent, Event, SkillCore
-from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers.logger import logger
-from .utils import get_stock_quotes, get_stock_news, analyze_stock
-
-WORKSPACE = Path(AGENT_CONFIG.path) / "投资建议"
-
+from .utils import WORKSPACE, query_stock_symbol, get_stock_quotes, get_stock_news, analyze_stock
 
 TOOLS = SkillCore()
 
@@ -20,8 +15,25 @@ TOOLS = SkillCore()
 async def _(agent: CloversAgent, event: Event):
     return """\
 本工具组下所有 symbol 字段都为带交易所前缀的股票代码，如：sh600000
-本工具组并发时极易造成 429 错误，在针对特定股票进行工具调用前，请向用户确认股票正式名称和代码。
+本工具组并发时极易造成 429 错误。在针对特定股票进行工具调用前，请使用 `query_stock_symbol` 或直接向用户确认股票正式名称和代码。
 """
+
+
+@TOOLS.register(
+    "query_stock_symbol",
+    "根据股票名称或代码查询该股票的正式名称和代码。",
+    {
+        "column": {
+            "type": "string",
+            "description": "查询列，可选 'symbol'（按股票代码精确查询）或 'name'（按名称匹配，可能返回多个结果）。",
+            "enum": ["symbol", "name"],
+        },
+        "value": {"type": "string", "description": "需要查询的股票名称或代码"},
+    },
+    category="stock_market_analysis",
+)
+async def _(agent: CloversAgent, event: Event, column: str, value: str):
+    return await query_stock_symbol(column, value) or "未查询到结果"
 
 
 @TOOLS.register(
