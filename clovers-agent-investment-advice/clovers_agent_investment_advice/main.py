@@ -1,8 +1,4 @@
-import json
-import asyncio
-from datetime import datetime
 from clovers_agent import CloversAgent, Event, SkillCore
-from clovers.logger import logger
 from .utils import WORKSPACE, query_stock_symbol, get_stock_quotes, get_stock_news, analyze_stock
 
 TOOLS = SkillCore()

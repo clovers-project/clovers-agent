@@ -120,7 +120,7 @@ async def get_stock_quotes(symbol: str):
     return "\n\n".join(report)
 
 
-def fill_stock_code(symbol: str) -> str:
+def fmt_stock_code(symbol: str) -> str:
     """
     将股票代码补齐成6位
     """
@@ -134,7 +134,7 @@ def fill_stock_code(symbol: str) -> str:
         return symbol
 
 
-def format_stock_code(symbol: str) -> tuple[str, str]:
+def fmt_stock_prefix(symbol: str) -> str:
     """
     将股票代码格式化为带交易所前缀的代码。
 
@@ -152,20 +152,19 @@ def format_stock_code(symbol: str) -> tuple[str, str]:
         >>> format_stock_code("920000")
         'bj920000'
     """
-    symbol = "".join(x for x in symbol if x in "0123456789")
-    symbol_l = len(symbol)
-    if symbol_l < 6:
-        symbol = symbol.zfill(6)
-    elif symbol_l > 6:
-        raise ValueError(f"股票代码长度不能超过6位: {symbol}")
-    if symbol in ("001696", "001896"):
-        return "sz", symbol
-    if symbol.startswith(("600", "601", "603", "605", "688")):
-        return "sh", symbol
-    elif symbol.startswith(("000", "002", "300", "200")):
-        return "sz", symbol
+    symbol = fmt_stock_code(symbol)
+    if symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+        return "sz"
+    elif symbol.startswith(("600", "601", "603", "605", "688", "689")):
+        return "sh"
     elif symbol.startswith("920"):
-        return "bj", symbol
+        return "bj"
+    elif symbol.startswith(("0", "3")):
+        return "sz"
+    elif symbol.startswith("6"):
+        return "sh"
+    elif symbol.startswith(("9")):
+        return "bj"
     else:
         raise ValueError(f"无法识别的股票代码: {symbol}")
 
@@ -174,13 +173,15 @@ async def update_stock_symbol_data():
     """
     更新股票代码数据
     """
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
     async with UPDATE_LOCK:
         # 获取所有股票代码
         stock_codes = await asyncio.to_thread(ak.stock_info_a_code_name)
         stock_codes = stock_codes.rename(columns={"code": "symbol"})
         stock_codes["name"] = stock_codes["name"].astype(str).str.replace(" ", "")
         stock_codes["symbol"] = stock_codes["symbol"].str.extract(r"(\d+)", expand=False).str.zfill(6)
-        stock_codes.dropna(subset=["symbol"]).to_csv(STOCK_CODES_CSV, index=False, encoding="utf-8")
+        stock_codes = stock_codes.dropna(subset=["symbol"])
+        stock_codes.to_csv(STOCK_CODES_CSV, index=False, encoding="utf-8")
         return stock_codes
 
 
@@ -192,8 +193,8 @@ async def query_stock_symbol(column: str, value: str, agent: CloversAgent):
     根据股票名称或代码查询股票信息
     """
     if column == "symbol":
-        value = "".join(x for x in value if x in "0123456789")
-        prefix, value = format_stock_code(value)
+        value = fmt_stock_code(value)
+        prefix = fmt_stock_prefix(value)
 
         def query_fn_symbol(df: pd.DataFrame):
             return df[df["symbol"] == value]
@@ -211,7 +212,7 @@ async def query_stock_symbol(column: str, value: str, agent: CloversAgent):
             names = df["name"].astype(str).tolist()
             scores = batch_similarity(names, value, agent.sentence_model)
             df["similarity"] = scores
-            return df.sort_values(by="similarity", ascending=False).head(3)
+            return df.sort_values(by="similarity", ascending=False).head(10)
 
         query_fn = query_fn_name
 
@@ -241,7 +242,8 @@ async def query_stock_symbol(column: str, value: str, agent: CloversAgent):
     for info in result.to_dict(orient="records"):
         symbol = info["symbol"]
         name = info["name"]
-        prefix, symbol = format_stock_code(symbol)
+        symbol = fmt_stock_code(symbol)
+        prefix = fmt_stock_prefix(symbol)
         item = f"{name} {prefix}{symbol}"
         QUERY_STOCK_SYMBOL_CACHE[f"symbol:{symbol}"] = item
         QUERY_STOCK_SYMBOL_CACHE[f"name:{name}"] = item

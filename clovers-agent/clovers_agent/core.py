@@ -229,6 +229,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         except TurnComplete:
             raise
         except Exception as e:
+            logger.exception(e)
             return {"role": "tool", "tool_call_id": call_info["id"], "content": f"工具发生内部错误，请稍后再试。"}
 
     async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):

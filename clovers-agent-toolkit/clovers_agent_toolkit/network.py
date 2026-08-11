@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+import trafilatura
 from clovers_agent import CloversAgent, Event
 from clovers_agent.utils import is_base64
 from clovers.logger import logger
@@ -57,15 +58,20 @@ async def _(agent: CloversAgent, event: Event, query: str):
     "network",
 )
 async def _(agent: CloversAgent, event: Event, webpage_url: str):
-    if not webpage_url.startswith("http"):
-        webpage_url = f"https://{webpage_url}"
-    try:
-        resp = await agent.async_client.get(webpage_url)
-        if resp.status_code != 200:
-            return f"获取网页失败，状态码：{resp.status_code}"
-        return resp.text
-    except Exception:
-        return "获取网页失败"
+    resp = await agent.async_client.get(webpage_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    if resp.status_code != 200:
+        return f"获取网页失败，状态码：{resp.status_code}"
+    text = trafilatura.extract(
+        resp.text,
+        url=webpage_url,
+        include_comments=True,
+        include_images=True,
+        include_links=True,
+        include_formatting=False,
+        favor_precision=True,
+        output_format="markdown",
+    )
+    return text or "未能提取内容。"
 
 
 ALLOWED_TYPES = ("application/json", "text/", "application/xml")
@@ -83,14 +89,7 @@ ALLOWED_TYPES = ("application/json", "text/", "application/xml")
     "network",
     required=["method", "url"],
 )
-async def _(
-    agent: CloversAgent,
-    event: Event,
-    method: str,
-    url: str,
-    headers: dict | None = None,
-    data: dict | None = None,
-):
+async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: dict | None = None, data: dict | None = None):
     method = method.lower()
     if method == "get":
         resp = await agent.async_client.get(url, params=data, headers=headers)
