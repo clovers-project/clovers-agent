@@ -79,8 +79,10 @@ async def _(agent: CloversAgent, event: Event, symbol: str):
     advice = await analyze_stock(session.api, session.usage_counter, agent, event, report)
     if not advice:
         return "报告生成失败。"
-    (WORKSPACE / f"{symbol}_advice.md").write_text(advice, encoding="utf-8")
-    agent.complete(advice)
+    advice_file = WORKSPACE / f"{symbol}_advice.md"
+    (advice_file).write_text(advice, encoding="utf-8")
+    await event.send("file", advice_file)
+    return advice
 
 
 @TOOLS.register(
