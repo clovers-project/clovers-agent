@@ -62,7 +62,7 @@ async def _(agent: CloversAgent, event: Event, webpage_url: str):
     if resp.status_code != 200:
         return f"获取网页失败，状态码：{resp.status_code}"
     text = trafilatura.extract(
-        resp.text,
+        resp.content,
         url=webpage_url,
         include_comments=True,
         include_images=True,
