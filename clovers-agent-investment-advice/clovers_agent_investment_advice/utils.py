@@ -345,7 +345,7 @@ STOCK_ANALYSIS_PROMPT = """\
 
 
 async def get_stock_news(api: OpenAIAPI, usage_counter: dict, agent: CloversAgent, event: Event, symbol: str):
-    info = await query_stock_symbol("symbol", "股票代码", agent)
+    info = await query_stock_symbol("symbol", symbol, agent)
     if not info:
         return ""
     elif len(info) > 1:

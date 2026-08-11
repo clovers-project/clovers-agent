@@ -76,7 +76,7 @@ async def _(agent: CloversAgent, event: Event, symbol: str):
     report = f"{quotes}\n\n{news}"
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     (WORKSPACE / f"{symbol}_report.md").write_text(report, encoding="utf-8")
-    advice = await analyze_stock(session.api, session.usage_counter, agent, event, symbol)
+    advice = await analyze_stock(session.api, session.usage_counter, agent, event, report)
     if not advice:
         return "报告生成失败。"
     (WORKSPACE / f"{symbol}_advice.md").write_text(advice, encoding="utf-8")
