@@ -2,7 +2,7 @@ from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.session import extract_plain_text
-from clovers_agent.embedding import similarity
+from clovers_agent.embedding import batch_similarity
 from clovers_agent.constants import ON_CHAT
 from clovers.logger import logger
 from .constants import WRITE_NOTE_PROMPT, UPDATE_USER_PROFILE_PROMPT
@@ -62,7 +62,7 @@ async def _(agent: CloversAgent, event: Event, content: str):
     try:
         if not note_file.exists() or not (note := note_file.read_text(encoding="utf-8").strip()):
             note_file.write_text(content, encoding="utf-8")
-        elif all(similarity(line, content, agent.sentence_model) < SIM_THRESHOD for line in note.split("\n")):
+        elif all(score < SIM_THRESHOD for score in batch_similarity(note.split("\n"), content, agent.sentence_model)):
             note_file.write_text(note + "\n" + content, encoding="utf-8")
         else:
             api = agent.current_session(event).api

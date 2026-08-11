@@ -33,36 +33,36 @@ async def _(agent: CloversAgent, event: Event):
     category="stock_market_analysis",
 )
 async def _(agent: CloversAgent, event: Event, column: str, value: str):
-    return await query_stock_symbol(column, value) or "未查询到结果"
+    lines = await query_stock_symbol(column, value, agent)
+    return "\n".join(lines) if lines else "未查询到结果"
 
 
-@TOOLS.register(
-    "screen_stocks_entry",
-    "扫描整个股票市场，根据技术面或基本面策略筛选出当前具备入场（买入/建仓）信号的股票列表。当用户要求推荐适合入场的股票时调用此工具。",
-    category="stock_market_analysis",
-)
-async def _(agent: CloversAgent, event: Event):
-    return "此功能暂不开放。"
-    session = agent.current_session(event)
-    api = session.api
-    counter = session.usage_counter
-    today, now = datetime.now().strftime("%Y年%m月%d日 %H:%M:%S").split(" ")
-    payload = api.build_payload(
-        ({"role": "user", "content": f"请检索并整理{today}当下最值得关注的 20 支股票。"},),
-        STOCK_SCREENING_PROMPT,
-    )
-    payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
-    payload["response_format"] = {"type": "json_object"}
-    stocks = json.loads(await agent.call_turn(api, payload, counter, event))
-    logger.info(f"筛选出的股票列表: {stocks}")
-    tasks = [asyncio.create_task(analyze_stock(api, counter, agent, event, stock)) for stock in stocks]
-    reports = await asyncio.gather(*tasks)
-    report = "\n---\n".join(reports)
-    WORKSPACE.mkdir(parents=True, exist_ok=True)
-    report_file = WORKSPACE / "股票入场报告.md"
-    report_file.write_text(f"# 股市入场报告\n\n报告生成时间: {today} {now}\n---\n{report}", encoding="utf-8")
-    await event.send("file", report_file)
-    return report
+# @TOOLS.register(
+#     "screen_stocks_entry",
+#     "扫描整个股票市场，根据技术面或基本面策略筛选出当前具备入场（买入/建仓）信号的股票列表。当用户要求推荐适合入场的股票时调用此工具。",
+#     category="stock_market_analysis",
+# )
+# async def _(agent: CloversAgent, event: Event):
+#     session = agent.current_session(event)
+#     api = session.api
+#     counter = session.usage_counter
+#     today, now = datetime.now().strftime("%Y年%m月%d日 %H:%M:%S").split(" ")
+#     payload = api.build_payload(
+#         ({"role": "user", "content": f"请检索并整理{today}当下最值得关注的 20 支股票。"},),
+#         STOCK_SCREENING_PROMPT,
+#     )
+#     payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
+#     payload["response_format"] = {"type": "json_object"}
+#     stocks = json.loads(await agent.call_turn(api, payload, counter, event))
+#     logger.info(f"筛选出的股票列表: {stocks}")
+#     tasks = [asyncio.create_task(analyze_stock(api, counter, agent, event, stock)) for stock in stocks]
+#     reports = await asyncio.gather(*tasks)
+#     report = "\n---\n".join(reports)
+#     WORKSPACE.mkdir(parents=True, exist_ok=True)
+#     report_file = WORKSPACE / "股票入场报告.md"
+#     report_file.write_text(f"# 股市入场报告\n\n报告生成时间: {today} {now}\n---\n{report}", encoding="utf-8")
+#     await event.send("file", report_file)
+#     return report
 
 
 @TOOLS.register(

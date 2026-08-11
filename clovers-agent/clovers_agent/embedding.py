@@ -9,10 +9,29 @@ import transformers
 transformers.logging.set_verbosity_error()
 
 
-def similarity(content: str, line: str, model: SentenceTransformer):
-    line_emb = model.encode(line, convert_to_tensor=True)
-    sentence_emb = model.encode(content, convert_to_tensor=True)
-    return util.cos_sim(sentence_emb, line_emb).item()
+def similarity(text1: str, text2: str, model: SentenceTransformer):
+    text1_emb = model.encode(text1, convert_to_tensor=True)
+    text2_emb = model.encode(text2, convert_to_tensor=True)
+    return util.cos_sim(text1_emb, text2_emb).item()
+
+
+def batch_similarity(texts: list[str], query: str, model: SentenceTransformer, batch_size: int = 256) -> list[float]:
+    """
+    批量计算文本列表中每个文本与 query 的语义相似度
+    Args:
+        texts (list[str]): 目标文本列表
+        query (str): 查询文本
+        model (SentenceTransformer): SentenceTransformer 模型
+        batch_size (int, optional): 批量编码的批次大小。默认为 256
+    Returns:
+        list[float]: 批量计算结果
+    """
+    if not texts:
+        return []
+    texts_emb = model.encode(texts, convert_to_tensor=True, batch_size=batch_size)
+    query_emb = model.encode(query, convert_to_tensor=True)
+    sim_matrix = util.cos_sim(query_emb, texts_emb)
+    return sim_matrix[0].cpu().tolist()
 
 
 def sentence_weight(text: str):

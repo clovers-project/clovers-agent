@@ -3,15 +3,41 @@ import pandas as pd
 import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
-from collections.abc import Callable
+from collections import OrderedDict
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent import CloversAgent, Event
 from clovers_agent.api import OpenAIAPI
+from clovers_agent.embedding import batch_similarity
 from clovers.logger import logger
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "stock_market_analysis"
 STOCK_CODES_CSV = WORKSPACE / "stock_codes.csv"
 UPDATE_LOCK = asyncio.Lock()
+
+
+class CacheDict[K, V]:
+    def __init__(self, maxsize: int = 1000):
+        self.maxsize = maxsize
+        self._cache = OrderedDict[K, V]()
+
+    def __contains__(self, key: K):
+        return key in self._cache
+
+    def __getitem__(self, key: K):
+        if key not in self._cache:
+            raise KeyError(key)
+        self._cache.move_to_end(key)
+        return self._cache[key]
+
+    def __setitem__(self, key: K, value: V):
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        self._cache[key] = value
+        if len(self._cache) > self.maxsize:
+            self._cache.popitem(last=False)
+
+    def clear(self):
+        self._cache.clear()
 
 
 def format_large_num(val):
@@ -94,7 +120,21 @@ async def get_stock_quotes(symbol: str):
     return "\n\n".join(report)
 
 
-def format_stock_code(symbol: str) -> str:
+def fill_stock_code(symbol: str) -> str:
+    """
+    将股票代码补齐成6位
+    """
+    symbol = "".join(x for x in symbol if x in "0123456789")
+    symbol_l = len(symbol)
+    if symbol_l < 6:
+        return symbol.zfill(6)
+    elif symbol_l > 6:
+        raise ValueError(f"股票代码长度不能超过6位: {symbol}")
+    else:
+        return symbol
+
+
+def format_stock_code(symbol: str) -> tuple[str, str]:
     """
     将股票代码格式化为带交易所前缀的代码。
 
@@ -119,13 +159,13 @@ def format_stock_code(symbol: str) -> str:
     elif symbol_l > 6:
         raise ValueError(f"股票代码长度不能超过6位: {symbol}")
     if symbol in ("001696", "001896"):
-        return f"sz{symbol}"
+        return "sz", symbol
     if symbol.startswith(("600", "601", "603", "605", "688")):
-        return f"sh{symbol}"
+        return "sh", symbol
     elif symbol.startswith(("000", "002", "300", "200")):
-        return f"sz{symbol}"
+        return "sz", symbol
     elif symbol.startswith("920"):
-        return f"bj{symbol}"
+        return "bj", symbol
     else:
         raise ValueError(f"无法识别的股票代码: {symbol}")
 
@@ -139,33 +179,51 @@ async def update_stock_symbol_data():
         stock_codes = await asyncio.to_thread(ak.stock_info_a_code_name)
         stock_codes = stock_codes.rename(columns={"code": "symbol"})
         stock_codes["name"] = stock_codes["name"].astype(str).str.replace(" ", "")
-        stock_codes.to_csv(STOCK_CODES_CSV, index=False, encoding="utf-8")
+        stock_codes["symbol"] = stock_codes["symbol"].str.extract(r"(\d+)", expand=False).str.zfill(6)
+        stock_codes.dropna(subset=["symbol"]).to_csv(STOCK_CODES_CSV, index=False, encoding="utf-8")
         return stock_codes
 
 
-async def query_stock_symbol(column: str, value: str):
+QUERY_STOCK_SYMBOL_CACHE = CacheDict[str, str](50)
+
+
+async def query_stock_symbol(column: str, value: str, agent: CloversAgent):
     """
     根据股票名称或代码查询股票信息
     """
+    if column == "symbol":
+        value = "".join(x for x in value if x in "0123456789")
+        prefix, value = format_stock_code(value)
+
+        def query_fn_symbol(df: pd.DataFrame):
+            return df[df["symbol"] == value]
+
+        query_fn = query_fn_symbol
+    elif column == "name":
+
+        def query_fn_name(df: pd.DataFrame):
+            result = df[df["name"] == value]
+            if not result.empty:
+                return result
+            result = df[df["name"].astype(str).str.contains(value, regex=False)]
+            if not result.empty:
+                return result
+            names = df["name"].astype(str).tolist()
+            scores = batch_similarity(names, value, agent.sentence_model)
+            df["similarity"] = scores
+            return df.sort_values(by="similarity", ascending=False).head(3)
+
+        query_fn = query_fn_name
+
+    else:
+        return None
+    cache_key = f"{column}:{value}"
+    if cache_key in QUERY_STOCK_SYMBOL_CACHE:
+        return [QUERY_STOCK_SYMBOL_CACHE[cache_key]]
     if not STOCK_CODES_CSV.exists():
         stock_codes = await update_stock_symbol_data()
     else:
         stock_codes = pd.read_csv(STOCK_CODES_CSV, dtype=str, encoding="utf-8")
-    query_fn: Callable[[pd.DataFrame], pd.DataFrame]
-    if column == "symbol":
-        value = "".join(x for x in value if x in "0123456789")
-        if not value:  # 忽略空值
-            return None
-        symbol_l = len(value)
-        if symbol_l < 6:
-            value = value.zfill(6)
-        elif symbol_l > 6:
-            return None
-        query_fn = lambda df: df[df["symbol"] == value]
-    elif column == "name":
-        query_fn = lambda df: df[df["name"].astype(str).str.contains(value, regex=False)]
-    else:
-        return None
     result = query_fn(stock_codes)
     if result.empty:
         now = datetime.now()
@@ -179,7 +237,16 @@ async def query_stock_symbol(column: str, value: str):
                 return None
         else:
             return None
-    return "\n".join(f"{format_stock_code(info['symbol'])} {info['name']}" for info in result.to_dict(orient="records"))
+    infos = []
+    for info in result.to_dict(orient="records"):
+        symbol = info["symbol"]
+        name = info["name"]
+        prefix, symbol = format_stock_code(symbol)
+        item = f"{name} {prefix}{symbol}"
+        QUERY_STOCK_SYMBOL_CACHE[f"symbol:{symbol}"] = item
+        QUERY_STOCK_SYMBOL_CACHE[f"name:{name}"] = item
+        infos.append(item)
+    return infos
 
 
 STOCK_SCREENING_PROMPT = """\
@@ -198,7 +265,7 @@ STOCK_SCREENING_PROMPT = """\
 """
 
 STOCK_NEWS_RESERCH_PROMPT = """\
-你是一位资深的证券基本面分析师，请你针对用户提供的股票代码，利用搜索工具 `web_search` 和网页查看工具 `web_extractor` 获取该股票和其行业的相关新闻，并撰写一份专业基本面分析。
+你是一位资深的证券基本面分析师，请你针对用户提供的股票名称，利用搜索工具 `web_search` 和网页查看工具 `web_extractor` 获取该股票和其行业的相关新闻，并撰写一份专业基本面分析。
 
 为了保证分析的准确性与时效性，请按以下步骤循序渐进地执行数据检索与分析：
 
@@ -276,9 +343,17 @@ STOCK_ANALYSIS_PROMPT = """\
 
 
 async def get_stock_news(api: OpenAIAPI, usage_counter: dict, agent: CloversAgent, event: Event, symbol: str):
+    info = await query_stock_symbol("symbol", "股票代码", agent)
+    if not info:
+        return ""
+    elif len(info) > 1:
+        return ""
+    else:
+        symbol = info[0]
+
     today = datetime.now().strftime("%Y年%m月%d日")
     payload = api.build_payload(
-        ({"role": "user", "content": f"请根据{today}最新信息，为股票代码 {symbol} 撰写一份详细的基本面报告"},),
+        ({"role": "user", "content": f"请根据{today}最新信息，为 {symbol} 撰写一份详细的基本面报告"},),
         STOCK_NEWS_RESERCH_PROMPT,
     )
     payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
