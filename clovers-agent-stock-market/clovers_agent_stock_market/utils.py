@@ -12,7 +12,6 @@ from clovers.logger import logger
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "stock_market_analysis"
 STOCK_CODES_CSV = WORKSPACE / "stock_codes.csv"
-UPDATE_LOCK = asyncio.Lock()
 
 
 class CacheDict[K, V]:
@@ -174,15 +173,13 @@ async def update_stock_symbol_data():
     更新股票代码数据
     """
     WORKSPACE.mkdir(parents=True, exist_ok=True)
-    async with UPDATE_LOCK:
-        # 获取所有股票代码
-        stock_codes = await asyncio.to_thread(ak.stock_info_a_code_name)
-        stock_codes = stock_codes.rename(columns={"code": "symbol"})
-        stock_codes["name"] = stock_codes["name"].astype(str).str.replace(" ", "")
-        stock_codes["symbol"] = stock_codes["symbol"].str.extract(r"(\d+)", expand=False).str.zfill(6)
-        stock_codes = stock_codes.dropna(subset=["symbol"])
-        stock_codes.to_csv(STOCK_CODES_CSV, index=False, encoding="utf-8")
-        return stock_codes
+    stock_codes = await asyncio.to_thread(ak.stock_info_a_code_name)
+    stock_codes = stock_codes.rename(columns={"code": "symbol"})
+    stock_codes["name"] = stock_codes["name"].astype(str).str.replace(" ", "")
+    stock_codes["symbol"] = stock_codes["symbol"].str.extract(r"(\d+)", expand=False).str.zfill(6)
+    stock_codes = stock_codes.dropna(subset=["symbol"])
+    stock_codes.to_csv(STOCK_CODES_CSV, index=False, encoding="utf-8")
+    return stock_codes
 
 
 QUERY_STOCK_SYMBOL_CACHE = CacheDict[str, str](50)
