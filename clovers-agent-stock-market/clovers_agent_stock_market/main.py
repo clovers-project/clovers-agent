@@ -69,10 +69,10 @@ async def _(agent: CloversAgent, event: Event, column: str, value: str):
 )
 async def _(agent: CloversAgent, event: Event, symbol: str):
     session = agent.current_session(event)
-    quotes = await get_stock_quotes(symbol)
     news = await get_stock_news(session.api, session.usage_counter, agent, event, symbol)
     if not news:
         return "报告生成失败。"
+    quotes = await get_stock_quotes(symbol)
     report = f"{quotes}\n\n{news}"
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     (WORKSPACE / f"{symbol}_report.md").write_text(report, encoding="utf-8")
@@ -81,7 +81,8 @@ async def _(agent: CloversAgent, event: Event, symbol: str):
         return "报告生成失败。"
     advice_file = WORKSPACE / f"{symbol}_advice.md"
     (advice_file).write_text(advice, encoding="utf-8")
-    await event.send("file", advice_file)
+    if coro := event.send("file", advice_file):
+        await coro
     return advice
 
 
