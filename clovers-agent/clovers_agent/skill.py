@@ -52,24 +52,12 @@ class SkillCore:
         self.categories[category] = description
         return self.on_category(category)
 
-    @staticmethod
-    def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
-        @wraps(func)
-        async def wrapper(agent: CloversAgent, event, /, *args: P.args, **kwargs: P.kwargs) -> str:
-            logger.info(f"[{agent.name}][CALL][{name}] called")
-            logger.debug(kwargs)
-            content = coro if isinstance(coro := func(agent, event, *args, **kwargs), str) else await coro
-            logger.debug(f"[{name}][RETURNED] {content}")
-            return content
-
-        return wrapper
-
     def intro_decorator(self, info: FunctionToolInfo):
         def decorator(func):
             name = info["function"]["name"]
             self.intro_tools.append(info)
             self.manifest[name] = info
-            self.intro_invoker[name] = self.invoker_wrapper(name, func)
+            self.intro_invoker[name] = invoker_wrapper(name, func)
             return func
 
         return decorator
@@ -83,7 +71,7 @@ class SkillCore:
                 self.__map_id_to_tools[category_id] = []
             self.__map_id_to_tools[category_id].append(info)
             self.manifest[name] = info
-            self.invoker[name] = self.invoker_wrapper(name, func)
+            self.invoker[name] = invoker_wrapper(name, func)
             return func
 
         return decorator
@@ -115,6 +103,7 @@ class SkillCore:
         if conflict:
             return conflict
         self.intro_tools.extend(others.intro_tools)
+        self.intro_invoker.update(others.intro_invoker)
         self.manifest.update(others.manifest)
         for category, hooks in others.category_hooks.items():
             if category in self.category_hooks:
@@ -132,7 +121,7 @@ class SkillCore:
                 self.__map_category_to_id[category] = new_category_id
         self.categories.update(others.categories)
 
-    def delete_skill(self, category: str | None, name: str | None):
+    def delete(self, category: str | None, name: str | None):
         if name is None:
             tools = self.select_tools(category)  # type: ignore
             if not tools:
@@ -153,6 +142,11 @@ class SkillCore:
             tools.remove(self.manifest[name])
             del self.manifest[name]
             del self.invoker[name]
+            if self.select_tools(category):
+                return
+            del self.categories[category]
+            if category in self.category_hooks:
+                del self.category_hooks[category]
             # 不清除 category_id
 
     def load_skill_md(self, skill: SkillMD, category: str | None = None, func: ToolFunction | None = None):
@@ -164,7 +158,7 @@ class SkillCore:
 
     def load_skill(self, skill_path: Path):
         if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
-            self.delete_skill(None, skill_md[0])
+            self.delete(None, skill_md[0])
             return self.load_skill_md(skill_md, None)
         md_file = skill_path / "SKILL.md"
         if not (md_file.exists() and (skill_md := parse_skill(md_file))):
@@ -172,10 +166,10 @@ class SkillCore:
         module = load_module_from_path(skill_md[0], skill_path / "skill.py")
         other_mds = [md for file in skill_path.glob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
         if not other_mds:
-            self.delete_skill(None, skill_md[0])
+            self.delete(None, skill_md[0])
             return self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
         category, desc, _, content = skill_md
-        self.delete_skill(category, None)
+        self.delete(category, None)
         register = self.create_category(category, desc)
         if skill_func := skill_wrapper(content, getattr(module, category, None)):
             register(skill_func)
@@ -196,6 +190,18 @@ def load_module_from_path(module_name: str, file: Path):
     except:
         return
     return module
+
+
+def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
+    @wraps(func)
+    async def wrapper(agent: CloversAgent, event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+        logger.info(f"[{agent.name}][CALL][{name}] called")
+        logger.debug(kwargs)
+        content = coro if isinstance(coro := func(agent, event, *args, **kwargs), str) else await coro
+        logger.debug(f"[{name}][RETURNED] {content}")
+        return content
+
+    return wrapper
 
 
 def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunction | None:
