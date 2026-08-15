@@ -8,7 +8,9 @@ class Config(BaseConfig):
     # use_shell: Literal["docker", "local"] = "docker"
     use_shell: bool = True
     """是否使用shell"""
-    note_similarity_threshold: float = 0.6
-    """笔记内容相似度阈值"""
     reminder_threshold: int = 5
+    """提醒个人档案更新对话轮数"""
     strong_reminder_threshold: int = 10
+    """强提醒个人档案更新对话轮数"""
+    debug_mode: bool = False
+    """是否加载调试工具"""

@@ -1,10 +1,12 @@
 import time
 import json
+import traceback
 import asyncio
 import httpx
 from pathlib import Path
 from itertools import islice
 from datetime import datetime
+from collections import deque
 from clovers.core import ModuleLoader
 from clovers.logger import logger
 from clovers_client import Event as BaseEvent
@@ -84,6 +86,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._skill_dirs = CONFIG.skill_dirs
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
+        # DEBUG
+        self.tracebacks: deque[str] = deque(maxlen=5)
 
     @property
     def usage_file(self):
@@ -230,6 +234,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             raise
         except Exception as e:
             logger.exception(e)
+            self.tracebacks.append("".join(traceback.format_exception(e)))
             return {"role": "tool", "tool_call_id": call_info["id"], "content": f"工具发生内部错误，请稍后再试。"}
 
     async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):

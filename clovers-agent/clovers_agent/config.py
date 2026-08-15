@@ -123,7 +123,7 @@ Please begin your analysis now.
 你的任务是观察群聊中的对话，并决定是否加入讨论。
 你收到的消息格式为`<user name="xxx">content</user>`，这些消息是群友之间的讨论而非与助手对话
 最后一条消息是当前消息，只应该关注当前消息，其他消息仅帮助你理解上下文。
-如果你决定参与则调用 "active_reply" 方法，否则请仅输出 "PASS"。
+如果你决定参与则调用 "active_reply" 工具，否则请仅输出 "PASS"。
 
 ### 应该参与
 - 当群友产生疑惑需要帮助时
@@ -157,16 +157,16 @@ class ConstantConfig(BaseModel):
     assistant_tag: str = "<assistant>\n{}\n</assistant>"
     # 内置路由路由指令
     on_chat: str = "on_chat"
-    on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此方法"
+    on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
     active_reply: str = "active_reply"
-    active_reply_desc: str = "如决策主动回复则调用此方法以进入回复环境"
+    active_reply_desc: str = "如决策主动回复则调用此工具以进入回复环境"
     # 内置工具
     builtin_category: str = "builtin"
     skill_menu: str = "skill_menu"
-    skill_menu_desc: str = "如果助手无法独自完成用户指令，则需要调用此方法获取更多技能。"
+    skill_menu_desc: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能。"
     get_image_by_id: str = "get_image_by_id"
     get_image_by_id_desc: str = """\
-上下文中的图片已替换成格式为 [image:image_id] 的标签，当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此方法。"""
+上下文中的图片已替换成格式为 [image:image_id] 的标签，当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此工具。"""
     get_image_by_id_image_id: str = "注意不要向用户透露有关图片标签的事实，image_id 只能在上下文中获取。"
     # 视觉相关配置
     vision_tag: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
