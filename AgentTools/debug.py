@@ -35,27 +35,7 @@ async def _(agent: CloversAgent, event: Event, import_name: str | None = None):
     if IMPORT_NAME in sys.modules:
         agent.load_from_list([IMPORT_NAME])
     else:
-        oldtools: SkillCore = sys.modules[IMPORT_NAME].TOOLS
-        for info in oldtools.intro_tools:
-            agent.intro_tools.remove(info)
-        for name in oldtools.intro_invoker:
-            del agent.intro_invoker[name]
-        for category, hooks in oldtools.category_hooks.items():
-            for hook in hooks:
-                agent.category_hooks[category].remove(hook)
-        for category in oldtools.categories:
-            tools = agent.select_tools(category)
-            for info in oldtools.select_tools(category):
-                tools.remove(info)
-                del agent.manifest[name]
-                del agent.invoker[name]
-            tools = agent.select_tools(category)
-            if tools:
-                continue
-            del agent.categories[category]
-            if category in agent.category_hooks:
-                del agent.category_hooks[category]
-        newtools: SkillCore = importlib.reload(sys.modules[IMPORT_NAME]).TOOLS
-        agent.merge(newtools)
+        agent.detach(sys.modules[IMPORT_NAME].TOOLS)
+        agent.merge(importlib.reload(sys.modules[IMPORT_NAME]).TOOLS)
         agent.sync_menu()
-    return "已重新加载目标模块"
+    return f"已重新加载{IMPORT_NAME}"
