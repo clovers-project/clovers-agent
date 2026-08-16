@@ -6,7 +6,6 @@ from clovers_agent.constants import ON_CHAT
 from .constants import UPDATE_USER_PROFILE_PROMPT
 from ..toolkit import TOOLS, CONFIG
 
-SIM_THRESHOD = CONFIG.note_similarity_threshold
 REMINDER_THRESHOLD = CONFIG.reminder_threshold
 STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"

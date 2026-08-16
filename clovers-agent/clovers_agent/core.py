@@ -16,7 +16,7 @@ from .skill import SkillCore, Parameters
 from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add
-from typing import Protocol, Literal, Never, override
+from typing import Protocol, Literal, TypedDict, Never, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
@@ -44,6 +44,12 @@ class TurnComplete(Exception):
     def __init__(self, data: str) -> None:
         super().__init__()
         self.data = data
+
+
+class ToolCallError(TypedDict):
+    name: str
+    args: dict
+    traceback: str
 
 
 class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
@@ -87,7 +93,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
         # DEBUG
-        self.tracebacks: deque[str] = deque(maxlen=5)
+        self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
+        self.extra = {}
 
     @property
     def usage_file(self):
@@ -234,7 +241,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             raise
         except Exception as e:
             logger.exception(e)
-            self.tracebacks.append("".join(traceback.format_exception(e)))
+            self.tool_failures.appendleft({"name": name, "args": kwargs, "traceback": "".join(traceback.format_exception(e))})
             return {"role": "tool", "tool_call_id": call_info["id"], "content": f"工具发生内部错误，请稍后再试。"}
 
     async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):

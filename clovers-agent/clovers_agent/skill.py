@@ -178,6 +178,9 @@ class SkillCore:
                 del self.manifest[_name]
                 del self.invoker[_name]
             tools.clear()
+            del self.categories[category]
+            if category in self.category_hooks:
+                del self.category_hooks[category]
         elif name not in self.invoker:
             return
         elif category is None:
