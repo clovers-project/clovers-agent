@@ -48,7 +48,7 @@ async def _(agent: CloversAgent, event: Event, column: str, value: str):
     category=MARKET_ANALYSIS,
 )
 async def _(agent: CloversAgent, event: Event, symbol: str):
-    return await get_market_quotes(symbol) or f"没有找到 {symbol} 的行情"
+    return (await get_market_quotes(symbol)) or f"没有找到 {symbol} 的行情"
 
 
 @TOOLS.register(
@@ -118,11 +118,11 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str):
 )
 async def _(agent: CloversAgent, event: Event, stock_symbol: str, index_symbol: str = "sh000300"):
     stock_info = await query_security_symbol("symbol", stock_symbol, agent)
-    if not stock_info or len(stock_info) >= 1:
+    if not stock_info or len(stock_info) > 1:
         return "报告生成失败。"
     stock_info = stock_info[0]
     index_info = await query_security_symbol("symbol", index_symbol, agent)
-    if not index_info or len(index_info) >= 1:
+    if not index_info or len(index_info) > 1:
         index_info = "沪深300 sh000300"
         index_symbol = "sh000300"
     else:
