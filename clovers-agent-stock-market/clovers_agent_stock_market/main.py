@@ -18,6 +18,8 @@ async def _(agent: CloversAgent, event: Event):
     return """\
 本工具组下所有 symbol 字段都为带交易所前缀的代码，如：`sh000001`，`sz000001`。
 本工具组并发时极易造成 429 错误。在针对特定股票进行工具调用前，请使用 `query_stock_symbol` 或直接向用户确认股票正式名称和代码。
+`analyze_stock` 仅支持A股股票，`get_market_quotes` 与 `query_security_symbol` 仅支持A股的股票与指数。
+对其他的分析请使用 `get_security_news`
 """
 
 
@@ -68,6 +70,11 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str):
     news = await get_security_news(session.api, session.usage_counter, agent, event, name, asset_type)
     if not news:
         return "无法获取新闻。"
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
+    news_file = WORKSPACE / f"{name}_{asset_type}_news.md"
+    news_file.write_text(news, encoding="utf-8")
+    if coro := event.send("file", news_file):
+        await coro
     return news
 
 
@@ -142,7 +149,7 @@ async def _(agent: CloversAgent, event: Event, stock_symbol: str, index_symbol: 
     if not advice:
         return "报告生成失败。"
     advice_file = WORKSPACE / f"{stock_symbol}_advice.md"
-    (advice_file).write_text(advice, encoding="utf-8")
+    advice_file.write_text(advice, encoding="utf-8")
     if coro := event.send("file", advice_file):
         await coro
     return advice

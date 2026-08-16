@@ -197,7 +197,7 @@ async def update_security_symbol_data():
     stock_codes["symbol"] = stock_codes["symbol"].map(fmt_stock_symbol)
     stock_codes = stock_codes.dropna(subset=["symbol"])
     index_codes = await asyncio.to_thread(ak.stock_zh_index_spot_sina)
-    index_codes = index_codes.rename(columns={"代码": "symbol", "名称": "name"})
+    index_codes = index_codes.rename(columns={"代码": "symbol", "名称": "name"})[["symbol", "name"]]
     index_codes["name"] = index_codes["name"].astype(str).str.replace(" ", "")
     symbol_data = pd.concat([stock_codes, index_codes], ignore_index=True)
     symbol_data.to_csv(SECURITY_SYMBOL_CSV, index=False, encoding="utf-8")
