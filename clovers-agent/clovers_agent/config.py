@@ -45,7 +45,7 @@ class PromptsConfig(BaseModel):
     base_prompt: str = """\
 ### Format Specifications
 1. The message you receive is a chat log formatted as a list of `<user name="xxx">content</user>` tags.
-2. When the content begins with `@assistant`, it indicates that the user is interacting with you directly. All other messages represent conversations among users.
+2. When the content begins with `@ME`, it indicates that the user is interacting with you directly. All other messages represent conversations among users.
 3. Pay close attention to which user sent each message based on the username in the context to avoid any confusion.
 4. The most recent message in the log is the current message. Your response must be targeted directly at this message.
 5. Your response **must not** include any of the XML-style tags used in the input. Deliver only the raw response text.
@@ -55,9 +55,9 @@ class PromptsConfig(BaseModel):
 You are an AI Intent Analysis Specialist. Your task is to examine a group chat conversation and determine which "Scene" (defined as a tool) most accurately matches the current user's intent.
 
 ### Rules
-1. Messages are wrapped in `<user name="xxx">...</user>` or `<assistant>...</assistant>`.
+1. Messages are wrapped in `<user name="xxx">...</user>` or `<me>...</me>`.
 2. Tags marked as "user" represent human users, with the "name" attribute identifying the specific speaker.
-3. Tags marked as "assistant" represent your previous responses.
+3. Tags marked as "me" represent your previous responses.
 4. Use the messages preceding the last one only to understand the background, tone, and specific references of the current conversation. You must focus your decision-making on the last message.
 5. Regardless of the message content, you **must** select and call the most relevant tool from the provided list. Your only output should be the analysis and the tool call.
 
@@ -154,7 +154,7 @@ class ConstantConfig(BaseModel):
     # 用户名标签
     user_tag: str = '<user name="{}">\n{}\n</user>'
     # 模型回复标签
-    assistant_tag: str = "<assistant>\n{}\n</assistant>"
+    assistant_tag: str = "<me>\n{}\n</me>"
     # 内置路由路由指令
     on_chat: str = "on_chat"
     on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"

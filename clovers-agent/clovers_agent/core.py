@@ -332,9 +332,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
         message = event.message
         if "extra_context" in event.properties:
-            body = f"@assistant {at}{message}\n{"\n".join(event.extra_context)}"
+            body = f"@ME {at}{message}\n{"\n".join(event.extra_context)}"
         elif event.to_me:
-            body = f"@assistant {at}{message}"
+            body = f"@ME {at}{message}"
         else:
             body = f"{at}{message}"
             session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
