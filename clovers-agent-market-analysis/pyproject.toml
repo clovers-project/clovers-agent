@@ -4,7 +4,12 @@ version = "0.1.2"
 description = ""
 readme = "README.md"
 requires-python = ">=3.12, <4.0.0"
-dependencies = ["clovers-agent>=0.2.10", "akshare", "pandas>=3.0.5"]
+dependencies = [
+    "clovers-agent>=0.2.10",
+    "akshare",
+    "pandas>=3.0.5",
+    "numpy>=2.5.2",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,14 +1,15 @@
-import akshare as ak
-import pandas as pd
 import asyncio
-from datetime import datetime
+import numpy as np
+import pandas as pd
+import akshare as ak
+from typing import cast
 from pathlib import Path
+from datetime import datetime
 from collections import OrderedDict
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent import CloversAgent, Event
 from clovers_agent.api import OpenAIAPI
 from clovers_agent.embedding import batch_similarity
-from clovers.logger import logger
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "market_analysis"
 SECURITY_SYMBOL_CSV = WORKSPACE / "security_symbol.csv"
@@ -47,10 +48,11 @@ def fmt_large_num(val):
     return f"{val:.2f}"
 
 
-def ohlc2md(ohlc: pd.DataFrame):
+def ohlc_to_md(ohlc: pd.DataFrame):
     for col in ["volume", "amount"]:
         if col in ohlc.columns:
             ohlc[col] = ohlc[col].map(fmt_large_num)
+    ohlc["return"] = ohlc["close"].pct_change().map(lambda x: "-" if pd.isna(x) else f"{x:.2%}")
     # 1. 表头
     header = f"{ohlc.index.name or 'time'}|" + "|".join(map(str, ohlc.columns))
     # 2. 最简分界线
@@ -60,77 +62,110 @@ def ohlc2md(ohlc: pd.DataFrame):
     return "\n".join((header, divider, *rows))
 
 
-def get_market_microscopic_quotes(symbol: str):
-    minute_k = ak.stock_zh_a_minute(symbol=symbol, period="1", adjust="qfq")
-    minute_k = minute_k.rename(columns={"day": "datetime"})
-    minute_k["datetime"] = pd.to_datetime(minute_k["datetime"])
-    minute_k["volume"] = pd.to_numeric(minute_k["volume"], errors="coerce")
-    minute_k["amount"] = pd.to_numeric(minute_k["amount"], errors="coerce")
-    minute_k = minute_k.sort_values("datetime")
-    start_3d = pd.Timestamp(minute_k["datetime"].dt.date.unique()[-3])
-    minute_k = minute_k.set_index("datetime")
-    report = ["### 15分钟实时"]
-    report.append(ohlc2md(minute_k.tail(15).rename(index=lambda x: x.strftime("%Y-%m-%d %H:%M"))))
+async def fetch_quotes_ohlc(symbol: str, period: str, adjust: str = ""):
+    ohlc = await asyncio.to_thread(ak.stock_zh_a_minute, symbol=symbol, period=period, adjust=adjust)
+    ohlc = ohlc.rename(columns={"day": "datetime"})
+    ohlc["datetime"] = pd.to_datetime(ohlc["datetime"])
+    ohlc["open"] = pd.to_numeric(ohlc["open"], errors="coerce")
+    ohlc["close"] = pd.to_numeric(ohlc["close"], errors="coerce")
+    ohlc["high"] = pd.to_numeric(ohlc["high"], errors="coerce")
+    ohlc["low"] = pd.to_numeric(ohlc["low"], errors="coerce")
+    ohlc["volume"] = pd.to_numeric(ohlc["volume"], errors="coerce")
+    ohlc["amount"] = pd.to_numeric(ohlc["amount"], errors="coerce")
+    return ohlc.dropna(subset=["open", "high", "low", "close"]).sort_values("datetime").set_index("datetime")
+
+
+def resample_ohlc(df: pd.DataFrame, period: str):
+    return (
+        df.resample(period)
+        .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum", "amount": "sum"})
+        .dropna(subset=["open"])
+    )
+
+
+def realtime_ohlc_to_md(minute_k: pd.DataFrame):
+    today = cast(pd.DatetimeIndex, minute_k.index).normalize().unique()[-1]
+    minute_k = minute_k[today:].rename(index=lambda x: x.strftime("%H:%M"))
+    return f"### 实时\n\n{ohlc_to_md(minute_k)}"
+
+
+def historical_ohlc_to_md(hourly_k: pd.DataFrame):
+    report = []
+    dates = cast(pd.DatetimeIndex, hourly_k.index).normalize().unique()
+    now = dates[-1]
+    start_3d = dates[-3]
+    start_15d = dates[-15]
+    start_1y = now - pd.DateOffset(years=1)
     report.append("### 3日")
-    report.append(
-        ohlc2md(
-            minute_k.loc[start_3d:]
-            .resample("1h")
-            .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum", "amount": "sum"})
-            .dropna(subset=["open"])
-            .rename(index=lambda x: x.strftime("%Y-%m-%d %H:00"))
-        )
-    )
-    return "\n\n".join(report)
-
-
-def get_market_macroscopic_quotes(symbol: str):
-    hourly_k = ak.stock_zh_a_minute(symbol=symbol, period="60", adjust="qfq")
-    hourly_k = hourly_k.rename(columns={"day": "date"})
-    hourly_k["date"] = pd.to_datetime(hourly_k["date"])
-    hourly_k["volume"] = pd.to_numeric(hourly_k["volume"], errors="coerce")
-    hourly_k["amount"] = pd.to_numeric(hourly_k["amount"], errors="coerce")
-    hourly_k = hourly_k.sort_values("date")
-    dates = hourly_k["date"].dt.date.unique()
-    start_15d = pd.Timestamp(dates[-15])
-    now = datetime.now()
-    start_1y = pd.Timestamp(now.replace(year=now.year - 1))
-    hourly_k = hourly_k.set_index("date")
-    report = ["### 15日"]
-    report.append(
-        ohlc2md(
-            hourly_k.loc[start_15d:]
-            .resample("D")
-            .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum", "amount": "sum"})
-            .dropna(subset=["open"])
-            .rename(index=lambda x: x.strftime("%Y-%m-%d"))
-        )
-    )
+    report.append(ohlc_to_md(hourly_k[start_3d:].rename(index=lambda x: x.strftime("%Y-%m-%d %H:00"))))
+    report.append("### 15日")
+    report.append(ohlc_to_md(resample_ohlc(hourly_k.loc[start_15d:], "D").rename(index=lambda x: x.strftime("%Y-%m-%d"))))
     report.append("### 1年")
-    report.append(
-        ohlc2md(
-            hourly_k.loc[start_1y:]
-            .resample("ME")
-            .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum", "amount": "sum"})
-            .dropna(subset=["open"])
-            .rename(index=lambda x: x.strftime("%Y-%m"))
-        )
-    )
+    report.append(ohlc_to_md(resample_ohlc(hourly_k.loc[start_1y:], "ME").rename(index=lambda x: x.strftime("%Y-%m"))))
     return "\n\n".join(report)
 
 
-async def get_market_quotes(symbol: str):
-    """获取股票行情
-    Args:
-        symbol (str): 股票代码，需要带市场前缀，如 sz302132
-    Returns:
-        str: 包含15分钟实时，3日小时K，15日日K,1年月K的行情报告
-    """
-    symbol = symbol.lower()
-    # ak 是同步的，这里转成异步避免阻塞主循环，不并行执行防止 429
-    micro = await asyncio.to_thread(get_market_microscopic_quotes, symbol)
-    macro = await asyncio.to_thread(get_market_macroscopic_quotes, symbol)
-    return f"{micro}\n\n{macro}"
+def relative_features_md(
+    stock_daily_k: pd.DataFrame,
+    index_daily_k: pd.DataFrame,
+    excess_windows=(5, 20, 60),  # 超额收益周期
+    rs_window=10,  # RS 窗口
+    corr_window=60,  # 滚动相关性窗口
+    capture_window=60,  # 上涨/下跌捕获率滚动窗口
+):
+
+    df = pd.concat(
+        [stock_daily_k["close"].rename("stock_close"), index_daily_k["close"].rename("index_close")],
+        axis=1,
+        join="inner",
+    ).dropna()
+    stock_ret = df["stock_ret"] = df["stock_close"].pct_change()
+    index_ret = df["index_ret"] = df["index_close"].pct_change()
+    df["excess_ret"] = stock_ret - index_ret
+    excess_ret = df[["excess_ret"]]  # excess_ret 算 Sharpe 需要保留更多数据
+    length = min(len(df), 2 * max(excess_windows[-1], rs_window, corr_window, capture_window))
+    df = df.tail(length)
+    for x in excess_windows:
+        stock_ret = df["stock_close"].pct_change(x)
+        index_ret = df["index_close"].pct_change(x)
+        df[f"relative_return_{x}d"] = (1 + stock_ret) / (1 + index_ret) - 1
+    # RS 移动平均值、RS 变化、RS 均线斜率
+    rs = df["stock_close"] / df["index_close"]
+
+    def calc_slope(x):
+        y = x.to_numpy()
+        t = np.arange(len(y))
+        return np.polyfit(t, y, 1)[0]
+
+    df["rs_slope"] = pd.Series(np.log(rs)).rolling(rs_window).apply(calc_slope, raw=False)
+    stock_ret = df["stock_ret"]
+    index_ret = df["index_ret"]
+    df["rolling_corr"] = stock_ret.rolling(corr_window).corr(index_ret)
+    up_stock = (1 + stock_ret.where(index_ret > 0, 0)).rolling(capture_window).apply(np.prod, raw=True)
+    up_index = (1 + index_ret.where(index_ret > 0, 0)).rolling(capture_window).apply(np.prod, raw=True)
+    down_stock = (1 + stock_ret.where(index_ret < 0, 0)).rolling(capture_window).apply(np.prod, raw=True)
+    down_index = (1 + index_ret.where(index_ret < 0, 0)).rolling(capture_window).apply(np.prod, raw=True)
+    df["upside_capture"] = (up_stock - 1).div((up_index - 1).replace(0, np.nan))
+    df["downside_capture"] = (down_stock - 1).div((down_index - 1).replace(0, np.nan))
+    # 10. 相对收益 Sharpe：全期超额收益年化夏普
+    now = df.index[-1]
+    last_y = now - pd.DateOffset(years=1)
+    excess_ret = excess_ret[last_y:]["excess_ret"]
+    excess_std = excess_ret.std()
+    if excess_std == 0 or np.isnan(excess_std):
+        relative_sharpe = np.nan
+    else:
+        relative_sharpe = excess_ret.mean() / excess_std * np.sqrt(252)
+    last = df.iloc[-1]
+    # 12. 相对收益胜率
+    report = [f"{x}D 相对收益率:{last[f"relative_return_{x}d"]:.2%}" for x in excess_windows]
+    report.append(f"{rs_window}D RS对数斜率: {last["rs_slope"]:.3g}")
+    report.append(f"{corr_window}D 滚动相关性: {last['rolling_corr']:.2%}")
+    report.append(f"{capture_window}D 上涨捕获率: {last['upside_capture']:.2%}")
+    report.append(f"{capture_window}D 下跌捕获率: {last['downside_capture']:.2%}")
+    report.append(f"近{length}日跑赢指数交易日占比: {(df["excess_ret"] > 0).mean():.2%}")
+    report.append(f"相对信息比率: {relative_sharpe:.2f}")
+    return "\n".join(report)
 
 
 def fmt_stock_code(symbol: str) -> str:
@@ -273,8 +308,8 @@ STOCK_SCREENING_PROMPT = """\
 请按照以下步骤执行任务：
 
 1. **信息检索**：调用搜索工具，搜索今日（A股最新交易日）的市场新闻、热门板块、龙头企业、涨幅榜及社交媒体讨论热点。
-2. **筛选分析**：从搜索结果中筛选出 20 个具有重大新闻影响或热门讨论的A 股股票。
-3. **格式化输出**：将筛选出的 20 个股票整理成一个 JSON 字符串数组。数组中的每个元素必须遵循特定的格式：`"[股票代码] 股票名称"`。
+2. **筛选分析**：从搜索结果中筛选出 20 个具有重大新闻影响或热门讨论的 A 股股票。
+3. **格式化输出**：将筛选出的 20 个股票整理成一个 JSON 字符串数组。数组中的元素为该股票的正式名称。
 
 **输出要求：**
 
@@ -410,29 +445,6 @@ INDUSTRY_NEWS_RESEARCH_PROMPT = """
     - 从多个维度进行风险解读
 """
 
-
-async def get_security_news(api: OpenAIAPI, usage_counter: dict, agent: CloversAgent, event: Event, name: str, asset_type: str):
-    match asset_type:
-        case "stock":
-            system_prompt = STOCK_NEWS_RESEARCH_PROMPT
-        case "index":
-            system_prompt = INDEX_NEWS_RESEARCH_PROMPT
-        case "futures":
-            system_prompt = FUTURES_NEWS_RESEARCH_PROMPT
-        case "industry":
-            system_prompt = INDUSTRY_NEWS_RESEARCH_PROMPT
-        case _:
-            raise ValueError("Invalid asset type")
-    today = datetime.now().strftime("%Y年%m月%d日")
-    payload = api.build_payload(({"role": "user", "content": f"请根据{today}最新信息，为 {name} 撰写一份详细新闻报告"},), system_prompt)
-    payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
-    try:
-        return await agent.call_turn(api, payload, usage_counter, event)
-    except Exception as e:
-        logger.error(f"分析 {name} 时发生错误: {e}")
-        return ""
-
-
 STOCK_ANALYSIS_PROMPT = """\
 你是一位资深的金融分析师和投资策略专家，你的任务是根据用户提供的行情数据和相关咨询信息，为用户撰写一份专业、严谨且具有操作参考价值的股票投资报告书。
 
@@ -449,7 +461,8 @@ STOCK_ANALYSIS_PROMPT = """\
 - 分析近期新闻对股价的中长期影响。
 
 ### 第二部分：技术面评估
-- 描述当前趋势（上涨趋势、横盘整理或下跌趋势）。
+- 描述当前趋势特征和与参考指数的相对强弱。
+- 结合参考指数判断市场环境
 - 指出关键的支撑和阻力水平。
 
 ### 第三部分：操作方案
@@ -460,12 +473,3 @@ STOCK_ANALYSIS_PROMPT = """\
 ### 第四部分：风险提示
 - 列出投资者需要警惕的具体风险因素。
 """
-
-
-async def analyze_stock(api: OpenAIAPI, usage_counter: dict, agent: CloversAgent, event: Event, report: str):
-    payload = api.build_payload(({"role": "user", "content": report},), STOCK_ANALYSIS_PROMPT)
-    try:
-        return await agent.call_turn(api, payload, usage_counter, event)
-    except Exception as e:
-        logger.error(f"分析股票时发生错误: {e}")
-        return report
