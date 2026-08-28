@@ -164,11 +164,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def sync_menu(self):
         for skill in self.skills:
             self.remove(*skill)
-        paths = (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir)).exists() for _p in _dir.iterdir())
+        paths = (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir).expanduser()).exists() for _p in _dir.iterdir())
         category_set: set[str] = set()
         name_set: set[str] = set()
         for path in paths:
-            select = self.load_skill(path.expanduser())
+            select = self.load_skill(path)
             if not select:
                 continue
             category, name = select

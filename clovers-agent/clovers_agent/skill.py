@@ -308,7 +308,7 @@ class SkillCore:
         if not (md_file.exists() and (skill_md := parse_skill(md_file.read_text("utf-8")))):
             return
         module = load_module_from_path(skill_md[0], skill_path / "skill.py")
-        other_mds = [file for file in skill_path.glob("*.md") if not file.samefile(md_file)]
+        other_mds = [file for file in skill_path.rglob("*.md") if not file.samefile(md_file)]
         if not other_mds:
             self.remove(None, skill_md[0])
             return self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
