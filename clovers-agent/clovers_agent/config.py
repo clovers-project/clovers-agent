@@ -207,7 +207,7 @@ class Config(BaseConfig):
     """插件列表"""
     plugin_dirs: list[str] = ["./AgentTools"]
     """插件路径"""
-    skill_dirs: list[str] = ["./AgentSkills"]
+    skill_dirs: list[str] = ["./AgentSkills", "~/.agents/skills"]
     """技能路径"""
     api: HybridOpenAIConfig
     """主模型接入点"""

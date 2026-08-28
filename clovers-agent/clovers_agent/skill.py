@@ -301,14 +301,14 @@ class SkillCore:
             tuple[str | None, str | None] | None: 加载成功时返回工具组名称和工具名称，失败时返回 None。
         """
 
-        if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
+        if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path.read_text("utf-8"))):
             self.remove(None, skill_md[0])
             return self.load_skill_md(skill_md, None)
         md_file = skill_path / "SKILL.md"
-        if not (md_file.exists() and (skill_md := parse_skill(md_file))):
+        if not (md_file.exists() and (skill_md := parse_skill(md_file.read_text("utf-8")))):
             return
         module = load_module_from_path(skill_md[0], skill_path / "skill.py")
-        other_mds = [md for file in skill_path.glob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
+        other_mds = [file for file in skill_path.glob("*.md") if not file.samefile(md_file)]
         if not other_mds:
             self.remove(None, skill_md[0])
             return self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
@@ -317,8 +317,13 @@ class SkillCore:
         register = self.create_category(category, desc)
         if skill_func := skill_wrapper(content, getattr(module, category, None)):
             register(skill_func)
-        for md in other_mds:
-            self.load_skill_md(md, category, getattr(module, md[0], None))
+        for md_file in other_mds:
+            md_data = md_file.read_text("utf-8")
+            if md := parse_skill(md_data):
+                self.load_skill_md(md, category, getattr(module, md[0], None))
+            else:
+                path = category / md_file.relative_to(skill_path)
+                self.load_skill_md((path.as_posix(), "", None, None, md_data), category)
         return category, None
 
 
@@ -361,9 +366,9 @@ def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunctio
     return lambda agent, event: content
 
 
-def parse_skill(skill_path: Path) -> SkillMD | None:
+def parse_skill(md: str) -> SkillMD | None:
     try:
-        skill = frontmatter.loads(skill_path.read_text("utf-8"))
+        skill = frontmatter.loads(md)
         name = skill["name"]
         desc = skill["description"]
         if schema := skill.get("parameters"):

@@ -159,6 +159,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()
+        logger.info(self.manifest)
 
     def sync_menu(self):
         for skill in self.skills:
@@ -167,7 +168,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         category_set: set[str] = set()
         name_set: set[str] = set()
         for path in paths:
-            select = self.load_skill(path)
+            select = self.load_skill(path.expanduser())
             if not select:
                 continue
             category, name = select

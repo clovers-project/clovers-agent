@@ -89,27 +89,16 @@ def resample_ohlc(df: pd.DataFrame, period: str):
     )
 
 
-async def main():
-    start = time.time()
-    stock_hourly_k = await fetch_quotes_ohlc(symbol="sh600089", period="60", adjust="qfq")
-    index_hourly_k = await fetch_quotes_ohlc(symbol="sh000300", period="60", adjust="qfq")
-    end = time.time()
-    print(f"获取 ohlc 耗时: {end - start:.2f}s")
-    start = time.time()
-    stock_daily_k = resample_ohlc(stock_hourly_k, "D")
+def main():
+    index_hourly_k = asyncio.run(fetch_quotes_ohlc(symbol="sh000300", period="60", adjust="qfq"))
     index_daily_k = resample_ohlc(index_hourly_k, "D")
-    end = time.time()
-    print(f"重采样 ohlc 耗时: {end - start:.2f}s")
-    start = time.time()
-    md = relative_features_md(stock_daily_k, index_daily_k)
-    end = time.time()
-    print(f"计算相对特征 耗时: {end - start:.2f}s")
-    print(md)
+    while True:
+        symbol = input("输入股票代码: ")
+        stock_hourly_k = asyncio.run(fetch_quotes_ohlc(symbol=symbol, period="60", adjust="qfq"))
+        stock_daily_k = resample_ohlc(stock_hourly_k, "D")
+        md = relative_features_md(stock_daily_k, index_daily_k)
+        print(md)
 
 
-# asyncio.run(main())
-
-# print(ak.search("股票,排名,排行"))
-print(ak.stock_hot_rank_em())
-# print(ak.stock_hot_rank_relate_em())
-print(ak.stock_hot_tweet_xq())
+if __name__ == "__main__":
+    main()
