@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import importlib.util
 import frontmatter
 from pathlib import Path
@@ -8,6 +9,7 @@ from clovers.logger import logger
 from collections.abc import Callable
 from typing import Concatenate, TYPE_CHECKING
 from clovers.base import Coro
+from .constants import EXECUTE_SCRIPT_ARGS, EXECUTE_SCRIPT_DESC
 from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 
@@ -31,6 +33,8 @@ class SkillCore:
         self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
         self.categories: dict[str, str] = {}
         self.category_hooks: dict[str, list[ToolFunction]] = {}
+        self.scripts_map: dict[str, Path] = {}
+        self.references_map: dict[str, Path] = {}
 
     def select_tools(self, category: str) -> list[FunctionToolInfo]:
         """选择指定工具组中的所有工具。
@@ -230,6 +234,8 @@ class SkillCore:
                 self.__map_id_to_tools[new_category_id].extend(others.__map_id_to_tools[category_id])
                 self.__map_category_to_id[category] = new_category_id
         self.categories.update(others.categories)
+        self.references_map.update(others.references_map)
+        self.scripts_map.update(others.scripts_map)
 
     def detach(self, others: "SkillCore"):
         """移除从其他 SkillCore 加载的内容。
@@ -258,6 +264,10 @@ class SkillCore:
             del self.categories[category]
             if category in self.category_hooks:
                 del self.category_hooks[category]
+        for reference in others.references_map.keys():
+            del self.references_map[reference]
+        for script in others.scripts_map.keys():
+            del self.scripts_map[script]
 
     def load_skill_md(self, skill: SkillMD, category: str | None = None, func: ToolFunction | None = None):
         """从 Skill Markdown 数据中注册工具。
@@ -301,15 +311,17 @@ class SkillCore:
             tuple[str | None, str | None] | None: 加载成功时返回工具组名称和工具名称，失败时返回 None。
         """
 
-        if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path.read_text("utf-8"))):
+        if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
             self.remove(None, skill_md[0])
             return self.load_skill_md(skill_md, None)
         md_file = skill_path / "SKILL.md"
-        if not (md_file.exists() and (skill_md := parse_skill(md_file.read_text("utf-8")))):
+        if not (md_file.exists() and (skill_md := parse_skill(md_file))):
             return
         module = load_module_from_path(skill_md[0], skill_path / "skill.py")
-        other_mds = [file for file in skill_path.rglob("*.md") if not file.samefile(md_file)]
-        if not other_mds:
+        other_mds = [md for file in skill_path.rglob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
+        references = [file for file in (skill_path / "references").rglob("*") if file.is_file()]
+        scripts = [file for file in (skill_path / "scripts").rglob("*") if file.is_file()]
+        if not other_mds and not scripts and not references:
             self.remove(None, skill_md[0])
             return self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
         category, desc, *_, content = skill_md
@@ -317,13 +329,14 @@ class SkillCore:
         register = self.create_category(category, desc)
         if skill_func := skill_wrapper(content, getattr(module, category, None)):
             register(skill_func)
-        for md_file in other_mds:
-            md_data = md_file.read_text("utf-8")
-            if md := parse_skill(md_data):
-                self.load_skill_md(md, category, getattr(module, md[0], None))
-            else:
-                path = category / md_file.relative_to(skill_path)
-                self.load_skill_md((path.as_posix(), "", None, None, md_data), category)
+        for md in other_mds:
+            self.load_skill_md(md, category, getattr(module, md[0], None))
+        for script_path in scripts:
+            path = category / script_path.relative_to(skill_path)
+            self.scripts_map[path.as_posix()] = script_path
+        for reference_path in references:
+            path = category / reference_path.relative_to(skill_path)
+            self.references_map[path.as_posix()] = script_path
         return category, None
 
 
@@ -366,9 +379,9 @@ def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunctio
     return lambda agent, event: content
 
 
-def parse_skill(md: str) -> SkillMD | None:
+def parse_skill(md: Path) -> SkillMD | None:
     try:
-        skill = frontmatter.loads(md)
+        skill = frontmatter.loads(md.read_text("utf-8"))
         name = skill["name"]
         desc = skill["description"]
         if schema := skill.get("parameters"):

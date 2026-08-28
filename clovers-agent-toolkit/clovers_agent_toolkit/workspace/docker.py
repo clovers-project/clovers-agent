@@ -10,12 +10,13 @@ client: docker.DockerClient | None = None
 
 class Shell:
 
-    def __init__(self, session_id: str, workspace: Path):
+    def __init__(self, session_id: str, workspace: Path, docker_image: str):
         self.workspace = workspace
         self.lock = asyncio.Lock()
         self.session_id = session_id
         self.workdir = "/workspace"
         self.container: Container | None = None
+        self.docker_image = docker_image
         global client
         if client is None:
             client = docker.from_env()
@@ -34,7 +35,7 @@ class Shell:
                 except NotFound:
                     self.container = await asyncio.to_thread(
                         self.client.containers.run,
-                        "nikolaik/python-nodejs:python3.12-nodejs20",
+                        self.docker_image,
                         name=container_name,
                         detach=True,
                         tty=True,

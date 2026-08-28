@@ -27,3 +27,20 @@ GET_IMAGE_BY_ID_INFO: FunctionToolInfo = {
 }
 VISION_TAG = CONSTANT.vision_tag
 VISION_PROMPT = CONSTANT.vision_prompt
+EXECUTE_SCRIPT = CONSTANT.execute_script
+EXECUTE_SCRIPT_INFO: FunctionToolInfo = {
+    "type": "function",
+    "function": {
+        "name": EXECUTE_SCRIPT,
+        "description": CONSTANT.execute_script_desc,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "run": {"type": "string", "description": ""},
+                "path": {"type": "string", "description": ""},
+                "args": {"type": "array", "items": {"type": "string"}, "description": ""},
+            },
+            "required": ["run", "path"],
+        },
+    },
+}

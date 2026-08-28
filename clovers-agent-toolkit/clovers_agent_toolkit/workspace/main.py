@@ -2,10 +2,10 @@ from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers.logger import logger
-from .docker import Shell
 from ..toolkit import TOOLS, CONFIG
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
+DOCKER_IMAGE = CONFIG.docker_image
 README = WORKSPACE / "README.md"
 
 
@@ -24,7 +24,9 @@ async def _(agent: CloversAgent, event: Event):
         session = agent.current_session(event)
         if "shell" not in session.extra:
             try:
-                shell = Shell(session_id, WORKSPACE)
+                from .docker import Shell
+
+                shell = Shell(session_id, WORKSPACE, DOCKER_IMAGE)
             except Exception as e:
                 logger.error(e)
                 return f"workspace 已初始化, shell 初始化失败，此工作区无法执行命令。\n当前工作目录: /workspace"
@@ -36,6 +38,7 @@ async def _(agent: CloversAgent, event: Event):
 
 
 if CONFIG.use_shell:
+    from .docker import Shell
 
     @TOOLS.register(
         "shell",
@@ -44,6 +47,7 @@ if CONFIG.use_shell:
         "workspace",
     )
     async def _(agent: CloversAgent, event: Event, command: str):
+
         extra = agent.current_session(event).extra
         if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
             return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"

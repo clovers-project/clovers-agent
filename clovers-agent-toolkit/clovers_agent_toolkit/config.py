@@ -8,6 +8,8 @@ class Config(BaseConfig):
     # use_shell: Literal["docker", "local"] = "docker"
     use_shell: bool = True
     """是否使用shell"""
+    docker_image: str = "nikolaik/python-nodejs:python3.12-nodejs20"
+    """docker镜像名称"""
     reminder_threshold: int = 5
     """提醒个人档案更新对话轮数"""
     strong_reminder_threshold: int = 10
