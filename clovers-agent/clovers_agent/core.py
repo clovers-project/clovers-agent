@@ -19,7 +19,7 @@ from .utils import deep_add
 from typing import Protocol, Literal, TypedDict, Never, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
-from .typing.json_schema import BaseJSONSchemaType
+from .typing.json_schema import BaseJSONSchemaType, JSONSchemaType
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     SYSTEM_TAG,
@@ -33,6 +33,10 @@ from .constants import (
     ACTIVE_REPLY_DESC,
     BUILTIN_CATEGORY,
     GET_IMAGE_BY_ID_INFO,
+    EXECUTE_SCRIPT,
+    EXECUTE_SCRIPT_DESC,
+    READ_REFERENCE,
+    READ_REFERENCE_DESC,
 )
 
 
@@ -91,6 +95,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._plugin_dirs = CONFIG.plugin_dirs
         self._skill_dirs = CONFIG.skill_dirs
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
+        self.scripts_enum: list[str] = []
+        self.references_enum: list[str] = []
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
         # DEBUG
         self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
@@ -156,6 +162,22 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
         self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, BUILTIN_CATEGORY)(skill_menu)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.register(
+            EXECUTE_SCRIPT,
+            EXECUTE_SCRIPT_DESC,
+            {
+                "interpreter": {"type": "string"},
+                "path": {"type": "string", "enum": self.scripts_enum},
+                "args": {"type": "array", "items": {"type": "string"}},
+            },
+            BUILTIN_CATEGORY,
+        )(execute_script)
+        self.register(
+            READ_REFERENCE,
+            READ_REFERENCE_DESC,
+            {"path": {"type": "string", "enum": self.references_enum}},
+            BUILTIN_CATEGORY,
+        )(read_reference)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()
@@ -436,6 +458,14 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
         prompt = ""
     if "tools" not in session.payload:
         session.payload["tools"] = [agent.manifest[SKILL_MENU], *agent.select_tools(category)]
+        if category in agent.scripts_map:
+            agent.scripts_enum.clear()
+            agent.scripts_enum.extend(agent.scripts_map[category].keys())
+            session.payload["tools"].append(agent.manifest[EXECUTE_SCRIPT])
+        if category in agent.references_map:
+            agent.references_enum.clear()
+            agent.references_enum.extend(agent.references_map[category].keys())
+            session.payload["tools"].append(agent.manifest[READ_REFERENCE])
     else:
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
         new_tools = agent.select_tools(category)
@@ -449,4 +479,12 @@ async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
     if not url:
         return f"Error: [image:{image_id}] is missing."
     session.current_input.append({"type": "image_url", "image_url": {"url": url}})
+    return "OK"
+
+
+async def execute_script(agent: CloversAgent, event: Event):
+    return "OK"
+
+
+async def read_reference(agent: CloversAgent, event: Event, path: str):
     return "OK"

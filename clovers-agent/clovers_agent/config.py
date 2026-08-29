@@ -194,20 +194,28 @@ class ConstantConfig(BaseModel):
 执行一个脚本文件，可指定解释器或直接执行。
 
 **参数**：
-- `run` (string)：解释器名称，例如 `"python"`、`"bash"`、`"node"` 等。  
+- `interpreter` (string)：解释器名称，例如 `"python"`、`"bash"`、`"node"` 等。  
   若脚本自身可执行（即具有执行权限），则传入 `"./"`。
 - `path` (string)：脚本文件的路径。
 - `args` (array of strings)：传递给脚本的参数列表（每个参数作为一个独立字符串）。
 
 **说明**：
-- 此工具只能执行脚本文件，不能执行命令。
-- 脚本的标准输出（stdout）内容（字符串）。  
-- 若执行失败（退出码非0）或发生异常，返回包含错误信息（stderr + 退出码）的字符串。
+- 该工具只能执行 Skill 的脚本文件，不能执行任意 shell 命令。
 - 执行超时默认为 120 秒，超时后会终止进程。
 
 **示例**：
-- 执行 Python 脚本：`run="python"`，`args=["--verbose", "data.txt"]`
-- 执行可直接运行的脚本：`run="./"`，`args=["--help"]`
+- 执行 Python 脚本：`interpreter="python"`，`args=["--verbose", "data.txt"]`
+- 执行可直接运行的脚本：`interpreter="./"`，`args=["--help"]`
+"""
+    read_reference: str = "read_reference"
+    read_reference_desc: str = """\
+读取参考资料，并返回内容。
+
+**参数**：
+- `path` (string)：参考资料文件的路径。
+
+**说明**：
+- 该工具只能读取 Skill 的 reference/参考资料文件，不能读取普通工作区文件。
 """
 
 

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import asyncio
 import importlib.util
 import frontmatter
 from pathlib import Path
@@ -9,7 +8,6 @@ from clovers.logger import logger
 from collections.abc import Callable
 from typing import Concatenate, TYPE_CHECKING
 from clovers.base import Coro
-from .constants import EXECUTE_SCRIPT_ARGS, EXECUTE_SCRIPT_DESC
 from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 
@@ -33,8 +31,8 @@ class SkillCore:
         self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
         self.categories: dict[str, str] = {}
         self.category_hooks: dict[str, list[ToolFunction]] = {}
-        self.scripts_map: dict[str, Path] = {}
-        self.references_map: dict[str, Path] = {}
+        self.scripts_map: dict[str, dict[str, Path]] = {}
+        self.references_map: dict[str, dict[str, Path]] = {}
 
     def select_tools(self, category: str) -> list[FunctionToolInfo]:
         """选择指定工具组中的所有工具。
@@ -234,8 +232,14 @@ class SkillCore:
                 self.__map_id_to_tools[new_category_id].extend(others.__map_id_to_tools[category_id])
                 self.__map_category_to_id[category] = new_category_id
         self.categories.update(others.categories)
-        self.references_map.update(others.references_map)
-        self.scripts_map.update(others.scripts_map)
+        for category in others.references_map:
+            if category not in self.references_map:
+                self.references_map[category] = {}
+            self.references_map[category].update(others.references_map[category])
+        for category in others.scripts_map:
+            if category not in self.scripts_map:
+                self.scripts_map[category] = {}
+            self.scripts_map[category].update(others.scripts_map[category])
 
     def detach(self, others: "SkillCore"):
         """移除从其他 SkillCore 加载的内容。
@@ -264,10 +268,16 @@ class SkillCore:
             del self.categories[category]
             if category in self.category_hooks:
                 del self.category_hooks[category]
-        for reference in others.references_map.keys():
-            del self.references_map[reference]
-        for script in others.scripts_map.keys():
-            del self.scripts_map[script]
+        for category in others.references_map:
+            for key in others.references_map[category]:
+                del self.references_map[category][key]
+            if not self.references_map[category]:
+                del self.references_map[category]
+        for category in others.scripts_map:
+            for key in others.scripts_map[category]:
+                del self.scripts_map[category][key]
+            if not self.scripts_map[category]:
+                del self.scripts_map[category]
 
     def load_skill_md(self, skill: SkillMD, category: str | None = None, func: ToolFunction | None = None):
         """从 Skill Markdown 数据中注册工具。
@@ -333,10 +343,10 @@ class SkillCore:
             self.load_skill_md(md, category, getattr(module, md[0], None))
         for script_path in scripts:
             path = category / script_path.relative_to(skill_path)
-            self.scripts_map[path.as_posix()] = script_path
+            self.scripts_map[category][path.as_posix()] = script_path
         for reference_path in references:
             path = category / reference_path.relative_to(skill_path)
-            self.references_map[path.as_posix()] = script_path
+            self.references_map[category][path.as_posix()] = reference_path
         return category, None
 
 

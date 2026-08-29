@@ -41,7 +41,7 @@ if CONFIG.use_shell:
     from .docker import Shell
 
     @TOOLS.register(
-        "shell",
+        "execute_command",
         "在工作区环境下执行命令",
         {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
         "workspace",
