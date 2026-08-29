@@ -31,8 +31,8 @@ class SkillCore:
         self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
         self.categories: dict[str, str] = {}
         self.category_hooks: dict[str, list[ToolFunction]] = {}
-        self.scripts_map: dict[str, dict[str, Path]] = {}
-        self.references_map: dict[str, dict[str, Path]] = {}
+        self.scripts_map: dict[str, dict[str, str]] = {}
+        self.references_map: dict[str, dict[str, str]] = {}
 
     def select_tools(self, category: str) -> list[FunctionToolInfo]:
         """选择指定工具组中的所有工具。
@@ -342,11 +342,15 @@ class SkillCore:
         for md in other_mds:
             self.load_skill_md(md, category, getattr(module, md[0], None))
         for script_path in scripts:
+            if not category in self.scripts_map:
+                self.scripts_map[category] = {}
             path = category / script_path.relative_to(skill_path)
-            self.scripts_map[category][path.as_posix()] = script_path
+            self.scripts_map[category][path.as_posix()] = script_path.resolve().as_posix()
         for reference_path in references:
+            if not category in self.references_map:
+                self.references_map[category] = {}
             path = category / reference_path.relative_to(skill_path)
-            self.references_map[category][path.as_posix()] = reference_path
+            self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
         return category, None
 
 
@@ -392,8 +396,12 @@ def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunctio
 def parse_skill(md: Path) -> SkillMD | None:
     try:
         skill = frontmatter.loads(md.read_text("utf-8"))
-        name = skill["name"]
+        name = skill.get("name")
+        if not name or not isinstance(name, str):
+            return
         desc = skill["description"]
+        if not desc or not isinstance(desc, str):
+            return
         if schema := skill.get("parameters"):
             parameters = schema["properties"]  # type: ignore
             required = schema.get("required")  # type: ignore
@@ -403,7 +411,5 @@ def parse_skill(md: Path) -> SkillMD | None:
         content = skill.content.strip()
     except Exception as e:
         logger.exception(e)
-        return
-    if not (isinstance(name, str) and isinstance(desc, str)):
         return
     return name.replace("-", "_"), desc, parameters, required, content

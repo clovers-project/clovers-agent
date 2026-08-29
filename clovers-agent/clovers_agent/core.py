@@ -1,3 +1,5 @@
+import sys
+import locale
 import time
 import json
 import traceback
@@ -19,7 +21,7 @@ from .utils import deep_add
 from typing import Protocol, Literal, TypedDict, Never, override
 from .typing import UserMessage, ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
-from .typing.json_schema import BaseJSONSchemaType, JSONSchemaType
+from .typing.json_schema import BaseJSONSchemaType
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     SYSTEM_TAG,
@@ -181,7 +183,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
         self.sync_menu()
-        logger.info(self.manifest)
 
     def sync_menu(self):
         for skill in self.skills:
@@ -470,6 +471,7 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
         new_tools = agent.select_tools(category)
         session.payload["tools"].extend(x for x in new_tools if x["function"]["name"] not in used)
+    print(session.payload)
     return prompt or f"Skills for '{category}' have been loaded."
 
 
@@ -482,9 +484,47 @@ async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
     return "OK"
 
 
-async def execute_script(agent: CloversAgent, event: Event):
-    return "OK"
+async def execute_script(agent: CloversAgent, event: Event, interpreter: str, path: str, args: list[str] | None = None, timeout: int = 120):
+    if interpreter in ("python", "python3"):
+        cmd = [sys.executable]
+    elif interpreter == "./":
+        cmd = []
+    else:
+        cmd = [interpreter]
+    cmd.append(agent.scripts_map[path.split("/", 1)[0]][path])  # path 是映射路径，路径规则 "{category}/relative_path"
+    if args:
+        cmd.extend(args)
+    try:
+        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+            await process.wait()
+        except:
+            pass
+        return f"ERROR: Script execution timed out after {timeout} seconds."
+    except FileNotFoundError:
+        return f"ERROR: Interpreter '{interpreter}' not found."
+    except PermissionError:
+        return f"ERROR: Permission denied – cannot execute script."
+    except Exception as e:
+        return f"ERROR: Unexpected error – {e}"
+    system_encoding = locale.getpreferredencoding(do_setlocale=False)
+    try:
+        out_text = stdout.decode(system_encoding, errors="replace")
+        err_text = stderr.decode(system_encoding, errors="replace")
+    except:
+        out_text = repr(stdout)
+        err_text = repr(stderr)
+    return f"RETURN CODE: {process.returncode}\nOUT: {out_text}\nERR: {err_text}"
 
 
 async def read_reference(agent: CloversAgent, event: Event, path: str):
-    return "OK"
+    file = Path(agent.references_map[path.split("/", 1)[0]][path])
+    for encoding in ["utf-8", None, "ansi"]:
+        try:
+            return file.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return ""
