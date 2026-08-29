@@ -194,9 +194,8 @@ class ConstantConfig(BaseModel):
 执行一个脚本文件，可指定解释器或直接执行。
 
 **参数**：
-- `interpreter` (string)：解释器名称，例如 `"python"`、`"bash"`、`"node"` 等。  
-  若脚本自身可执行（即具有执行权限），则传入 `"./"`。
-- `path` (string)：脚本文件的路径。
+- `interpreter` (string)：解释器名称，例如 `"python"`、`"bash"`、`"node"` 等。若脚本自身可执行，则不传入此参数。
+- `path` (string)：脚本路径。
 - `args` (array of strings)：传递给脚本的参数列表（每个参数作为一个独立字符串）。
 
 **说明**：
@@ -212,7 +211,7 @@ class ConstantConfig(BaseModel):
 读取参考资料。
 
 **参数**：
-- `path` (string)：参考资料文件的路径。
+- `path` (string)：参考资料路径。
 
 **说明**：
 - 该工具只能读取 Skill 的 reference/参考资料文件，不能读取普通工作区文件。

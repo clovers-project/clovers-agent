@@ -173,12 +173,14 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 "args": {"type": "array", "items": {"type": "string"}},
             },
             BUILTIN_CATEGORY,
+            required=["path"],
         )(execute_script)
         self.register(
             READ_REFERENCE,
             READ_REFERENCE_DESC,
             {"path": {"type": "string", "enum": self.references_enum}},
             BUILTIN_CATEGORY,
+            required=["path"],
         )(read_reference)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
@@ -490,10 +492,19 @@ async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
     return "OK"
 
 
-async def execute_script(agent: CloversAgent, event: Event, interpreter: str, path: str, args: list[str] | None = None, timeout: int = 120):
+async def execute_script(
+    agent: CloversAgent,
+    event: Event,
+    interpreter: str = "",
+    path: str = "",
+    args: list[str] | None = None,
+    timeout: int = 120,
+):
+    if not path:
+        return "Error: path is missing."
     if interpreter in ("python", "python3"):
         cmd = [sys.executable]
-    elif interpreter == "./":
+    elif not interpreter:
         cmd = []
     else:
         cmd = [interpreter]
