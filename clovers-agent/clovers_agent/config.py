@@ -209,7 +209,7 @@ class ConstantConfig(BaseModel):
 """
     read_reference: str = "read_reference"
     read_reference_desc: str = """\
-读取参考资料，并返回内容。
+读取参考资料。
 
 **参数**：
 - `path` (string)：参考资料文件的路径。

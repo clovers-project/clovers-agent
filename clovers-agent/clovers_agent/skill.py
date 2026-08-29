@@ -6,7 +6,7 @@ from itertools import count
 from functools import wraps
 from clovers.logger import logger
 from collections.abc import Callable
-from typing import Concatenate, TYPE_CHECKING
+from typing import final, Concatenate, TYPE_CHECKING
 from clovers.base import Coro
 from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
@@ -34,6 +34,7 @@ class SkillCore:
         self.scripts_map: dict[str, dict[str, str]] = {}
         self.references_map: dict[str, dict[str, str]] = {}
 
+    @final
     def select_tools(self, category: str) -> list[FunctionToolInfo]:
         """选择指定工具组中的所有工具。
         Args:

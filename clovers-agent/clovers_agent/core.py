@@ -414,6 +414,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 if category_prompts := await self.activate_category(category, event):
                     session.unit_prompts.extend(category_prompts)
                 session.activate()
+                self.scripts_enum.clear()
+                self.references_enum.clear()
                 result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
             except Exception as e:
                 logger.exception(e)
@@ -451,6 +453,19 @@ async def on_chat(agent: CloversAgent, event: Event):
     return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
 
 
+def skill_menu_select_tools(agent: CloversAgent, category: str):
+    tools = agent.select_tools(category).copy()
+    if scripts_map := agent.scripts_map.get(category):
+        existing = set(agent.scripts_enum)
+        agent.scripts_enum.extend(path for path in scripts_map if path not in existing)
+        tools.append(agent.manifest[EXECUTE_SCRIPT])
+    if references_map := agent.references_map.get(category):
+        existing = set(agent.references_enum)
+        agent.references_enum.extend(path for path in references_map if path not in existing)
+        tools.append(agent.manifest[READ_REFERENCE])
+    return tools
+
+
 async def skill_menu(agent: CloversAgent, event: Event, category: str):
     session = agent.current_session(event)
     if prompts := await agent.activate_category(category, event):
@@ -458,20 +473,11 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
     else:
         prompt = ""
     if "tools" not in session.payload:
-        session.payload["tools"] = [agent.manifest[SKILL_MENU], *agent.select_tools(category)]
-        if category in agent.scripts_map:
-            agent.scripts_enum.clear()
-            agent.scripts_enum.extend(agent.scripts_map[category].keys())
-            session.payload["tools"].append(agent.manifest[EXECUTE_SCRIPT])
-        if category in agent.references_map:
-            agent.references_enum.clear()
-            agent.references_enum.extend(agent.references_map[category].keys())
-            session.payload["tools"].append(agent.manifest[READ_REFERENCE])
+        session.payload["tools"] = [agent.manifest[SKILL_MENU], *skill_menu_select_tools(agent, category)]
     else:
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
-        new_tools = agent.select_tools(category)
+        new_tools = skill_menu_select_tools(agent, category)
         session.payload["tools"].extend(x for x in new_tools if x["function"]["name"] not in used)
-    print(session.payload)
     return prompt or f"Skills for '{category}' have been loaded."
 
 
@@ -527,4 +533,4 @@ async def read_reference(agent: CloversAgent, event: Event, path: str):
             return file.read_text(encoding=encoding)
         except UnicodeDecodeError:
             continue
-    return ""
+    return "Encoding Error"
