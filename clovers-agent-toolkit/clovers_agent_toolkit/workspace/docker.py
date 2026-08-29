@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import docker
 import shlex
@@ -75,12 +76,12 @@ class Shell:
                 buffer.append(byte)
                 if byte == 10:
                     line = buffer.decode("utf-8")
-                    # print(line)
+                    print(line)
                     outputs.append(line)
                     buffer.clear()
                 elif byte == 13:
-                    # sys.stdout.buffer.write(buffer)
-                    # sys.stdout.flush()
+                    sys.stdout.buffer.write(buffer)
+                    sys.stdout.flush()
                     buffer.clear()
         if buffer:
             outputs.append(buffer.decode("utf-8"))
