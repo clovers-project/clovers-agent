@@ -1,4 +1,5 @@
-import sys
+import threading
+import queue
 import asyncio
 import docker
 import shlex
@@ -12,9 +13,9 @@ client: docker.DockerClient | None = None
 class Shell:
 
     def __init__(self, session_id: str, workspace: Path, docker_image: str):
-        self.workspace = workspace
         self.lock = asyncio.Lock()
         self.session_id = session_id
+        self.workspace = workspace / session_id
         self.workdir = "/workspace"
         self.container: Container | None = None
         self.docker_image = docker_image
@@ -22,14 +23,14 @@ class Shell:
         if client is None:
             client = docker.from_env()
         self.client = client
+        self.stdout_queue: queue.Queue[str | None] = queue.Queue()
 
     async def execute(self, command: str):
         async with self.lock:
             if self.container is None:
                 self.workdir = "/workspace"
-                workspace = self.workspace / self.session_id
-                if not workspace.exists():
-                    workspace.mkdir(parents=True, exist_ok=True)
+                if not self.workspace.exists():
+                    self.workspace.mkdir(parents=True, exist_ok=True)
                 container_name = f"CloversAgentSandbox-{self.session_id}"
                 try:
                     self.container = await asyncio.to_thread(self.client.containers.get, container_name)
@@ -41,7 +42,7 @@ class Shell:
                         detach=True,
                         tty=True,
                         command="sleep infinity",
-                        volumes={workspace.resolve().as_posix(): {"bind": "/workspace", "mode": "rw"}},
+                        volumes={self.workspace.resolve().as_posix(): {"bind": "/workspace", "mode": "rw"}},
                     )
             else:
                 self.container
@@ -49,13 +50,19 @@ class Shell:
             if self.container.status != "running":
                 await asyncio.to_thread(self.container.start)
             assert self.container is not None
-            wrapped_command = f"bash -c {shlex.quote(f"{command}\necho '___CWD_MARKER___'\npwd")}"
+            wrapped_command = f"bash -c {shlex.quote(f"{command} < /dev/null\necho '___CWD_MARKER___'\npwd")}"
             # result = await asyncio.to_thread(self.container.exec_run, wrapped_command, workdir=self.workdir)
             # stdout: str = result.output.decode("utf-8")
-            stdout = await asyncio.to_thread(self.execute_thread, wrapped_command)
-            output, workdir = stdout.rsplit("___CWD_MARKER___", 1)
-            self.workdir = workdir.strip()
-            return output
+            stdout_thread = threading.Thread(target=self.stdout_thread)
+            stdout_thread.start()
+            try:
+                stdout = await asyncio.to_thread(self.execute_thread, wrapped_command)
+                output, workdir = stdout.rsplit("___CWD_MARKER___", 1)
+                self.workdir = workdir.strip()
+                return output
+            finally:
+                self.stdout_queue.put(None)
+                stdout_thread.join(timeout=5)
 
     async def cleanup(self):
         async with self.lock:
@@ -64,6 +71,15 @@ class Shell:
             await asyncio.to_thread(self.container.remove, force=True)
             self.workdir = "/workspace"
             self.container = None
+
+    def stdout_thread(self):
+        with open(self.workspace / "stdout", "w", buffering=1, encoding="utf-8") as f:
+            while True:
+                item = self.stdout_queue.get()
+                if item is None:
+                    break
+                f.write(item)
+                f.flush()
 
     def execute_thread(self, command: str):
         """运行命令,不输出被回车覆盖的行"""
@@ -75,14 +91,14 @@ class Shell:
             for byte in chunk:
                 buffer.append(byte)
                 if byte == 10:
-                    line = buffer.decode("utf-8")
-                    print(line)
+                    line = buffer.decode("utf-8", errors="replace")
+                    self.stdout_queue.put(line)
                     outputs.append(line)
                     buffer.clear()
                 elif byte == 13:
-                    sys.stdout.buffer.write(buffer)
-                    sys.stdout.flush()
+                    line = buffer.decode("utf-8", errors="replace")
+                    self.stdout_queue.put(line)
                     buffer.clear()
         if buffer:
             outputs.append(buffer.decode("utf-8"))
-        return "\n".join(outputs)
+        return "".join(outputs)
