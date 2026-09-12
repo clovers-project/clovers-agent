@@ -47,7 +47,6 @@ if CONFIG.use_shell:
         "workspace",
     )
     async def _(agent: CloversAgent, event: Event, command: str):
-
         extra = agent.current_session(event).extra
         if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
             return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"

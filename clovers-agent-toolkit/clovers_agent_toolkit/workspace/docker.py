@@ -1,5 +1,3 @@
-import threading
-import queue
 import asyncio
 import docker
 import shlex
@@ -23,7 +21,7 @@ class Shell:
         if client is None:
             client = docker.from_env()
         self.client = client
-        self.stdout_queue: queue.Queue[str | None] = queue.Queue()
+        self.stdout_log = self.workspace / "stdout.log"
 
     async def execute(self, command: str):
         async with self.lock:
@@ -50,19 +48,11 @@ class Shell:
             if self.container.status != "running":
                 await asyncio.to_thread(self.container.start)
             assert self.container is not None
-            wrapped_command = f"bash -c {shlex.quote(f"{command} < /dev/null\necho '___CWD_MARKER___'\npwd")}"
             # result = await asyncio.to_thread(self.container.exec_run, wrapped_command, workdir=self.workdir)
             # stdout: str = result.output.decode("utf-8")
-            stdout_thread = threading.Thread(target=self.stdout_thread)
-            stdout_thread.start()
-            try:
-                stdout = await asyncio.to_thread(self.execute_thread, wrapped_command)
-                output, workdir = stdout.rsplit("___CWD_MARKER___", 1)
-                self.workdir = workdir.strip()
-                return output
-            finally:
-                self.stdout_queue.put(None)
-                stdout_thread.join(timeout=5)
+            output, workdir = await asyncio.to_thread(self.execute_thread, command)
+            self.workdir = workdir.strip()
+            return output
 
     async def cleanup(self):
         async with self.lock:
@@ -72,33 +62,28 @@ class Shell:
             self.workdir = "/workspace"
             self.container = None
 
-    def stdout_thread(self):
-        with open(self.workspace / "stdout", "w", buffering=1, encoding="utf-8") as f:
-            while True:
-                item = self.stdout_queue.get()
-                if item is None:
-                    break
-                f.write(item)
-                f.flush()
-
     def execute_thread(self, command: str):
         """运行命令,不输出被回车覆盖的行"""
-        exec_id = self.client.api.exec_create(self.container.id, command, workdir=self.workdir)  # type: ignore
+        wrapped_command = f"bash -c {shlex.quote(f"{command}\necho '___CWD_MARKER___'\npwd")} < /dev/null"
+        exec_id = self.client.api.exec_create(self.container.id, wrapped_command, workdir=self.workdir)  # type: ignore
         output_gen = self.client.api.exec_start(exec_id["Id"], stream=True)
         outputs: list[str] = []
         buffer: bytearray = bytearray()
-        for chunk in output_gen:
-            for byte in chunk:
-                buffer.append(byte)
-                if byte == 10:
-                    line = buffer.decode("utf-8", errors="replace")
-                    self.stdout_queue.put(line)
-                    outputs.append(line)
-                    buffer.clear()
-                elif byte == 13:
-                    line = buffer.decode("utf-8", errors="replace")
-                    self.stdout_queue.put(line)
-                    buffer.clear()
+        with self.stdout_log.open("w", buffering=1, encoding="utf-8", newline="") as f:
+            f.write(f"[EXEC:{self.session_id}]:~{self.workdir}$ {command}\n")
+            for chunk in output_gen:
+                for byte in chunk:
+                    buffer.append(byte)
+                    if byte == 10:
+                        line = buffer.decode("utf-8", errors="replace")
+                        f.write(line)
+                        outputs.append(line)
+                        buffer.clear()
+                    elif byte == 13:
+                        line = buffer.decode("utf-8", errors="replace")
+                        f.write(line)
+                        buffer.clear()
         if buffer:
             outputs.append(buffer.decode("utf-8"))
-        return "".join(outputs)
+        output, workdir = "".join(outputs).rsplit("___CWD_MARKER___", 1)
+        return output, workdir.strip()
