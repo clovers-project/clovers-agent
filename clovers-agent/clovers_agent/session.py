@@ -28,12 +28,13 @@ class Session:
 
     def __init__(self, sentence_model: SentenceTransformer) -> None:
         # 标准记录
-        self.recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.memory_size)
+        self.recorder: list[Record] = []
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=SESSION_CONFIG.silence_size)
         self.image_recorder: deque[tuple[int, str, float]] = deque()
         self.image_id = count()
         self.router_recorder: deque[tuple[str, str]] = deque(maxlen=SESSION_CONFIG.router_size)
         self.memory_timeout = SESSION_CONFIG.memory_timeout
+        self.memory_size = SESSION_CONFIG.memory_size
         self.silence_timeout = SESSION_CONFIG.silence_timeout
         # 状态
         self.execute_lock = asyncio.Lock()
@@ -93,16 +94,22 @@ class Session:
 
     def refresh(self, timestamp: float):
         """刷新记忆"""
+        # timeout = timestamp - self.memory_timeout
+        # while self.recorder and (self.recorder[0][2] <= timeout):
+        #     self.recorder.popleft()
         timeout = timestamp - self.memory_timeout
-        while self.recorder and (self.recorder[0][2] <= timeout):
-            self.recorder.popleft()
         while self.image_recorder and (self.image_recorder[0][2] <= timeout):
             self.image_recorder.popleft()
         timeout = timestamp - self.silence_timeout
         while self.silence_recorder and (self.silence_recorder[0][1] <= timeout):
             self.silence_recorder.popleft()
 
-    def step(self, message: str):
+    def step(self, message: str, timestamp: float):
+        if len(self.recorder) > self.memory_size:
+            return True
+        timeout = timestamp - self.memory_timeout
+        if self.recorder[0][2] < timeout:
+            return True
         if sum(char_count(msg["content"]) for msg in self) < self.decouple_length:
             return False
         return self.decoupler.step(message)

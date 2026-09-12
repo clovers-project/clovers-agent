@@ -401,7 +401,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 session.last_active_time = timestamp
                 return result
         async with session.execute_lock:
-            if session.step(body) and (summary := await self.summary_context(session)):
+            if session.step(body, timestamp) and (summary := await self.summary_context(session)):
                 session.clear()
                 session.silence_recorder.append((summary, timestamp))
             quote_content: MultimodalContent = []
