@@ -282,7 +282,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         for _ in range(self.call_depth):
             message = await api.call_api(payload, usage_counter)
             if not (tool_calls := message.get("tool_calls")):
-                return message["content"]
+                content = message["content"].strip()
+                if not content:
+                    payload["messages"].append(message)
+                    break
+                return content
             try:
                 messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
             except TurnComplete as e:
@@ -403,7 +407,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         async with session.execute_lock:
             if session.step(body, timestamp) and (summary := await self.summary_context(session)):
                 session.clear()
-                session.silence_recorder.append((summary, timestamp))
+                content = summary + "\n" + content
             quote_content: MultimodalContent = []
             if (call := event.call("flat_context")) and (flat_context := await call):
                 quote_content.append({"type": "text", "text": "<quote>\n"})
@@ -451,7 +455,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         session = self.current_session(event)
         result = await self.handle_chat(session, event)
         self.update_usage(session.usage_counter)
-        print(f"{result=}")
         return result
 
 
