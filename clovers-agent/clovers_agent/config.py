@@ -238,9 +238,8 @@ class Config(BaseConfig):
     apis: dict[str, HybridOpenAIConfig] = {}
     """模型接入点配置，内置的键名：
     - router: 路由模型接入点
-    - decision: 语义决策模型接入点
-    - active: 主动触发模型接入点
-    - skill: 技能模型接入点
+    - chime_in_decision: 主动参与话题决策模型接入点
+    - chime_in: 主动参与话题模型接入点
     - chat: 聊天模型接入点
     - wait: 等待回复模型接入点
     """
@@ -252,10 +251,10 @@ class Config(BaseConfig):
     """最大调用深度"""
     wait_cooldown: int = 20
     """等待回复冷却（秒）"""
-    chime_in_cooldown: tuple[int, int] = (300, 3600)
-    """主动触发冷却（秒）"""
+    chime_in_decision_time_window: tuple[int, int] = (300, 3600)
+    """主动参与话题决策时间窗口（秒）"""
     chime_in_context_size: int = 6
-    """主动回复上下文长度"""
+    """主动参与话题上下文长度"""
     session: SessionConfig = SessionConfig()
     """会话配置"""
     prompts: PromptsConfig = PromptsConfig()

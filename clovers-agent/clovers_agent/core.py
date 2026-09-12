@@ -87,9 +87,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             self.usage_counter = {}
         # 配置
         self.call_depth = CONFIG.call_depth
-        # 主动参与控制
         self.wait_cooldown = CONFIG.wait_cooldown
-        self.chime_in_cooldown = CONFIG.chime_in_cooldown
+        # 主动参与控制
+        self.chime_in_decision_time_window = CONFIG.chime_in_decision_time_window
         self.chime_in_context_size = CONFIG.chime_in_context_size
         # 技能
         self.skills = tuple()
@@ -321,10 +321,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     async def chime_in_decision(self, session: Session, timestamp: float):
         silence_duration = timestamp - session.last_active_time
-        chime_in_cd0, chime_in_cd1 = self.chime_in_cooldown
-        if silence_duration < chime_in_cd0:
+        twl, twr = self.chime_in_decision_time_window
+        if silence_duration < twl:
             return False
-        if silence_duration > chime_in_cd1:
+        if silence_duration > twr:
             return True
         contents = [x for x, _ in islice(reversed(session.silence_recorder), self.chime_in_context_size)]
         if len(contents) < self.chime_in_context_size:
@@ -335,7 +335,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         payload["tools"] = [{"type": "function", "function": {"name": CHIME_IN, "description": CHIME_IN_DESC}}]
         try:
             resp = await api.call_api(payload, session.usage_counter)
-            return silence_duration > chime_in_cd1 and "tool_calls" in resp
+            silence_duration = timestamp - session.last_active_time  # 异步决策期间可能触发
+            return silence_duration > twr and "tool_calls" in resp
         except Exception as e:
             logger.exception(e)
             return False
