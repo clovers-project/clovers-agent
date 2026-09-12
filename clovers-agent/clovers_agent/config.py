@@ -35,6 +35,8 @@ class SessionConfig(BaseModel):
     """静默储存长度"""
     decouple_length: int = 1600
     """话题解藕长度（字数）"""
+    decoupler_alpha: float = 0.8
+    """话题解藕器前文指数衰减系数"""
     unimportant_size: int = 3
     """不重要上下文记忆长度"""
     router_size: int = 3

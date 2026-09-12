@@ -47,7 +47,7 @@ class Session:
         self.unimportant = False
         self.unimportant_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.unimportant_size)
         # 主题分离
-        self.decoupler = TopicDecoupler(sentence_model)
+        self.decoupler = TopicDecoupler(sentence_model, SESSION_CONFIG.decoupler_alpha)
         self.decouple_length = SESSION_CONFIG.decouple_length
 
     def __iter__(self):
@@ -105,6 +105,8 @@ class Session:
             self.silence_recorder.popleft()
 
     def step(self, message: str, timestamp: float):
+        if not self.recorder:
+            return False
         if len(self.recorder) > self.memory_size:
             return True
         timeout = timestamp - self.memory_timeout
