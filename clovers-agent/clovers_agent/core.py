@@ -87,10 +87,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             self.usage_counter = {}
         # 配置
         self.call_depth = CONFIG.call_depth
-        self.wait_coldown = CONFIG.wait_coldown
-        self.active_coldown = CONFIG.active_coldown
-        self.dormant_timeout = CONFIG.dormant_timeout
-        self.active_context_size = CONFIG.active_context_size
+        # 主动参与控制
+        self.wait_cooldown = CONFIG.wait_cooldown
+        self.chime_in_cooldown = CONFIG.chime_in_cooldown
+        self.chime_in_context_size = CONFIG.chime_in_context_size
         # 技能
         self.skills = tuple()
         self._plugins = CONFIG.plugins
@@ -321,32 +321,33 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     async def chime_in_decision(self, session: Session, timestamp: float):
         silence_duration = timestamp - session.last_active_time
-        if silence_duration < self.active_coldown:
+        chime_in_cd0, chime_in_cd1 = self.chime_in_cooldown
+        if silence_duration < chime_in_cd0:
             return False
-        if silence_duration > self.dormant_timeout:
+        if silence_duration > chime_in_cd1:
             return True
-        contents = [x for x, _ in islice(reversed(session.silence_recorder), self.active_context_size)]
-        if len(contents) < self.active_context_size:
+        contents = [x for x, _ in islice(reversed(session.silence_recorder), self.chime_in_context_size)]
+        if len(contents) < self.chime_in_context_size:
             return False
         message: UserMessage = {"role": "user", "content": "\n".join(reversed(contents))}
-        api = self.api("decision")
+        api = self.api("chime_in_decision")
         payload = api.build_payload((message,), "\n".join(self.chime_in_decision_prompt))
         payload["tools"] = [{"type": "function", "function": {"name": CHIME_IN, "description": CHIME_IN_DESC}}]
         try:
             resp = await api.call_api(payload, session.usage_counter)
-            return silence_duration > self.active_coldown and "tool_calls" in resp
+            return silence_duration > chime_in_cd1 and "tool_calls" in resp
         except Exception as e:
             logger.exception(e)
             return False
 
     async def chime_in(self, session: Session, content: str):
-        api = self.api("active")
+        api = self.api("chime_in")
         payload = api.build_payload(({"role": "user", "content": content},), self.chime_in_prompt)
         logger.info(f"[{self.name}][CHIME_IN]")
         resp = await api.call_api(payload, session.usage_counter)
         return resp["content"].strip()
 
-    async def wait_chat(self, session: Session, content: str):
+    async def wait_reply(self, session: Session, content: str):
         api = self.api("wait")
         wait_prompt = f"{content}\n{SYSTEM_TAG.format(self.wait_prompt)}"
         payload = api.build_payload((*session, {"role": "user", "content": wait_prompt}), self.style_prompt)
@@ -388,11 +389,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             if session.wait_lock.locked():
                 return
             silence_duration = timestamp - session.last_active_time
-            if silence_duration < self.wait_coldown:
+            if silence_duration < self.wait_cooldown:
                 return
             async with session.wait_lock:
                 try:
-                    result = await self.wait_chat(session, content)
+                    result = await self.wait_reply(session, content)
                 except Exception as e:
                     logger.exception(e)
                     return

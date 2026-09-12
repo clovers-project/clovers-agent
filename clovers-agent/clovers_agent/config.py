@@ -250,13 +250,11 @@ class Config(BaseConfig):
     """词嵌入向量模型缓存路径"""
     call_depth: int = 40
     """最大调用深度"""
-    wait_coldown: int = 20
+    wait_cooldown: int = 20
     """等待回复冷却（秒）"""
-    active_coldown: int = 300
+    chime_in_cooldown: tuple[int, int] = (300, 3600)
     """主动触发冷却（秒）"""
-    dormant_timeout: int = 3600
-    """休眠超时"""
-    active_context_size: int = 6
+    chime_in_context_size: int = 6
     """主动回复上下文长度"""
     session: SessionConfig = SessionConfig()
     """会话配置"""
