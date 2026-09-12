@@ -153,19 +153,18 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def style_prompt(self) -> str:
         """Agent 人物设定核心提示
 
-        需要角色连贯性的任何主动回复都应含有此提示。
-        在此提示后接具体回复要求。
+        需要角色连贯性的回复应含有此系统提示，并在此提示后接该调用系统提示的具体的要求。
         """
         return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
 
     @property
     def chat_prompt(self) -> str:
-        """Agent 聊天核心提示应用场景：预设的聊天场景。"""
+        """Agent 预设的聊天场景。"""
         return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
 
     @property
     def chime_in_prompt(self) -> str:
-        """Agent 激活回复核心提示"""
+        """Agent 主动回复要求"""
         return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chime_in_prompt) if x)
 
     def skill_init(self):
