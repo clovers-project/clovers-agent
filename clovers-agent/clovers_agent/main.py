@@ -57,9 +57,6 @@ async def format_message(result: str, lock: asyncio.Lock) -> SegmentedMessage:
         if len(lines) > 4:
             yield Result("text", result)
         else:
-            for seg in result.split("\n"):
-                seg = seg.strip()
-                if not seg:
-                    continue
+            for seg in lines:
                 yield Result("text", seg)
                 await asyncio.sleep(min(0.12 * len(seg), 8))

@@ -451,6 +451,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         session = self.current_session(event)
         result = await self.handle_chat(session, event)
         self.update_usage(session.usage_counter)
+        print(f"{result=}")
         return result
 
 
