@@ -31,8 +31,8 @@ from .constants import (
     ON_CHAT_DESC,
     SKILL_MENU,
     SKILL_MENU_DESC,
-    ACTIVE_REPLY,
-    ACTIVE_REPLY_DESC,
+    CHIME_IN,
+    CHIME_IN_DESC,
     BUILTIN_CATEGORY,
     GET_IMAGE_BY_ID_INFO,
     EXECUTE_SCRIPT,
@@ -108,16 +108,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def usage_file(self):
         return self.usage_dir / f"{self.today}.json"
 
-    @property
-    def style_prompt(self) -> str:
-        """Agent 人物设定核心提示"""
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
-
-    @property
-    def chat_prompt(self) -> str:
-        """Agent 聊天核心提示"""
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
-
     def creat_api(self, config: HybridOpenAIConfig):
         if config.vision:
             return HybridOpenAIAPI(self.async_client, config)
@@ -150,14 +140,33 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
 
     def init_prompts(self):
         logger.info(f"[{self.name}][LOADING PROMPTS]")
-        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
         self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
         self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
+        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
         self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
+        self.chime_in_decision_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN_DECISION.md", PROMPTS.chime_in_decision_prompt)
+        self._chime_in_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
         self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
         self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
-        self.active_decision_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_DECISION.md", PROMPTS.active_decision_prompt)
-        self.active_reply_prompt = self.load_prompt(self.prompts_dir / "ACTIVE_REPLY.md", PROMPTS.active_reply_prompt)
+
+    @property
+    def style_prompt(self) -> str:
+        """Agent 人物设定核心提示
+
+        需要角色连贯性的任何主动回复都应含有此提示。
+        在此提示后接具体回复要求。
+        """
+        return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
+
+    @property
+    def chat_prompt(self) -> str:
+        """Agent 聊天核心提示应用场景：预设的聊天场景。"""
+        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
+
+    @property
+    def chime_in_prompt(self) -> str:
+        """Agent 激活回复核心提示"""
+        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chime_in_prompt) if x)
 
     def skill_init(self):
         SkillCore.__init__(self)
@@ -311,7 +320,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             category = await on_chat(self, event)
         return category
 
-    async def active_decision(self, session: Session, timestamp: float):
+    async def chime_in_decision(self, session: Session, timestamp: float):
         silence_duration = timestamp - session.last_active_time
         if silence_duration < self.active_coldown:
             return False
@@ -322,8 +331,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             return False
         message: UserMessage = {"role": "user", "content": "\n".join(reversed(contents))}
         api = self.api("decision")
-        payload = api.build_payload((message,), "\n".join(self.active_decision_prompt))
-        payload["tools"] = [{"type": "function", "function": {"name": ACTIVE_REPLY, "description": ACTIVE_REPLY_DESC}}]
+        payload = api.build_payload((message,), "\n".join(self.chime_in_decision_prompt))
+        payload["tools"] = [{"type": "function", "function": {"name": CHIME_IN, "description": CHIME_IN_DESC}}]
         try:
             resp = await api.call_api(payload, session.usage_counter)
             return silence_duration > self.active_coldown and "tool_calls" in resp
@@ -331,13 +340,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             logger.exception(e)
             return False
 
-    async def active_reply(self, session: Session, content: str):
+    async def chime_in(self, session: Session, content: str):
         api = self.api("active")
-        payload = api.build_payload(
-            ({"role": "user", "content": content},),
-            "\n".join(x for x in (self.style_prompt, self.active_reply_prompt) if x),
-        )
-        logger.info(f"[{self.name}][ACTIVE_REPLY]")
+        payload = api.build_payload(({"role": "user", "content": content},), self.chime_in_prompt)
+        logger.info(f"[{self.name}][CHIME_IN]")
         resp = await api.call_api(payload, session.usage_counter)
         return resp["content"].strip()
 
@@ -364,12 +370,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         else:
             body = f"{at}{message}"
             session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
-            if event.at or not await self.active_decision(session, timestamp):
+            if event.at or not await self.chime_in_decision(session, timestamp):
                 return
             async with session.execute_lock, session.wait_lock:
                 content = "\n".join(x for x, _ in session.silence_recorder)
                 try:
-                    result = await self.active_reply(session, content)
+                    result = await self.chime_in(session, content)
                 except Exception as e:
                     logger.exception(e)
                     return
