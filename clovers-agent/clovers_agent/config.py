@@ -121,23 +121,6 @@ Please begin your analysis now.
     """中间提示 这是助手执行任务时，快速回复使用的提示"""
     summary_prompt: str = "对上述所有历史对话进行详细总结。保留所有的核心讨论内容与关键事实，禁止输出除总结内容以外的任何其他文字。"
     """总结提示 这是总结上下文的用户提示词"""
-    chime_in_decision_prompt: str = """\
-你的任务是观察群聊中的对话，并决定是否加入讨论。
-你收到的消息格式为`<user name="xxx">content</user>`，这些消息是群友之间的讨论而非与助手对话
-你的决策依据是聊天记录中的最后一条消息，其他消息仅供理解上下文。
-如果你决定参与则调用 "chime_in" 工具，否则请仅输出 "PASS"。
-
-### 应该参与
-- 当群友产生疑惑需要帮助时
-- 当有人表达沮丧、吐槽或输出明显消极情绪时。
-- 当有人输出了精彩或独到的观点时。
-
-### 不该参与
-- 当群友正在讨论私人话题时。
-- 群内发生过于激烈的言语冲突与争论时。
-- 话题切换很快的闲聊。
-"""
-    """主动参与聊天决策提示 这是助手决策发送主动消息时使用的提示"""
     chime_in_prompt: str = """\
 ### 回复要求
 - 默认你不是被讨论对象: 聊天记录并不是与你的对话，禁止把自己代入话题中心。
@@ -157,8 +140,6 @@ class ConstantConfig(BaseModel):
     # 内置路由路由指令
     on_chat: str = "on_chat"
     on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
-    chime_in: str = "chime_in"
-    chime_in_desc: str = "如决策参与聊天则调用此工具以进入回复环境"
     # 内置工具
     builtin_category: str = "builtin"
     skill_menu: str = "skill_menu"
@@ -253,10 +234,8 @@ class Config(BaseConfig):
     """最大调用深度"""
     wait_cooldown: int = 20
     """等待回复冷却（秒）"""
-    chime_in_decision_time_window: tuple[int, int] = (300, 3600)
-    """主动参与话题决策时间窗口（秒）"""
-    chime_in_context_size: int = 6
-    """主动参与话题上下文长度"""
+    chime_in_cooldown: int = 3600
+    """主动参与话题冷却（秒）"""
     session: SessionConfig = SessionConfig()
     """会话配置"""
     prompts: PromptsConfig = PromptsConfig()

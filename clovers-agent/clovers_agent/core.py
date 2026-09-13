@@ -6,7 +6,6 @@ import traceback
 import asyncio
 import httpx
 from pathlib import Path
-from itertools import islice
 from datetime import datetime
 from collections import deque
 from clovers.core import ModuleLoader
@@ -19,7 +18,7 @@ from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add
 from typing import Protocol, Literal, TypedDict, Never, override
-from .typing import UserMessage, ToolMessage, ToolCallInfo, Payload
+from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
@@ -31,8 +30,6 @@ from .constants import (
     ON_CHAT_DESC,
     SKILL_MENU,
     SKILL_MENU_DESC,
-    CHIME_IN,
-    CHIME_IN_DESC,
     BUILTIN_CATEGORY,
     GET_IMAGE_BY_ID_INFO,
     EXECUTE_SCRIPT,
@@ -88,9 +85,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         # 配置
         self.call_depth = CONFIG.call_depth
         self.wait_cooldown = CONFIG.wait_cooldown
-        # 主动参与控制
-        self.chime_in_decision_time_window = CONFIG.chime_in_decision_time_window
-        self.chime_in_context_size = CONFIG.chime_in_context_size
+        self.chime_in_cooldown = CONFIG.chime_in_cooldown
         # 技能
         self.skills = tuple()
         self._plugins = CONFIG.plugins
@@ -144,7 +139,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
         self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
         self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
-        self.chime_in_decision_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN_DECISION.md", PROMPTS.chime_in_decision_prompt)
         self._chime_in_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
         self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
         self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
@@ -322,28 +316,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             category = await on_chat(self, event)
         return category
 
-    async def chime_in_decision(self, session: Session, timestamp: float):
-        silence_duration = timestamp - session.last_active_time
-        twl, twr = self.chime_in_decision_time_window
-        if silence_duration < twl:
-            return False
-        if silence_duration > twr:
-            return True
-        contents = [x for x, _ in islice(reversed(session.silence_recorder), self.chime_in_context_size)]
-        if len(contents) < self.chime_in_context_size:
-            return False
-        message: UserMessage = {"role": "user", "content": "\n".join(reversed(contents))}
-        api = self.api("chime_in_decision")
-        payload = api.build_payload((message,), self.chime_in_decision_prompt)
-        payload["tools"] = [{"type": "function", "function": {"name": CHIME_IN, "description": CHIME_IN_DESC}}]
-        try:
-            resp = await api.call_api(payload, session.usage_counter)
-            silence_duration = timestamp - session.last_active_time  # 异步决策期间可能触发
-            return silence_duration > twr and "tool_calls" in resp
-        except Exception as e:
-            logger.exception(e)
-            return False
-
     async def chime_in(self, session: Session, content: str):
         api = self.api("chime_in")
         payload = api.build_payload(({"role": "user", "content": content},), self.chime_in_prompt)
@@ -374,7 +346,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         else:
             body = f"{at}{message}"
             session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
-            if event.at or not await self.chime_in_decision(session, timestamp):
+            if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
                 return
             async with session.execute_lock, session.wait_lock:
                 content = "\n".join(x for x, _ in session.silence_recorder)
