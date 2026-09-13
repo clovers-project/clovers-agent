@@ -1,6 +1,6 @@
 [project]
 name = "clovers-agent-market-analysis"
-version = "0.1.2"
+version = "0.1.2r1"
 description = ""
 readme = "README.md"
 requires-python = ">=3.12, <4.0.0"
