@@ -481,7 +481,7 @@ def skill_menu_select_tools(agent: CloversAgent, category: str):
 async def skill_menu(agent: CloversAgent, event: Event, category: str):
     session = agent.current_session(event)
     if prompts := await agent.activate_category(category, event):
-        prompt = "\n".join(x for x in (prompts) if x)
+        prompt = "\n".join(x for x in prompts if x)
     else:
         prompt = ""
     if "tools" not in session.payload:
