@@ -306,11 +306,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             message = await api.call_api(payload, session.usage_counter)
             if "tool_calls" not in message:
                 raise ValueError(f"message must contain tool_calls, but got {message}")
-            call_info = message["tool_calls"][0]
-            category = call_info["function"]["name"]
-            kwargs = json.loads(call_info["function"]["arguments"])
-            logger.info(f"[{self.name}][ROUTER] {category} {kwargs}")
-            await self.intro_invoker[category](self, event, *kwargs)
+            category = message["tool_calls"][0]["function"]["name"]
+            logger.info(f"[{self.name}][ROUTER] {category}")
+            await self.intro_invoker[category](self, event)
+            # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 防止造成不必要的 fallback
         except Exception as e:
             logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
             category = await on_chat(self, event)
