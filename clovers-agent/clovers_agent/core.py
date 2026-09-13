@@ -290,7 +290,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         payload_file.parent.mkdir(parents=True, exist_ok=True)
         with payload_file.open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=4, ensure_ascii=False)
-        raise TimeoutError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
+        raise RuntimeError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
 
     async def router(self, session: Session, event: Event):
         if len(self.intro_tools) < 2:
@@ -521,7 +521,7 @@ async def execute_script(
 
 async def read_reference(agent: CloversAgent, event: Event, path: str):
     file = Path(agent.references_map[path.split("/", 1)[0]][path])
-    for encoding in ["utf-8", None, "ansi"]:
+    for encoding in ["utf-8", None]:
         try:
             return file.read_text(encoding=encoding)
         except UnicodeDecodeError:
