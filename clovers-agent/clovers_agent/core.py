@@ -334,7 +334,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             return False
         message: UserMessage = {"role": "user", "content": "\n".join(reversed(contents))}
         api = self.api("chime_in_decision")
-        payload = api.build_payload((message,), "\n".join(self.chime_in_decision_prompt))
+        payload = api.build_payload((message,), self.chime_in_decision_prompt)
         payload["tools"] = [{"type": "function", "function": {"name": CHIME_IN, "description": CHIME_IN_DESC}}]
         try:
             resp = await api.call_api(payload, session.usage_counter)
