@@ -221,7 +221,6 @@ class Config(BaseConfig):
     apis: dict[str, HybridOpenAIConfig] = {}
     """模型接入点配置，内置的键名：
     - router: 路由模型接入点
-    - chime_in_decision: 主动参与话题决策模型接入点
     - chime_in: 主动参与话题模型接入点
     - chat: 聊天模型接入点
     - wait: 等待回复模型接入点
