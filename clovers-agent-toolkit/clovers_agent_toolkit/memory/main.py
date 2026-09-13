@@ -54,11 +54,20 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     session = agent.current_session(event)
     context = "\n".join(extract_plain_text(msg["content"]) for msg in session)
     user_prompt = (
-        f"上下文：\n\n{context}\n"
-        f"待更新档案：\n\n{old_profile}\n"
-        f"触发点：\n\n"
+        f"### 本次档案更新依据\n"
+        f"- 当前日期：{agent.today}\n"
+        f"- 用户昵称：{event.nickname}\n"
+        f"- 用户发言：{event.message}\n"
         f"- 观察到：{observation}\n"
-        f"- 你的对用户的感受：{impression}"
+        f"- 对用户的感受：{impression}\n\n"
+        f"### 待更新档案\n"
+        f"```\n"
+        f"{old_profile}\n"
+        f"```\n\n"
+        f"### 上下文\n"
+        f"```\n"
+        f"{context}\n"
+        f"```\n\n"
     )
     api = session.api
     payload = api.build_payload(({"role": "user", "content": user_prompt},), UPDATE_USER_PROFILE_PROMPT)

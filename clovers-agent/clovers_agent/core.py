@@ -284,8 +284,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             if not (tool_calls := message.get("tool_calls")):
                 content = message["content"].strip()
                 if not content:
-                    payload["messages"].append(message)
-                    break
+                    continue
                 return content
             try:
                 messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
