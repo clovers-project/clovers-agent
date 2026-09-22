@@ -1,3 +1,4 @@
+import time
 import pandas as pd
 from datetime import datetime
 from clovers_agent import CloversAgent, Event, SkillCore
@@ -70,7 +71,7 @@ async def _(agent: CloversAgent, event: Event, symbol: str):
         "name": {"type": "string", "description": "股票/指数/期货/行业名称"},
         "asset_type": {
             "type": "string",
-            "description": "金融对象类型，用于选择相应的新闻分析策略。",
+            "description": "金融对象类型，用于匹配相应的分析策略。",
             "enum": ["stock", "index", "futures", "industry"],
         },
         "ref_index_symbol": {"type": "string", "description": "参考指数代码，仅当 `asset_type` 为 `stock` 时有效。"},
@@ -97,66 +98,61 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_i
         case _:
             return "无效的资产类型"
     session = agent.current_session(event)
-    user_prompt = f"请根据{datetime.now().strftime("%Y年%m月%d日")}最新信息，为 {name} 撰写一份详细新闻报告"
-    payload = session.api.build_payload(({"role": "user", "content": user_prompt},), system_prompt)
-    payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
-    news = await agent.call_turn(session.api, payload, session.usage_counter, event)
     WORKSPACE.mkdir(parents=True, exist_ok=True)
-    news_file = WORKSPACE / f"{name}_{asset_type}.md"
-    news_file.write_text(news, encoding="utf-8")
-    if asset_type != "stock":
-        if coro := event.send("file", news_file):
-            await coro
-        return news
-    stock_info = name
-    name, stock_symbol = stock_info.split(" ")
-    index_info = await query_security_symbol("symbol", ref_index_symbol, agent)
-    if not index_info or len(index_info) > 1:
-        index_info = "沪深300 sh000300"
-        ref_index_symbol = "sh000300"
+    news_md = WORKSPACE / f"{name}_{asset_type}.md"
+    if news_md.exists() and (time.time() - news_md.stat().st_mtime) < 14400:
+        news = news_md.read_text(encoding="utf-8")
     else:
-        index_info = index_info[0]
-    ref_index_symbol = ref_index_symbol.lower()
-    # ak 是同步的，这里转成异步避免阻塞主循环，不并行执行防止 429
-    stock_hourly_k = await fetch_quotes_ohlc(symbol=stock_symbol, period="60", adjust="qfq")
-    index_hourly_k = await fetch_quotes_ohlc(symbol=ref_index_symbol, period="60", adjust="qfq")
-    stock_daily_k = resample_ohlc(stock_hourly_k, "D")
-    index_daily_k = resample_ohlc(index_hourly_k, "D")
-    if stock_hourly_k.index[-1] > pd.Timestamp.now().normalize():
-        current = ""
+        user_prompt = f"请根据{datetime.now().strftime("%Y年%m月%d日")}最新信息，为 {name} 撰写一份详细新闻报告"
+        payload = session.api.build_payload(({"role": "user", "content": user_prompt},), system_prompt)
+        payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
+        news = await agent.call_turn(session.api, payload, session.usage_counter, event)
+        news_md.write_text(news, encoding="utf-8")
+    if asset_type == "stock":
+        stock_info = name
+        name, stock_symbol = stock_info.split(" ")
+        index_info = await query_security_symbol("symbol", ref_index_symbol, agent)
+        if not index_info or len(index_info) > 1:
+            index_info = "沪深300 sh000300"
+            ref_index_symbol = "sh000300"
+        else:
+            index_info = index_info[0]
+            ref_index_symbol = ref_index_symbol.lower()
+        stock_hourly_k = await fetch_quotes_ohlc(symbol=stock_symbol, period="60", adjust="qfq")
+        index_hourly_k = await fetch_quotes_ohlc(symbol=ref_index_symbol, period="60", adjust="qfq")
+        stock_daily_k = resample_ohlc(stock_hourly_k, "D")
+        index_daily_k = resample_ohlc(index_hourly_k, "D")
+        prompts = [f"## {stock_info}"]
+        if stock_hourly_k.index[-1] < pd.Timestamp.now().normalize():
+            prompts.append(realtime_ohlc_to_md(await fetch_quotes_ohlc(stock_symbol, "15")))
+        prompts.append(historical_ohlc_to_md(stock_hourly_k))
+        prompts.append(f"## 股票相对参考指数（{index_info}）表现")
+        prompts.append(relative_features_md(stock_daily_k, index_daily_k))
+        prompts.append(news)
+        user_prompt = "\n\n".join(prompts)
+        payload = session.api.build_payload(({"role": "user", "content": user_prompt},), STOCK_ANALYSIS_PROMPT)
+        try:
+            advice = await agent.call_turn(session.api, payload, session.usage_counter, event)
+        except Exception as e:
+            logger.error(f"分析股票时发生错误: {e}")
+            return user_prompt
+        advice_md = WORKSPACE / f"{stock_symbol}.md"
+        advice_md.write_text(advice, encoding="utf-8")
+        file = advice_md
+        result = advice
     else:
-        current = realtime_ohlc_to_md(await fetch_quotes_ohlc(stock_symbol, "15")) + "\n\n"
-    report = f"""
-## {stock_info}
-
-{current}{historical_ohlc_to_md(stock_hourly_k)}
-
-## 股票相对参考指数（{index_info}）表现
-
-{relative_features_md(stock_daily_k, index_daily_k)}
-
-{news}
-"""
-    WORKSPACE.mkdir(parents=True, exist_ok=True)
-    (WORKSPACE / f"{stock_symbol}_report.md").write_text(report, encoding="utf-8")
-    payload = session.api.build_payload(({"role": "user", "content": report},), STOCK_ANALYSIS_PROMPT)
-    try:
-        advice = await agent.call_turn(session.api, payload, session.usage_counter, event)
-    except Exception as e:
-        logger.error(f"分析股票时发生错误: {e}")
-        return report
-    advice_file = WORKSPACE / f"{stock_symbol}_advice.md"
-    advice_file.write_text(advice, encoding="utf-8")
-    if coro := event.send("file", advice_file):
+        file = news_md
+        result = news
+    if coro := event.send("file", file):
         await coro
-    return advice
+    return result
 
 
 @TOOLS.register(
     "compute_stock_relative_features",
     "计算指定股票与参考指数的相对特征。",
     {
-        "stocks": {"type": "array", "description": "待计算的股票名称或代码列表"},
+        "stocks": {"type": "array", "description": "待计算的股票名称或代码的列表"},
         "ref_index_symbol": {"type": "string", "description": "参考指数代码"},
     },
     category=MARKET_ANALYSIS,

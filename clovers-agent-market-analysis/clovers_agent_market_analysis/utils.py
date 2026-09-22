@@ -7,8 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import OrderedDict
 from clovers_agent.config import CONFIG as AGENT_CONFIG
-from clovers_agent import CloversAgent, Event
-from clovers_agent.api import OpenAIAPI
+from clovers_agent import CloversAgent
 from clovers_agent.embedding import batch_similarity
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "market_analysis"
@@ -242,7 +241,7 @@ async def update_security_symbol_data():
 QUERY_SYMBOL_CACHE = CacheDict[str, str](50)
 
 
-async def query_security_symbol(column: str, value: str, agent: CloversAgent, limit: int = 10):
+async def query_security_symbol(column: str, value: str, agent: CloversAgent, limit: int = 10) -> list[str] | None:
     """
     根据股票名称或代码查询股票信息
     """
