@@ -298,22 +298,20 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             payload["messages"].extend(messages)
         raise RuntimeError(f"Maximum tool call chain length exceeded")
 
-    async def router(self, session: Session, event: Event):
+    async def router(self, text_input: str, event: Event, usage_counter: dict):
         if len(self.intro_tools) < 2:
             return await on_chat(self, event)
         try:
             api = self.api("router")
-            record = "".join(f"{a}\n{ASSISTANT_TAG.format(b)}\n" for a, b in session.router_recorder)
-            text_input = (x for x in session.current_input if x["type"] == "text")
-            payload = api.build_payload(({"role": "user", "content": [{"type": "text", "text": record}, *text_input]},), self.router_prompt)
+            payload = api.build_payload(({"role": "user", "content": text_input},), self.router_prompt)
             payload["tools"] = self.intro_tools
-            message = await api.call_api(payload, session.usage_counter)
+            message = await api.call_api(payload, usage_counter)
             if "tool_calls" not in message:
                 raise ValueError(f"message must contain tool_calls, but got {message}")
             category = message["tool_calls"][0]["function"]["name"]
             logger.info(f"[{self.name}][ROUTER] {category}")
             await self.intro_invoker[category](self, event)
-            # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 防止造成不必要的 fallback
+            # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         except Exception as e:
             logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
             category = await on_chat(self, event)
@@ -397,7 +395,9 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
             session.current_input = [*quote_content, *chat_content]
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            category = await self.router(session, event)
+            text_input = [f"{a}\n{ASSISTANT_TAG.format(b)}" for a, b in session.router_recorder]
+            text_input.append(content)
+            category = await self.router("\n".join(text_input), event, session.usage_counter)
             if category_prompts := await self.activate_category(category, event):
                 session.unit_prompts.extend(category_prompts)
             self.scripts_enum.clear()
