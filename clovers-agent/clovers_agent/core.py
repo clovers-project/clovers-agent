@@ -246,7 +246,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             if record_path.exists():
                 try:
                     with record_path.open("r", encoding="utf-8") as f:
-                        self.sessions[session_id].recorder = json.load(f)
+                        self.sessions[session_id].recorder.extend(json.load(f))
                 except Exception as e:
                     logger.error(f"[{self.name}][RECORDER_LOAD] {e}")
         return self.sessions[session_id]

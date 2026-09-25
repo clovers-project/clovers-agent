@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 from itertools import count
 from collections import deque
 from .api import OpenAIAPI
