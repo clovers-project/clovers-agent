@@ -16,7 +16,7 @@ from .api import OpenAIAPI, HybridOpenAIAPI
 from .skill import SkillCore, Parameters
 from .session import Session
 from .embedding import SentenceTransformer
-from .utils import deep_add
+from .utils import deep_add, save_json
 from typing import Protocol, Literal, TypedDict, Never, override
 from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
@@ -287,9 +287,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             payload["messages"].append(message)
             payload["messages"].extend(messages)
         payload_file = self.payload_dir / self.session_id(event) / f"{datetime.now().strftime('%Y%m%d-%H%M%S')} {id(payload)}.json"
-        payload_file.parent.mkdir(parents=True, exist_ok=True)
-        with payload_file.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=4, ensure_ascii=False)
+        save_json(payload_file, payload)
         raise RuntimeError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
 
     async def router(self, session: Session, event: Event):
@@ -392,14 +390,15 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
             session.current_input = [*quote_content, *chat_content]
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
+            category = await self.router(session, event)
+            if category_prompts := await self.activate_category(category, event):
+                session.unit_prompts.extend(category_prompts)
+            self.scripts_enum.clear()
+            self.references_enum.clear()
             try:
-                category = await self.router(session, event)
-                if category_prompts := await self.activate_category(category, event):
-                    session.unit_prompts.extend(category_prompts)
                 session.activate()
-                self.scripts_enum.clear()
-                self.references_enum.clear()
                 result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
+                save_json(self.payload_dir / self.session_id(event) / "latest.json", session.payload)
             except Exception as e:
                 logger.exception(e)
                 return
@@ -416,10 +415,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
         usage_counter.clear()
         logger.info(f"[{self.name}][USAGE] {usage}")
-        usage_file = self.usage_file
-        usage_file.parent.mkdir(parents=True, exist_ok=True)
-        with usage_file.open("w", encoding="utf-8") as f:
-            json.dump(self.usage_counter, f, indent=4, ensure_ascii=False)
+        save_json(self.usage_file, self.usage_counter)
 
     async def chat(self, event: Event):
         session = self.current_session(event)
