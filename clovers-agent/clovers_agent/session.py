@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from itertools import count
 from collections import deque
 from .api import OpenAIAPI
@@ -26,7 +27,9 @@ class Session:
     payload: Payload
     current_input: MultimodalContent
 
-    def __init__(self, sentence_model: SentenceTransformer) -> None:
+    def __init__(self, session_id: str, sentence_model: SentenceTransformer) -> None:
+        # 会话 id
+        self.session_id = session_id
         # 标准记录
         self.recorder: list[Record] = []
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=SESSION_CONFIG.silence_size)

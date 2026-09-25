@@ -70,7 +70,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         # 文件
         path = Path(CONFIG.path)
         self.usage_dir = path / "usages"
-        self.payload_dir = path / "payloads"
+        self.session_dir = path / "sessions"
         self.prompts_dir = path / "prompts"
         self.init_prompts()
         # 状态
@@ -98,6 +98,12 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         # DEBUG
         self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
         self.extra = {}
+
+    def recorder_file(self, session_id: str):
+        return self.session_dir / session_id / "recorder.json"
+
+    def payload_file(self, session_id: str):
+        return self.session_dir / session_id / "payload.json"
 
     @property
     def usage_file(self):
@@ -238,7 +244,14 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def current_session(self, event: Event):
         session_id = self.session_id(event)
         if session_id not in self.sessions:
-            self.sessions[session_id] = Session(self.sentence_model)
+            self.sessions[session_id] = Session(session_id, self.sentence_model)
+            record_path = self.recorder_file(session_id)
+            if record_path.exists():
+                try:
+                    with record_path.open("r", encoding="utf-8") as f:
+                        self.sessions[session_id].recorder = json.load(f)
+                except Exception as e:
+                    logger.error(f"[{self.name}][RECORDER_LOAD] {e}")
         return self.sessions[session_id]
 
     @staticmethod
@@ -286,9 +299,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 return e.data
             payload["messages"].append(message)
             payload["messages"].extend(messages)
-        payload_file = self.payload_dir / self.session_id(event) / f"{datetime.now().strftime('%Y%m%d-%H%M%S')} {id(payload)}.json"
-        save_json(payload_file, payload)
-        raise RuntimeError(f"Maximum tool call chain length exceeded, payload saved to: {payload_file.name}")
+        raise RuntimeError(f"Maximum tool call chain length exceeded")
 
     async def router(self, session: Session, event: Event):
         if len(self.intro_tools) < 2:
@@ -354,6 +365,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                     return
                 session.last_active_time = timestamp
                 session.over(content, {"role": "assistant", "content": result}, timestamp)
+                save_json(self.recorder_file(session.session_id), session.recorder)
                 return result
         session.refresh(timestamp)
         session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
@@ -398,14 +410,17 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             try:
                 session.activate()
                 result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
-                save_json(self.payload_dir / self.session_id(event) / "latest.json", session.payload)
+                save_json(self.payload_file(session.session_id), session.payload)
             except Exception as e:
+                file = f"payload_{id(session.payload)} {datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+                save_json(self.session_dir / session.session_id / file, session.payload)
                 logger.exception(e)
                 return
             finally:
                 session.inactivate()
             session.last_active_time = timestamp
             session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
+            save_json(self.recorder_file(session.session_id), session.recorder)
             return result
 
     def update_usage(self, usage_counter: dict):
