@@ -102,9 +102,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
     def recorder_file(self, session_id: str):
         return self.session_dir / session_id / "recorder.json"
 
-    def payload_file(self, session_id: str):
-        return self.session_dir / session_id / "payload.json"
-
     @property
     def usage_file(self):
         return self.usage_dir / f"{self.today}.json"
@@ -307,10 +304,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         try:
             api = self.api("router")
             record = "".join(f"{a}\n{ASSISTANT_TAG.format(b)}\n" for a, b in session.router_recorder)
-            payload = api.build_payload(
-                ({"role": "user", "content": [{"type": "text", "text": record}, *session.current_input]},),
-                self.router_prompt,
-            )
+            text_input = (x for x in session.current_input if x["type"] == "text")
+            payload = api.build_payload(({"role": "user", "content": [{"type": "text", "text": record}, *text_input]},), self.router_prompt)
             payload["tools"] = self.intro_tools
             message = await api.call_api(payload, session.usage_counter)
             if "tool_calls" not in message:
@@ -410,7 +405,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             try:
                 session.activate()
                 result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
-                save_json(self.payload_file(session.session_id), session.payload)
             except Exception as e:
                 file = f"payload_{id(session.payload)} {datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
                 save_json(self.session_dir / session.session_id / file, session.payload)
