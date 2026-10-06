@@ -44,24 +44,6 @@ async def _(agent: CloversAgent, event: Event):
         return f"workspace 已初始化\n当前工作目录: /workspace"
 
 
-@TOOLS.register(
-    "ls",
-    "查看工作区文件",
-    {"path": {"type": "string", "description": "需要查看的目录路径"}},
-    "workspace:hidden",
-    [],
-)
-async def _(agent: CloversAgent, event: Event, path: str = "./"):
-    folder = WORKSPACE / agent.session_id(event) / format_path(path)
-    if not folder.exists():
-        return f"路径 '{path}' 不存在。"
-    files = []
-    for file in folder.glob("*"):
-        if file.is_file():
-            files.append(file.relative_to(folder).as_posix())
-    return f"路径 '{path}' 下的文件列表：\n{"\n".join(files)}"
-
-
 def format_size(size: float) -> str:
     if size < 1024:
         return f"{size:.0f}B"
