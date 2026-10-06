@@ -1,6 +1,5 @@
 from typing import TypedDict, Literal, NotRequired
 
-
 type BaseType = Literal["string", "boolean", "integer", "number"]
 
 
@@ -15,7 +14,7 @@ class ArrayJSONSchemaType(TypedDict):
     description: NotRequired[str]
     minItems: NotRequired[int]
     maxItems: NotRequired[int]
-    items: NotRequired[BaseJSONSchemaType | list[BaseJSONSchemaType]]
+    items: NotRequired["JSONSchemaType | list[JSONSchemaType]"]
 
 
 class ObjectJSONSchemaType(TypedDict):

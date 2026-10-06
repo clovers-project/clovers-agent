@@ -3,15 +3,12 @@ from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import ON_CHAT, HIDDEN_CATEGORY
-from .constants import UPDATE_USER_PROFILE_PROMPT
+from .constants import UPDATE_USER_PROFILE, EDIT_USER_PROFILE, UPDATE_USER_PROFILE_PROMPT
 from ..toolkit import TOOLS, CONFIG
 
 REMINDER_THRESHOLD = CONFIG.reminder_threshold
 STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
-
-UPDATE_USER_PROFILE = "update_user_profile"
-EDIT_USER_PROFILE = "edit_user_profile"
 
 
 @TOOLS.on_category(ON_CHAT)
@@ -54,6 +51,24 @@ async def _(agent: CloversAgent, event: Event):
 @TOOLS.register(
     EDIT_USER_PROFILE,
     "",
+    {
+        "address_as": {"type": "string", "description": "记录你应当如何称呼对方"},
+        "tags": {"type": "string", "description": "为用户贴几个核心关键词"},
+        "preferences": {"type": "string", "description": "记录用户的话题偏好、语言风格偏好、特定观点、禁忌等"},
+        "impression": {"type": "string", "description": "你对该用户的整体印象"},
+        "new_memories": {"type": "array", "items": {"type": "string", "description": "新记忆"}},
+        "promote_memories": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "number", "description": "升星的记忆序号"},
+                    "content": {"type": "number", "description": "更新后的记忆，该记忆应融合"},
+                },
+            },
+        },
+        "demote_memory_ids": {"type": "array", "items": {"type": "number", "description": "降星的记忆序号"}},
+    },
     category=HIDDEN_CATEGORY,
     required=[],
 )
