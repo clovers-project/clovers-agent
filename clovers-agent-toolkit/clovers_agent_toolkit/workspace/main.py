@@ -20,22 +20,25 @@ async def _(agent: CloversAgent, event: Event):
     if not README.exists():
         README.write_text("Clovers Agent Workspace")
     session = agent.current_session(event)
+    assert "tools" in session.payload
     if CONFIG.use_shell:
-        if "shell" not in session.extra:
-            try:
+        try:
+            if "shell" in session.extra:
+                shell = session.extra["shell"]
+            else:
                 from .docker import Shell
 
                 shell = Shell(session.session_id, WORKSPACE, DOCKER_IMAGE)
-            except Exception as e:
-                logger.error(e)
-                assert "tools" in session.payload
-                session.payload["tools"].append(agent.manifest["ls"])
-                return f"workspace 已初始化\n当前工作目录: /workspace"
-            session.extra["shell"] = shell
+                session.extra["shell"] = shell
+            await shell.activate()
+        except Exception as e:
+            logger.error(e)
+            session.payload["tools"].append(agent.manifest["ls"])
+            return f"workspace 已初始化\n当前工作目录: /workspace"
         session.extra["shell"].workdir = "/workspace"
+        session.payload["tools"].append(agent.manifest["execute_command"])
         return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
     else:
-        assert "tools" in session.payload
         session.payload["tools"].append(agent.manifest["ls"])
         return f"workspace 已初始化\n当前工作目录: /workspace"
 
@@ -64,7 +67,7 @@ if CONFIG.use_shell:
         "execute_command",
         "在工作区环境下执行命令",
         {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
-        "workspace",
+        "workspace:hidden",
     )
     async def _(agent: CloversAgent, event: Event, command: str):
         extra = agent.current_session(event).extra

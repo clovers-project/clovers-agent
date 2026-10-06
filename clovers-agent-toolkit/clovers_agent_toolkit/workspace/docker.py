@@ -23,7 +23,7 @@ class Shell:
         self.client = client
         self.stdout_log = self.workspace / "stdout.log"
 
-    async def execute(self, command: str):
+    async def activate(self):
         async with self.lock:
             if self.container is None:
                 self.workdir = "/workspace"
@@ -43,13 +43,13 @@ class Shell:
                         volumes={self.workspace.resolve().as_posix(): {"bind": "/workspace", "mode": "rw"}},
                     )
             else:
-                self.container
                 self.container.reload()
             if self.container.status != "running":
                 await asyncio.to_thread(self.container.start)
+
+    async def execute(self, command: str):
+        async with self.lock:
             assert self.container is not None
-            # result = await asyncio.to_thread(self.container.exec_run, wrapped_command, workdir=self.workdir)
-            # stdout: str = result.output.decode("utf-8")
             output, workdir = await asyncio.to_thread(self.execute_thread, command)
             self.workdir = workdir.strip()
             return output

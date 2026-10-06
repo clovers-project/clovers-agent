@@ -1,7 +1,7 @@
+import asyncio
 from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
-from clovers_agent.session import extract_plain_text
 from clovers_agent.constants import ON_CHAT
 from .constants import UPDATE_USER_PROFILE_PROMPT
 from ..toolkit import TOOLS, CONFIG
@@ -47,34 +47,37 @@ async def _(agent: CloversAgent, event: Event):
     category=ON_CHAT,
 )
 async def _(agent: CloversAgent, event: Event, observation: str, impression: str):
-    USER_PROFILE.mkdir(parents=True, exist_ok=True)
-    user_id = event.user_id
-    user_profile_path = USER_PROFILE / f"{user_id}.md"
-    old_profile = user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "无"
     session = agent.current_session(event)
-    context = "\n".join(extract_plain_text(msg["content"]) for msg in session)
-    user_prompt = (
-        f"### 本次档案更新依据\n"
-        f"- 当前日期：{agent.today}\n"
-        f"- 用户昵称：{event.nickname}\n"
-        f"- 用户发言：{event.message}\n"
-        f"- 观察到：{observation}\n"
-        f"- 对用户的感受：{impression}\n\n"
-        f"### 待更新档案\n"
-        f"```\n"
-        f"{old_profile}\n"
-        f"```\n\n"
-        f"### 上下文\n"
-        f"```\n"
-        f"{context}\n"
-        f"```\n\n"
+    user_id = event.user_id
+    if UPDATE_USER_PROFILE not in session.extra:
+        session.extra[UPDATE_USER_PROFILE] = {}
+    updating = session.extra[UPDATE_USER_PROFILE]
+    if updating.get(user_id, False):
+        return "OK"
+    USER_PROFILE.mkdir(parents=True, exist_ok=True)
+    user_profile_path = USER_PROFILE / f"{user_id}.md"
+    user_prompt = UPDATE_USER_PROFILE_PROMPT.format(
+        user_profile=user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "",
+        today=agent.today,
+        nickname=event.nickname,
+        message=event.message,
+        observation=observation,
+        impression=impression,
     )
+    # 利用原 api 和上下文构建 payload 以提升缓存命中率
     api = session.api
-    payload = api.build_payload(({"role": "user", "content": user_prompt},), UPDATE_USER_PROFILE_PROMPT)
-    resp = await api.call_api(payload, session.usage_counter)
-    user_profile_path.write_text(resp["content"], encoding="utf-8")
-    try:
-        del session.extra[UPDATE_USER_PROFILE][user_id]
-    except KeyError:
-        pass
+    payload = api.build_payload(session.payload["messages"][: session.cursor - 1])
+    payload["messages"].append({"role": "user", "content": user_prompt})
+
+    async def update_user_profile():
+        updating[user_id] = True
+        try:
+            usage_counter = {}
+            resp = await api.call_api(payload, usage_counter)
+            agent.update_usage({UPDATE_USER_PROFILE: usage_counter})
+            user_profile_path.write_text(resp["content"], encoding="utf-8")
+        finally:
+            updating[user_id] = False
+
+    asyncio.create_task(update_user_profile())
     return "OK"

@@ -66,4 +66,14 @@ UPDATE_USER_PROFILE_PROMPT = """\
 1. 现有档案不符合格式: 依据其中有价值的信息重新形成符合格式的档案。
 2. 档案维度违反简洁原则: 按原则本身规定处理。
 3. 档案中重复或相近的内容: 删除或合并
+
+{user_profile}
+
+# 本次档案更新依据
+
+- 当前日期：{today}
+- 用户昵称：{nickname}
+- 用户发言：{message}
+- 观察到：{observation}
+- 对用户的感受：{impression}
 """
