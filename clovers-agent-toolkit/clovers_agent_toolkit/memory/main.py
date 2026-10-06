@@ -1,9 +1,9 @@
-import asyncio
 from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import ON_CHAT, HIDDEN_CATEGORY
-from .constants import UPDATE_USER_PROFILE, EDIT_USER_PROFILE, UPDATE_USER_PROFILE_PROMPT
+from .constants import UPDATE_USER_PROFILE, UPDATE_USER_PROFILE_PROMPT, EDIT_USER_PROFILE, EDIT_USER_PROFILE_DESC
+from .typing import UserProfile, MemoryItem, MemoryItemTuple
 from ..toolkit import TOOLS, CONFIG
 
 REMINDER_THRESHOLD = CONFIG.reminder_threshold
@@ -20,14 +20,14 @@ async def _(agent: CloversAgent, event: Event):
     user_id = event.user_id
     count = counter[user_id] = counter.get(user_id, 0) + 1
     notes = []
-    user_profile = USER_PROFILE / f"{user_id}.md"
+    user_profile = USER_PROFILE / f"{user_id}.json"
     if not user_profile.exists():
         notes.append(f"""\
 # 用户档案：{event.nickname}
 
 目前尚无该用户档案，请在**上下文足够充分**时进行使用 '{UPDATE_USER_PROFILE}' 工具进行第一次更新。""")
     else:
-        notes.append(user_profile.read_text(encoding="utf-8"))
+        notes.append(UserProfile.model_validate_json(user_profile.read_text(encoding="utf-8")).to_markdown())
         if count > STRONG_REMINDER_THRESHOLD:
             notes.append(f"档案在 {count} 次对话前更新，请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
         elif count > REMINDER_THRESHOLD:
@@ -50,7 +50,7 @@ async def _(agent: CloversAgent, event: Event):
 
 @TOOLS.register(
     EDIT_USER_PROFILE,
-    "",
+    EDIT_USER_PROFILE_DESC,
     {
         "address_as": {"type": "string", "description": "记录你应当如何称呼对方"},
         "tags": {"type": "string", "description": "为用户贴几个核心关键词"},
@@ -72,39 +72,71 @@ async def _(agent: CloversAgent, event: Event):
     category=HIDDEN_CATEGORY,
     required=[],
 )
-async def _(agent: CloversAgent, event: Event, observation: str, impression: str):
+async def _(
+    agent: CloversAgent,
+    event: Event,
+    address_as: str = "",
+    tags: str = "",
+    preferences: str = "",
+    impression: str = "",
+    new_memories: list[str] | None = None,
+    promote_memories: list[MemoryItem] | None = None,
+    demote_memory_ids: list[int] | None = None,
+):
     session = agent.current_session(event)
     user_id = event.user_id
-    if UPDATE_USER_PROFILE not in session.extra:
-        session.extra[UPDATE_USER_PROFILE] = {}
-    updating = session.extra[UPDATE_USER_PROFILE]
-    if updating.get(user_id, False):
-        return "OK"
+    user_profile = USER_PROFILE / f"{user_id}.json"
     USER_PROFILE.mkdir(parents=True, exist_ok=True)
-    user_profile_path = USER_PROFILE / f"{user_id}.md"
-    user_prompt = UPDATE_USER_PROFILE_PROMPT.format(
-        user_profile=user_profile_path.read_text(encoding="utf-8") if user_profile_path.exists() else "",
-        today=agent.today,
-        nickname=event.nickname,
-        message=event.message,
-        observation=observation,
-        impression=impression,
-    )
-    # 利用原 api 和上下文构建 payload 以提升缓存命中率
-    api = session.api
-    payload = api.build_payload(session.payload["messages"][: session.cursor - 1])
-    payload["messages"].append({"role": "user", "content": user_prompt})
-    payload["response_format"] = {"type": "json_object"}
-
-    async def update_user_profile():
-        updating[user_id] = True
-        try:
-            usage_counter = {}
-            resp = await api.call_api(payload, usage_counter)
-            agent.update_usage({UPDATE_USER_PROFILE: usage_counter})
-            user_profile_path.write_text(resp["content"], encoding="utf-8")
-        finally:
-            updating[user_id] = False
-
-    asyncio.create_task(update_user_profile())
-    return "OK"
+    if not user_profile.exists():
+        profile = UserProfile(
+            nickname=event.nickname,
+            address_as=address_as,
+            tags=tags,
+            preferences=preferences,
+            impression=impression,
+            memories=[{"id": i, "content": c, "star": 1} for i, c in enumerate(new_memories, 1)] if new_memories else [],
+        )
+    else:
+        profile = UserProfile.model_validate_json(user_profile.read_text(encoding="utf-8"))
+        profile.nickname = event.nickname
+        if address_as:
+            profile.address_as = address_as
+        if tags:
+            profile.tags = tags
+        if preferences:
+            profile.preferences = preferences
+        if impression:
+            profile.impression = impression
+        old_memories: dict[int, MemoryItemTuple] = {int(x["id"]): (x["content"], x["star"]) for x in profile.memories}
+        memories: list[MemoryItemTuple] = []
+        if promote_memories:
+            for x in promote_memories:
+                if not "id" in x:
+                    if "content" in x:
+                        memories.append((x["content"], 1))
+                    continue
+                key = int(x["id"])
+                c = x.get("content")
+                if key not in old_memories:
+                    if c:
+                        memories.append((c, 1))
+                else:
+                    old_c, star = old_memories[key]
+                    memories.append((c or old_c, max(star + 1, 5)))
+                    del old_memories[key]
+        if demote_memory_ids:
+            for key in demote_memory_ids:
+                if key not in old_memories:
+                    continue
+                old_c, star = old_memories[key]
+                if star > 0:
+                    memories.append((old_c, star - 1))
+                del old_memories[key]
+        if new_memories:
+            memories.extend((x, 1) for x in new_memories)
+        memories.extend(old_memories.values())
+        memories.sort(key=lambda x: x[1], reverse=True)
+        profile.memories.clear()
+        profile.memories.extend({"id": i, "content": c, "star": star} for i, (c, star) in enumerate(memories, 1))
+    user_profile.write_text(profile.model_dump_json(indent=4), encoding="utf-8")
+    return profile.to_markdown()
