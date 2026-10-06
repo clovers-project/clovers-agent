@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers.logger import logger
@@ -48,16 +49,60 @@ async def _(agent: CloversAgent, event: Event):
     "查看工作区文件",
     {"path": {"type": "string", "description": "需要查看的目录路径"}},
     "workspace:hidden",
+    [],
 )
-async def _(agent: CloversAgent, event: Event, path: str):
+async def _(agent: CloversAgent, event: Event, path: str = "./"):
     folder = WORKSPACE / agent.session_id(event) / format_path(path)
     if not folder.exists():
         return f"路径 '{path}' 不存在。"
     files = []
-    for file in folder.rglob("*"):
+    for file in folder.glob("*"):
         if file.is_file():
-            files.append(str(file.relative_to(folder)))
+            files.append(file.relative_to(folder).as_posix())
     return f"路径 '{path}' 下的文件列表：\n{"\n".join(files)}"
+
+
+def format_size(size: float) -> str:
+    if size < 1024:
+        return f"{size:.0f}B"
+    for unit in ("K", "M", "G"):
+        size /= 1024
+        if size < 1024:
+            break
+    return f"{size:.1f}{unit}"
+
+
+@TOOLS.register(
+    "ls",
+    "查看工作区文件",
+    {"path": {"type": "string", "description": "需要查看的目录路径"}},
+    "workspace:hidden",
+    [],
+)
+async def _(agent: CloversAgent, event: Event, path: str = "./"):
+    folder = WORKSPACE / agent.session_id(event) / format_path(path)
+    if not folder.exists():
+        return f"路径 '{path}' 不存在。"
+    if not folder.is_dir():
+        return f"'{path}' 不是目录。"
+    lines = [
+        f"`{path}` 下的文件列表：\n",
+        "kind|size|mtime|name| ",
+        "---|---|---|---",
+    ]
+    entries = sorted(folder.glob("*"), key=lambda f: (f.is_file(), f.name))
+    for file in entries:
+        name = file.name
+        try:
+            mtime = datetime.fromtimestamp(file.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            if file.is_file():
+                ks = f"f|{format_size(file.stat().st_size)}"
+            else:
+                ks = "d|-"
+            lines.append(f"{ks}|{mtime}|{name}")
+        except OSError as e:
+            lines.append(f"?|?|?|{name}")
+    return "\n".join(lines)
 
 
 if CONFIG.use_shell:
