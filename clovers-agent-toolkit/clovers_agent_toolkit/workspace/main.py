@@ -19,14 +19,13 @@ async def _(agent: CloversAgent, event: Event):
         WORKSPACE.mkdir(parents=True, exist_ok=True)
     if not README.exists():
         README.write_text("Clovers Agent Workspace")
+    session = agent.current_session(event)
     if CONFIG.use_shell:
-        session = agent.current_session(event)
-        session_id = session.session_id
         if "shell" not in session.extra:
             try:
                 from .docker import Shell
 
-                shell = Shell(session_id, WORKSPACE, DOCKER_IMAGE)
+                shell = Shell(session.session_id, WORKSPACE, DOCKER_IMAGE)
             except Exception as e:
                 logger.error(e)
                 assert "tools" in session.payload
@@ -36,7 +35,6 @@ async def _(agent: CloversAgent, event: Event):
         session.extra["shell"].workdir = "/workspace"
         return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
     else:
-        session = agent.current_session(event)
         assert "tools" in session.payload
         session.payload["tools"].append(agent.manifest["ls"])
         return f"workspace 已初始化\n当前工作目录: /workspace"
