@@ -20,8 +20,8 @@ async def _(agent: CloversAgent, event: Event):
     if not README.exists():
         README.write_text("Clovers Agent Workspace")
     if CONFIG.use_shell:
-        session_id = agent.session_id(event)
         session = agent.current_session(event)
+        session_id = session.session_id
         if "shell" not in session.extra:
             try:
                 from .docker import Shell
@@ -29,12 +29,34 @@ async def _(agent: CloversAgent, event: Event):
                 shell = Shell(session_id, WORKSPACE, DOCKER_IMAGE)
             except Exception as e:
                 logger.error(e)
-                return f"workspace 已初始化, shell 初始化失败，此工作区无法执行命令。\n当前工作目录: /workspace"
+                assert "tools" in session.payload
+                session.payload["tools"].append(agent.manifest["ls"])
+                return f"workspace 已初始化\n当前工作目录: /workspace"
             session.extra["shell"] = shell
         session.extra["shell"].workdir = "/workspace"
         return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
     else:
+        session = agent.current_session(event)
+        assert "tools" in session.payload
+        session.payload["tools"].append(agent.manifest["ls"])
         return f"workspace 已初始化\n当前工作目录: /workspace"
+
+
+@TOOLS.register(
+    "ls",
+    "查看工作区文件",
+    {"path": {"type": "string", "description": "需要查看的目录路径"}},
+    "workspace:hidden",
+)
+async def _(agent: CloversAgent, event: Event, path: str):
+    folder = WORKSPACE / agent.session_id(event) / format_path(path)
+    if not folder.exists():
+        return f"路径 '{path}' 不存在。"
+    files = []
+    for file in folder.rglob("*"):
+        if file.is_file():
+            files.append(str(file.relative_to(folder)))
+    return f"路径 '{path}' 下的文件列表：\n{"\n".join(files)}"
 
 
 if CONFIG.use_shell:
@@ -52,24 +74,6 @@ if CONFIG.use_shell:
             return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
         output = await shell.execute(command)
         return f"{output}\n当前工作目录: {shell.workdir}"
-
-else:
-
-    @TOOLS.register(
-        "ls",
-        "查看工作区文件",
-        {"path": {"type": "string", "description": "需要查看的目录路径"}},
-        "workspace",
-    )
-    async def _(agent: CloversAgent, event: Event, path: str):
-        folder = WORKSPACE / agent.session_id(event) / format_path(path)
-        if not folder.exists():
-            return f"路径 '{path}' 不存在。"
-        files = []
-        for file in folder.rglob("*"):
-            if file.is_file():
-                files.append(str(file.relative_to(folder)))
-        return f"路径 '{path}' 下的文件列表：\n{"\n".join(files)}"
 
 
 def read_text(file: Path):
