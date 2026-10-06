@@ -40,7 +40,7 @@ async def _(agent: CloversAgent, event: Event):
     "用于更新助手对用户的印象档案。当用户约定称呼、展现偏好、或你对该用户的印象需要修正时，应主动调用此工具",
     category=ON_CHAT,
 )
-async def _(agent: CloversAgent, event: Event):
+async def _(agent: CloversAgent, event: Event, **kwargs):
     session = agent.current_session(event)
     assert "tools" in session.payload
     if not any(tool["function"]["name"] == EDIT_USER_PROFILE for tool in session.payload["tools"]):
