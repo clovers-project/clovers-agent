@@ -8,7 +8,7 @@ from ..toolkit import TOOLS, CONFIG
 WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
 DOCKER_IMAGE = CONFIG.docker_image
 README = WORKSPACE / "README.md"
-FALLBACK_TOOLS = ["ls", "read_files", "write_file"]
+BUILTIN_TOOLS = ["ls", "read_files", "write_file"]
 
 
 @TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
@@ -29,16 +29,13 @@ async def _(agent: CloversAgent, event: Event):
                 shell = Shell(session.session_id, WORKSPACE, DOCKER_IMAGE)
                 session.extra["shell"] = shell
             await shell.activate()
+            session.extra["shell"].workdir = "/workspace"
+            session.payload["tools"].append(agent.manifest["execute_command"])
+            return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
         except Exception as e:
             logger.error(e)
-            session.payload["tools"].append(agent.manifest["ls"])
-            return f"workspace 已初始化\n当前工作目录: /workspace"
-        session.extra["shell"].workdir = "/workspace"
-        session.payload["tools"].append(agent.manifest["execute_command"])
-        return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
-    else:
-        session.payload["tools"].extend(agent.manifest[x] for x in FALLBACK_TOOLS)
-        return f"workspace 已初始化\n当前工作目录: /workspace"
+    session.payload["tools"].extend(agent.manifest[x] for x in BUILTIN_TOOLS)
+    return f"workspace 已初始化\n当前工作目录: /workspace"
 
 
 def format_path(path: str):
