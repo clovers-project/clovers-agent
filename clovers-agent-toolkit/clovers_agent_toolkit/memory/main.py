@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
-from clovers_agent.constants import ON_CHAT
+from clovers_agent.constants import ON_CHAT, HIDDEN_CATEGORY
 from .constants import UPDATE_USER_PROFILE_PROMPT
 from ..toolkit import TOOLS, CONFIG
 
@@ -11,6 +11,7 @@ STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 
 UPDATE_USER_PROFILE = "update_user_profile"
+EDIT_USER_PROFILE = "edit_user_profile"
 
 
 @TOOLS.on_category(ON_CHAT)
@@ -40,11 +41,21 @@ async def _(agent: CloversAgent, event: Event):
 @TOOLS.register(
     UPDATE_USER_PROFILE,
     "用于更新助手对用户的印象档案。当用户约定称呼、展现偏好、或你对该用户的印象需要修正时，应主动调用此工具",
-    {
-        "observation": {"type": "string", "description": "从对话中提取的关键观察（如用户性格特征、偏好变化、言行风格等）。"},
-        "impression": {"type": "string", "description": "你对用户当前的主观情感评价。"},
-    },
     category=ON_CHAT,
+)
+async def _(agent: CloversAgent, event: Event):
+    session = agent.current_session(event)
+    assert "tools" in session.payload
+    if not any(tool["function"]["name"] == EDIT_USER_PROFILE for tool in session.payload["tools"]):
+        session.payload["tools"].append(agent.manifest[EDIT_USER_PROFILE])
+    return UPDATE_USER_PROFILE_PROMPT
+
+
+@TOOLS.register(
+    EDIT_USER_PROFILE,
+    "",
+    category=HIDDEN_CATEGORY,
+    required=[],
 )
 async def _(agent: CloversAgent, event: Event, observation: str, impression: str):
     session = agent.current_session(event)
@@ -68,6 +79,7 @@ async def _(agent: CloversAgent, event: Event, observation: str, impression: str
     api = session.api
     payload = api.build_payload(session.payload["messages"][: session.cursor - 1])
     payload["messages"].append({"role": "user", "content": user_prompt})
+    payload["response_format"] = {"type": "json_object"}
 
     async def update_user_profile():
         updating[user_id] = True

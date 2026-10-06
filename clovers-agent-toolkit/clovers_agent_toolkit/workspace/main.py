@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import datetime
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
+from clovers_agent.constants import HIDDEN_CATEGORY
 from clovers.logger import logger
 from ..toolkit import TOOLS, CONFIG
 
@@ -71,7 +72,7 @@ if CONFIG.use_shell:
         "execute_command",
         "在工作区环境下执行命令",
         {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
-        "workspace:hidden",
+        HIDDEN_CATEGORY,
     )
     async def _(agent: CloversAgent, event: Event, command: str):
         extra = agent.current_session(event).extra
@@ -95,7 +96,7 @@ def format_size(size: float) -> str:
     "ls",
     "查看工作区文件",
     {"path": {"type": "string", "description": "需要查看的目录路径"}},
-    "workspace:hidden",
+    HIDDEN_CATEGORY,
     [],
 )
 async def _(agent: CloversAgent, event: Event, path: str = "./"):
@@ -139,7 +140,7 @@ def read_text(file: Path):
     "read_files",
     "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件。",
     {"filepaths": {"type": "array", "description": "包含一个或多个文件路径的数组", "items": {"type": "string"}}},
-    "workspace:hidden",
+    HIDDEN_CATEGORY,
 )
 async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
     workspace = WORKSPACE / agent.session_id(event)
@@ -162,7 +163,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
         "file_path": {"type": "string", "description": "需要写入的文件路径"},
         "file_content": {"type": "string", "description": "需要写入到文件的内容"},
     },
-    "workspace:hidden",
+    HIDDEN_CATEGORY,
 )
 async def _(agent: CloversAgent, event: Event, file_path: str, file_content: str):
     file = WORKSPACE / agent.session_id(event) / format_path(file_path)

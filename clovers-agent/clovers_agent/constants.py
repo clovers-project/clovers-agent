@@ -7,6 +7,7 @@ USER_TAG = CONSTANT.user_tag
 ASSISTANT_TAG = CONSTANT.assistant_tag
 ON_CHAT = CONSTANT.on_chat
 ON_CHAT_DESC = CONSTANT.on_chat_desc
+HIDDEN_CATEGORY = CONSTANT.hidden_category
 BUILTIN_CATEGORY = CONSTANT.builtin_category
 SKILL_MENU = CONSTANT.skill_menu
 SKILL_MENU_DESC = CONSTANT.skill_menu_desc
