@@ -83,7 +83,6 @@ async def _(
     promote_memories: list[MemoryItem] | None = None,
     demote_memory_ids: list[int] | None = None,
 ):
-    session = agent.current_session(event)
     user_id = event.user_id
     user_profile = USER_PROFILE / f"{user_id}.json"
     USER_PROFILE.mkdir(parents=True, exist_ok=True)
@@ -122,7 +121,7 @@ async def _(
                         memories.append((c, 1))
                 else:
                     old_c, star = old_memories[key]
-                    memories.append((c or old_c, max(star + 1, 5)))
+                    memories.append((c or old_c, min(star + 1, 5)))
                     del old_memories[key]
         if demote_memory_ids:
             for key in demote_memory_ids:
