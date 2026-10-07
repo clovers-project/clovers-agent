@@ -8,6 +8,7 @@ from ..toolkit import TOOLS, CONFIG
 
 REMINDER_THRESHOLD = CONFIG.reminder_threshold
 STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
+PROFILE_MEMORY_SIZE = CONFIG.profile_memory_size
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 
 
@@ -133,7 +134,7 @@ async def _(
         if new_memories:
             memories.extend((x, 1) for x in new_memories)
         memories.extend(old_memories.values())
-        dstar = 1 if len(memories) >= 20 else 0
+        dstar = 1 if len(memories) >= PROFILE_MEMORY_SIZE else 0
         memories = sorted((x for x in memories if x[1] >= dstar), key=lambda x: x[1], reverse=True)
         profile.memories.clear()
         profile.memories.extend({"id": i, "content": c, "star": star} for i, (c, star) in enumerate(memories, 1))
