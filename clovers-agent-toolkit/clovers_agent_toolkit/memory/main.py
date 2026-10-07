@@ -128,13 +128,13 @@ async def _(
                 if key not in old_memories:
                     continue
                 old_c, star = old_memories[key]
-                if star > 0:
-                    memories.append((old_c, star - 1))
+                memories.append((old_c, star - 1))
                 del old_memories[key]
         if new_memories:
             memories.extend((x, 1) for x in new_memories)
         memories.extend(old_memories.values())
-        memories.sort(key=lambda x: x[1], reverse=True)
+        dstar = 1 if len(memories) >= 20 else 0
+        memories = sorted((x for x in memories if x[1] >= dstar), key=lambda x: x[1], reverse=True)
         profile.memories.clear()
         profile.memories.extend({"id": i, "content": c, "star": star} for i, (c, star) in enumerate(memories, 1))
     user_profile.write_text(profile.model_dump_json(indent=4), encoding="utf-8")
