@@ -7,8 +7,8 @@ from pathlib import Path
 from datetime import datetime
 from collections import OrderedDict
 from clovers_agent.config import CONFIG as AGENT_CONFIG
-from clovers_agent import CloversAgent
 from clovers_agent.embedding import batch_similarity
+from sentence_transformers import SentenceTransformer
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "market_analysis"
 SECURITY_SYMBOL_CSV = WORKSPACE / "security_symbol.csv"
@@ -241,7 +241,7 @@ async def update_security_symbol_data():
 QUERY_SYMBOL_CACHE = CacheDict[str, str](50)
 
 
-async def query_security_symbol(column: str, value: str, agent: CloversAgent, limit: int = 10) -> list[str] | None:
+async def query_security_symbol(column: str, value: str, sentence_model: SentenceTransformer, limit: int = 10) -> list[str] | None:
     """
     根据股票名称或代码查询股票信息
     """
@@ -261,7 +261,7 @@ async def query_security_symbol(column: str, value: str, agent: CloversAgent, li
             if not result.empty:
                 return result
             names = df["name"].astype(str).tolist()
-            scores = batch_similarity(names, value, agent.sentence_model)
+            scores = batch_similarity(names, value, sentence_model)
             df["similarity"] = scores
             return df.sort_values(by="similarity", ascending=False).head(limit)
 
@@ -397,6 +397,7 @@ INDEX_NEWS_RESEARCH_PROMPT = """\
 1. 时效性：使用最新的财务数据
 2. 准确性：如遇到矛盾信息请谨慎处理
 """
+
 FUTURES_NEWS_RESEARCH_PROMPT = f"""\
 你是一位资深的金融市场研究员。请你针对用户提供的期货品种，利用搜索工具 `web_search` 和网页查看工具 `web_extractor` 进行新闻收集并撰写一份清晰的新闻分析。
 

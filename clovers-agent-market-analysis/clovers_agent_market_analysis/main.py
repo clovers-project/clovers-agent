@@ -50,7 +50,7 @@ async def _(agent: CloversAgent, event: Event):
     category=MARKET_ANALYSIS,
 )
 async def _(agent: CloversAgent, event: Event, column: str, value: str):
-    lines = await query_security_symbol(column, value, agent)
+    lines = await query_security_symbol(column, value, agent.sentence_model)
     return "\n".join(lines) if lines else "未查询到结果"
 
 
@@ -82,7 +82,7 @@ async def _(agent: CloversAgent, event: Event, symbol: str):
 async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_index_symbol: str = "sh000300"):
     match asset_type:
         case "stock":
-            stocks_info = await query_security_symbol("name", name, agent)
+            stocks_info = await query_security_symbol("name", name, agent.sentence_model)
             if not stocks_info:
                 return f"未找到{name}"
             if len(stocks_info) > 1:
@@ -104,14 +104,15 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_i
         news = news_md.read_text(encoding="utf-8")
     else:
         user_prompt = f"请根据{datetime.now().strftime("%Y年%m月%d日")}最新信息，为 {name} 撰写一份详细新闻报告"
-        payload = session.api.build_payload(({"role": "user", "content": user_prompt},), system_prompt)
+        api = agent.api("analyze_security")
+        payload = api.build_payload(({"role": "user", "content": user_prompt},), system_prompt)
         payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
-        news = await agent.call_turn(session.api, payload, session.usage_counter, event)
+        news = await agent.call_turn(api, payload, session.usage_counter, event)
         news_md.write_text(news, encoding="utf-8")
     if asset_type == "stock":
         stock_info = name
         name, stock_symbol = stock_info.split(" ")
-        index_info = await query_security_symbol("symbol", ref_index_symbol, agent)
+        index_info = await query_security_symbol("symbol", ref_index_symbol, agent.sentence_model)
         if not index_info or len(index_info) > 1:
             index_info = "沪深300 sh000300"
             ref_index_symbol = "sh000300"
@@ -130,9 +131,9 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_i
         prompts.append(relative_features_md(stock_daily_k, index_daily_k))
         prompts.append(news)
         user_prompt = "\n\n".join(prompts)
-        payload = session.api.build_payload(({"role": "user", "content": user_prompt},), STOCK_ANALYSIS_PROMPT)
+        payload = api.build_payload(({"role": "user", "content": user_prompt},), STOCK_ANALYSIS_PROMPT)
         try:
-            advice = await agent.call_turn(session.api, payload, session.usage_counter, event)
+            advice = await agent.call_turn(api, payload, session.usage_counter, event)
         except Exception as e:
             logger.error(f"分析股票时发生错误: {e}")
             return user_prompt
@@ -159,7 +160,7 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_i
     required=["stocks"],
 )
 async def _(agent: CloversAgent, event: Event, stocks: list[str], ref_index_symbol: str = "sh000300"):
-    index_info = await query_security_symbol("symbol", ref_index_symbol, agent)
+    index_info = await query_security_symbol("symbol", ref_index_symbol, agent.sentence_model)
     if not index_info or len(index_info) > 1:
         index_info = "沪深300 sh000300"
         ref_index_symbol = "sh000300"
@@ -169,7 +170,7 @@ async def _(agent: CloversAgent, event: Event, stocks: list[str], ref_index_symb
     index_hourly_k = await fetch_quotes_ohlc(symbol=ref_index_symbol, period="60", adjust="qfq")
     index_daily_k = resample_ohlc(index_hourly_k, "D")
     for stock in stocks:
-        symbol = await query_security_symbol("symbol", stock, agent)
+        symbol = await query_security_symbol("symbol", stock, agent.sentence_model)
         if not symbol:
             continue
         name, symbol = symbol[0].split(" ")
