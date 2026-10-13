@@ -156,20 +156,24 @@ class SkillCore:
         else:
             return self.category_decorator(info, category)
 
-    def _remove_intro(self, name: str):
+    def remove_intro(self, name: str):
+        """移除初始化工具。
+
+        Args:
+            name (str): 工具名名称。
+        """
+
         self.intro_tools.remove(self.manifest[name])
         del self.manifest[name]
         del self.invoker[name]
 
-    def _remove_single(self, category: str, name: str):
-        tools = self.category_tools_map[category]
-        tools.remove(self.manifest[name])
-        del self.manifest[name]
-        del self.invoker[name]
-        if not tools:
-            del self.category_tools_map[category]
+    def remove_category(self, category: str):
+        """移除工具组。
 
-    def _remove_category(self, category: str):
+        Args:
+            category (str): 工具组名。
+        """
+
         tools = self.category_tools_map[category]
         for info in tools:
             name = info["function"]["name"]
@@ -180,23 +184,6 @@ class SkillCore:
             del self.category_desc_map[category]
         if category in self.category_hooks:
             del self.category_hooks[category]
-
-    def remove(self, category: str | None, name: str | None):
-        """移除已注册的工具。
-
-        Args:
-            category (str | None): 要操作的工具组名称。如果为 None 则为初始化工具。。
-            name (str | None): 要移除的工具名称。如果为 None 则表示移除所有工具。
-        """
-        match category, name:
-            case None, None:
-                raise ValueError("Can'not remove all intro tools")
-            case None, _:
-                self._remove_intro(name)
-            case _, None:
-                self._remove_category(category)
-            case _, _:
-                self._remove_single(category, name)
 
     def validate_manifest(self):
         """验证工具清单的完整性。
@@ -363,12 +350,12 @@ class AgentCore(SkillCore):
         return (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir).expanduser()).exists() for _p in _dir.iterdir())
 
     def reload_skills(self):
-        for category in self._loaded_categories:
-            self.remove(category, None)
-        self._loaded_categories.clear()
         for name in self._loaded_intros:
-            self.remove(None, name)
+            self.remove_intro(name)
         self._loaded_intros.clear()
+        for category in self._loaded_categories:
+            self.remove_category(category)
+        self._loaded_categories.clear()
         self.scripts_map.clear()
         self.references_map.clear()
         for path in self.skill_dirs:
