@@ -434,7 +434,6 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
         new_tools = agent.select_tools(category)
         session.payload["tools"].extend(x for x in new_tools if x["function"]["name"] not in used)
-
     if scripts_map := agent.scripts_map.get(category):
         if not session.scripts_enum:
             session.payload["tools"].append(
@@ -476,7 +475,6 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
             )
         existing = set(session.references_enum)
         session.references_enum.extend(path for path in references_map if path not in existing)
-
     return prompt or f"Skills for '{category}' have been loaded."
 
 
