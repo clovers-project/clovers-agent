@@ -173,13 +173,12 @@ class SkillCore:
         Args:
             category (str): 工具组名。
         """
-
-        tools = self.category_tools_map[category]
-        for info in tools:
-            name = info["function"]["name"]
-            del self.manifest[name]
-            del self.invoker[name]
-        del self.category_tools_map[category]
+        if category in self.category_tools_map:
+            for info in self.category_tools_map[category]:
+                name = info["function"]["name"]
+                del self.manifest[name]
+                del self.invoker[name]
+            del self.category_tools_map[category]
         if category in self.category_desc_map:
             del self.category_desc_map[category]
         if category in self.category_hooks:
@@ -236,6 +235,27 @@ class SkillCore:
             others (SkillCore): 被移除的 SkillCore 实例。
         """
         others.validate_manifest()
+        # 验证
+        if any(info not in self.intro_tools for info in others.intro_tools):
+            raise ValueError()
+        for category, other_tools in others.category_tools_map.items():
+            if not category in self.category_tools_map:
+                raise ValueError()
+            self_tools = self.category_tools_map[category]
+            if any(tool not in self_tools for tool in other_tools):
+                raise ValueError()
+        for category in others.category_desc_map:
+            if not category in self.category_desc_map:
+                raise ValueError()
+        for category, other_hooks in others.category_hooks.items():
+            if not category in self.category_hooks:
+                raise ValueError()
+            self_hooks = self.category_hooks[category]
+            if any(hook not in self_hooks for hook in other_hooks):
+                raise ValueError()
+        if others.manifest.keys() - self.manifest.keys():
+            raise ValueError()
+        # 操作
         for info in others.intro_tools:
             self.intro_tools.remove(info)
         for category, other_tools in others.category_tools_map.items():
@@ -252,7 +272,7 @@ class SkillCore:
                 self_hooks.remove(hook)
             if not self_hooks:
                 del self.category_hooks[category]
-        for name, info in others.manifest.items():
+        for name in others.manifest.keys():
             del self.manifest[name]
             del self.invoker[name]
 
@@ -264,8 +284,8 @@ class AgentCore(SkillCore):
         self.scripts_map: dict[str, dict[str, str]] = {}
         self.references_map: dict[str, dict[str, str]] = {}
         self._skill_dirs = skill_dirs
-        self._loaded_categories: list[str] = []
         self._loaded_intros: list[str] = []
+        self._loaded_categories: list[str] = []
 
     @overload
     def load_skill_md(self, skill: SkillMD, category: None, func: ToolFunction | None = None) -> IntroK: ...
