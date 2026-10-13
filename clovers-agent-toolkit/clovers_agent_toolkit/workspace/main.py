@@ -3,6 +3,7 @@ from datetime import datetime
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY
+from clovers_agent.utils import decode_bytes
 from clovers.logger import logger
 from ..toolkit import TOOLS, CONFIG
 
@@ -125,17 +126,6 @@ async def _(agent: CloversAgent, event: Event, path: str = "./"):
     return "\n".join(lines)
 
 
-def read_text(file: Path):
-    for encoding in ["utf-8", None, "ansi"]:
-        try:
-            return file.read_text(encoding=encoding)
-        except UnicodeDecodeError:
-            continue
-        except Exception as e:
-            logger.error(f"文件读取失败: {e}")
-            return ""
-
-
 @TOOLS.register(
     "read_files",
     "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件。",
@@ -152,7 +142,7 @@ async def _(agent: CloversAgent, event: Event, filepaths: list[str]):
         if not file.exists():
             md.append(f"{file_path} 文件不存在")
             continue
-        md.append(f"```{file_path}\n{read_text(file)}\n```")
+        md.append(f"```{file_path}\n{decode_bytes(file.read_bytes())}\n```")
     return "\n\n".join(md)
 
 
