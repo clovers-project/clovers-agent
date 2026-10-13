@@ -12,11 +12,11 @@ from clovers.logger import logger
 from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
-from .skill import SkillCore, AgentCore, Parameters, invoker_wrapper
+from .skill import SkillCore, AgentCore, invoker_wrapper
 from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add, save_json, decode_bytes
-from typing import Protocol, Literal, TypedDict, Never, override
+from typing import Protocol, TypedDict, Never, override
 from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
@@ -58,6 +58,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
     """OpenAI API"""
 
     def __init__(self, name: str, async_client: httpx.AsyncClient, scheduler: AsyncIOScheduler) -> None:
+        AgentCore.__init__(self, CONFIG.skill_dirs)
         ModuleLoader.__init__(self, ["TOOLS"], SkillCore)
         self.name = name
         self.async_client = async_client
@@ -86,15 +87,31 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         self.wait_cooldown = CONFIG.wait_cooldown
         self.chime_in_cooldown = CONFIG.chime_in_cooldown
         # 技能
-        self.skills = tuple()
         self._plugins = CONFIG.plugins
         self._plugin_dirs = CONFIG.plugin_dirs
-        self._skill_dirs = CONFIG.skill_dirs
-        self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
+        self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
         # DEBUG
         self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
         self.extra = {}
+
+    def sync_menu(self):
+        self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
+        self._category_schema["enum"] = list(self.category_desc_map.keys())
+
+    def skill_init(self):
+        self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
+        self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, BUILTIN_CATEGORY)(skill_menu)
+        self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
+        self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
+        self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.load_from_list(self._plugins)
+        self.load_from_dirs(self._plugin_dirs)
+        self.sync_menu()
+
+    @property
+    def skill_dirs(self):
+        return (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir).expanduser()).exists() for _p in _dir.iterdir())
 
     def recorder_file(self, session_id: str):
         return self.session_dir / session_id / "recorder.json"
@@ -117,9 +134,10 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         tools = super()._load(package)
         if tools is None:
             return
-        conflict = self.merge(tools)
-        if conflict:
-            logger.error(f'[{self.name}] "{package}" conflict with {conflict}')
+        try:
+            self.merge(tools)
+        except Exception as e:
+            logger.error(f'[{self.name}] "{package}" load failed: {e}')
             return
         logger.info(f'[{self.name}][TOOLS] "{package}" loaded')
 
@@ -160,39 +178,6 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
     def chime_in_prompt(self) -> str:
         """Agent 主动回复要求"""
         return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chime_in_prompt) if x)
-
-    def skill_init(self):
-        SkillCore.__init__(self)
-        self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
-        self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, BUILTIN_CATEGORY)(skill_menu)
-        self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
-        self.load_from_list(self._plugins)
-        self.load_from_dirs(self._plugin_dirs)
-        self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
-        self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
-        self.sync_menu()
-
-    def sync_menu(self):
-        for skill in self.skills:
-            self.remove(*skill)
-        paths = (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir).expanduser()).exists() for _p in _dir.iterdir())
-        category_set: set[str] = set()
-        name_set: set[str] = set()
-        for path in paths:
-            select = self.load_skill(path)
-            if not select:
-                continue
-            category, name = select
-            if category:
-                category_set.add(category)
-            if name:
-                name_set.add(name)
-            logger.info(f'[{self.name}][SKILLS] "{category or name}" loaded')
-        self.skills = *((category, None) for category in category_set), *((None, name) for name in name_set)
-        self.skill_parameters["category"]["description"] = "\n".join(
-            f"{category}: {desc}" for category, desc in self.category_desc_map.items()
-        )
-        self.skill_parameters["category"]["enum"] = list(self.category_desc_map.keys())
 
     def daily_tasks(self):
         timestamp = time.time()
