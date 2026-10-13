@@ -161,30 +161,23 @@ class SkillCore:
         del self.manifest[name]
         del self.invoker[name]
 
+    def _remove_single(self, category: str, name: str):
+        tools = self.category_tools_map[category]
+        tools.remove(self.manifest[name])
+        del self.manifest[name]
+        del self.invoker[name]
+        if not tools:
+            del self.category_tools_map[category]
+
     def _remove_category(self, category: str):
-        if not category in self.category_tools_map:
-            return
         tools = self.category_tools_map[category]
         for info in tools:
             name = info["function"]["name"]
             del self.manifest[name]
             del self.invoker[name]
         del self.category_tools_map[category]
-        del self.category_desc_map[category]
-        if category in self.category_hooks:
-            del self.category_hooks[category]
-
-    def _remove_single(self, category: str, name: str):
-        if not category in self.category_tools_map:
-            return
-        tools = self.category_tools_map[category]
-        tools.remove(self.manifest[name])
-        del self.manifest[name]
-        del self.invoker[name]
-        if tools:
-            return
-        del self.category_tools_map[category]
-        del self.category_desc_map[category]
+        if category in self.category_desc_map:
+            del self.category_desc_map[category]
         if category in self.category_hooks:
             del self.category_hooks[category]
 
@@ -258,14 +251,19 @@ class SkillCore:
         others.validate_manifest()
         for info in others.intro_tools:
             self.intro_tools.remove(info)
-        for category, tools in others.category_tools_map.items():
-            for info in tools:
-                self.category_tools_map[category].remove(info)
-            if self.category_tools_map[category]:
-                continue
-            del self.category_tools_map[category]
+        for category, other_tools in others.category_tools_map.items():
+            self_tools = self.category_tools_map[category]
+            for info in other_tools:
+                self_tools.remove(info)
+            if not self_tools:
+                del self.category_tools_map[category]
+        for category in others.category_desc_map:
             del self.category_desc_map[category]
-            if category in self.category_hooks:
+        for category, other_hooks in others.category_hooks.items():
+            self_hooks = self.category_hooks[category]
+            for hook in other_hooks:
+                self_hooks.remove(hook)
+            if not self_hooks:
                 del self.category_hooks[category]
         for name, info in others.manifest.items():
             del self.manifest[name]
