@@ -230,7 +230,7 @@ class SkillCore:
         """移除从其他 SkillCore 加载的内容。
 
         Args:
-            others (SkillCore): 被移除的 SkillCore 实例。
+            others (SkillCore): 被移除的 SkillCore 实例，`others` 必须是 `self.merge` 过的实例 。
         """
         others.validate_manifest()
         # 验证
@@ -282,8 +282,8 @@ class AgentCore(SkillCore):
         self.scripts_map: dict[str, dict[str, str]] = {}
         self.references_map: dict[str, dict[str, str]] = {}
         self._skill_dirs = skill_dirs
-        self._loaded_intros: list[str] = []
-        self._loaded_categories: list[str] = []
+        self._loaded_intros: set[str] = set()
+        self._loaded_categories: set[str] = set()
 
     @overload
     def load_skill_md(self, skill: SkillMD, category: None, func: ToolFunction | None = None) -> IntroK: ...
@@ -331,7 +331,7 @@ class AgentCore(SkillCore):
 
         if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
             intro_k = self.load_skill_md(skill_md, None)
-            self._loaded_intros.append(intro_k[1])
+            self._loaded_intros.add(intro_k[1])
             return
         md_file = skill_path / "SKILL.md"
         if not (md_file.exists() and (skill_md := parse_skill(md_file))):
@@ -342,15 +342,19 @@ class AgentCore(SkillCore):
         scripts = [file for file in (skill_path / "scripts").rglob("*") if file.is_file()]
         if not other_mds and not scripts and not references:
             intro_k = self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
-            self._loaded_intros.append(intro_k[1])
+            self._loaded_intros.add(intro_k[1])
             return
         category, desc, *_, content = skill_md
         # 加载的 skill 必须独占一个工具组
         register = self.create_category(category, desc)
         if skill_func := skill_wrapper(content, getattr(module, category, None)):
             register(skill_func)
-        for md in other_mds:
-            self.load_skill_md(md, category, getattr(module, md[0], None))
+        try:
+            for md in other_mds:
+                self.load_skill_md(md, category, getattr(module, md[0], None))
+        except Exception:
+            self.remove_category(category)
+            raise
         for script_path in scripts:
             if not category in self.scripts_map:
                 self.scripts_map[category] = {}
@@ -361,7 +365,7 @@ class AgentCore(SkillCore):
                 self.references_map[category] = {}
             path = category / reference_path.relative_to(skill_path)
             self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
-        self._loaded_categories.append(category)
+        self._loaded_categories.add(category)
 
     @property
     def skill_dirs(self):
