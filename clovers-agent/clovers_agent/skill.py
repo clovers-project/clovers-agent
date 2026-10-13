@@ -22,11 +22,9 @@ type SingleK = tuple[str, str]
 
 class SkillCore:
     def __init__(self) -> None:
-        self.intro_tools: list[FunctionToolInfo] = []
         self.manifest: dict[str, FunctionToolInfo] = {}
         self.invoker: dict[str, WrappedToolFunction] = {}
-        # self.__map_category_to_id: dict[str, int] = {}
-        # self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
+        self.intro_tools: list[FunctionToolInfo] = []
         self.category_tools_map: dict[str, list[FunctionToolInfo]] = {}
         self.category_desc_map: dict[str, str] = {}
         self.category_hooks: dict[str, list[ToolFunction]] = {}
@@ -237,24 +235,24 @@ class SkillCore:
         others.validate_manifest()
         # 验证
         if any(info not in self.intro_tools for info in others.intro_tools):
-            raise ValueError()
+            raise ValueError(f"Cannot detach: intro_tools from others are not present in the current instance.")
         for category, other_tools in others.category_tools_map.items():
             if not category in self.category_tools_map:
-                raise ValueError()
+                raise ValueError(f"Cannot detach: category '{category}' does not exist in the current instance.")
             self_tools = self.category_tools_map[category]
             if any(tool not in self_tools for tool in other_tools):
-                raise ValueError()
+                raise ValueError(f"Cannot detach: category '{category}' from others are not present in the current instance.")
         for category in others.category_desc_map:
             if not category in self.category_desc_map:
-                raise ValueError()
+                raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
         for category, other_hooks in others.category_hooks.items():
             if not category in self.category_hooks:
-                raise ValueError()
+                raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
             self_hooks = self.category_hooks[category]
             if any(hook not in self_hooks for hook in other_hooks):
-                raise ValueError()
-        if others.manifest.keys() - self.manifest.keys():
-            raise ValueError()
+                raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
+        if missing := others.manifest.keys() - self.manifest.keys():
+            raise ValueError(f"Cannot detach: manifest keys {missing} are not present in the current instance.")
         # 操作
         for info in others.intro_tools:
             self.intro_tools.remove(info)
