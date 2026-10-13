@@ -1,3 +1,5 @@
+import time
+from datetime import datetime
 from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
@@ -21,19 +23,40 @@ async def _(agent: CloversAgent, event: Event):
     user_id = event.user_id
     count = counter[user_id] = counter.get(user_id, 0) + 1
     notes = []
-    user_profile = USER_PROFILE / f"{user_id}.json"
-    if not user_profile.exists():
+    user_profile_json = USER_PROFILE / f"{user_id}.json"
+    if not user_profile_json.exists():
         notes.append(f"""\
 # 用户档案：{event.nickname}
 
 目前尚无该用户档案，请在**上下文足够充分**时进行使用 '{UPDATE_USER_PROFILE}' 工具进行第一次更新。""")
     else:
-        notes.append(UserProfile.model_validate_json(user_profile.read_text(encoding="utf-8")).to_markdown())
+        user_profile = UserProfile.model_validate_json(user_profile_json.read_text(encoding="utf-8"))
+        if user_profile.block_until > time.time():
+            agent.complete("")
+        notes.append(user_profile.to_markdown())
         if count > STRONG_REMINDER_THRESHOLD:
             notes.append(f"档案在 {count} 次对话前更新，请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
         elif count > REMINDER_THRESHOLD:
             notes.append(f"档案在 {count} 次对话前更新，请确认用户档案是否过时。")
     return "\n\n".join(notes)
+
+
+@TOOLS.register(
+    "block_user",
+    "拉黑当前用户",
+    {"block_days": {"type": "number", "description": "拉黑天数，默认 7 天"}},
+    category=ON_CHAT,
+)
+async def _(agent: CloversAgent, event: Event, block_days: int = 7):
+    user_id = event.user_id
+    user_profile_json = USER_PROFILE / f"{user_id}.json"
+    block_t = min(max(block_days, 1), 30) * 86400
+    if user_profile_json.exists():
+        user_profile = UserProfile.model_validate_json(user_profile_json.read_text(encoding="utf-8"))
+        user_profile.block_until = block_t
+    else:
+        user_profile = UserProfile(nickname=event.nickname, block_until=block_t)
+    agent.complete("")
 
 
 @TOOLS.register(
@@ -64,7 +87,7 @@ async def _(agent: CloversAgent, event: Event, **kwargs):
                 "type": "object",
                 "properties": {
                     "id": {"type": "number", "description": "升星的记忆序号"},
-                    "content": {"type": "number", "description": "更新后的记忆，该记忆应融合"},
+                    "content": {"type": "string", "description": "更新后的记忆，该记忆应融合"},
                 },
             },
         },

@@ -398,7 +398,11 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             text_input = [f"{a}\n{ASSISTANT_TAG.format(b)}" for a, b in session.router_recorder]
             text_input.append(content)
             category = await self.router("\n".join(text_input), event, session.usage_counter)
-            if category_prompts := await self.activate_category(category, event):
+            try:
+                category_prompts = await self.activate_category(category, event)
+            except TurnComplete as e:
+                return e.data
+            if category_prompts:
                 session.unit_prompts.extend(category_prompts)
             self.scripts_enum.clear()
             self.references_enum.clear()

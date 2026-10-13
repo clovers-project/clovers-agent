@@ -18,6 +18,7 @@ class UserProfile(BaseModel):
     preferences: str = ""
     impression: str = ""
     memories: list[MemoryItem] = []
+    block_until: float = 0
 
     def to_markdown(self):
         self.memories.sort(key=lambda x: int(x["id"]))
