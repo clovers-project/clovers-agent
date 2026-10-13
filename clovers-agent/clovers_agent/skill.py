@@ -306,6 +306,10 @@ class AgentCore(SkillCore):
         register = self.register(name, desc, parameters, category, required)
         if skill_func := skill_wrapper(content, func):
             register(skill_func)
+            if category is None:
+                self._loaded_intros.add(name)
+            else:
+                self._loaded_categories.add(category)
         return category, name
 
     def load_skill(self, skill_path: Path):
@@ -330,8 +334,7 @@ class AgentCore(SkillCore):
         """
 
         if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
-            intro_k = self.load_skill_md(skill_md, None)
-            self._loaded_intros.add(intro_k[1])
+            self.load_skill_md(skill_md, None)
             return
         md_file = skill_path / "SKILL.md"
         if not (md_file.exists() and (skill_md := parse_skill(md_file))):
@@ -341,8 +344,7 @@ class AgentCore(SkillCore):
         references = [file for file in (skill_path / "references").rglob("*") if file.is_file()]
         scripts = [file for file in (skill_path / "scripts").rglob("*") if file.is_file()]
         if not other_mds and not scripts and not references:
-            intro_k = self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
-            self._loaded_intros.add(intro_k[1])
+            self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
             return
         category, desc, *_, content = skill_md
         # 加载的 skill 必须独占一个工具组
@@ -353,6 +355,7 @@ class AgentCore(SkillCore):
             for md in other_mds:
                 self.load_skill_md(md, category, getattr(module, md[0], None))
         except Exception:
+            self._loaded_categories.discard(category)
             self.remove_category(category)
             raise
         for script_path in scripts:
@@ -365,7 +368,6 @@ class AgentCore(SkillCore):
                 self.references_map[category] = {}
             path = category / reference_path.relative_to(skill_path)
             self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
-        self._loaded_categories.add(category)
 
     @property
     def skill_dirs(self):
