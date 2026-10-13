@@ -3,6 +3,7 @@ import json
 import base64
 from pathlib import Path
 
+import chardet
 import puremagic
 
 B64_PATTERN = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
@@ -41,3 +42,11 @@ def save_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def decode_bytes(btext: bytes | bytearray):
+    encoding = chardet.detect(btext)["encoding"]
+    try:
+        return btext.decode(encoding=encoding or "ascii")
+    except (UnicodeDecodeError, LookupError):
+        return "Encoding Error"

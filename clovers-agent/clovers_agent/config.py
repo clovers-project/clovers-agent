@@ -179,6 +179,7 @@ class ConstantConfig(BaseModel):
 - `interpreter` (string)：解释器名称，例如 `"python"`、`"bash"`、`"node"` 等。若脚本自身可执行，则不传入此参数。
 - `path` (string)：脚本路径。
 - `args` (array of strings)：传递给脚本的参数列表（每个参数作为一个独立字符串）。
+- `timeout` (number)：执行超时时间，默认为 120 秒。
 
 **说明**：
 - 该工具只能执行 Skill 的脚本文件，不能执行任意 shell 命令。

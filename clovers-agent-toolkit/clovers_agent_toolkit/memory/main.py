@@ -32,7 +32,7 @@ async def _(agent: CloversAgent, event: Event):
     else:
         user_profile = UserProfile.model_validate_json(user_profile_json.read_text(encoding="utf-8"))
         if user_profile.block_until > time.time():
-            agent.complete("")
+            agent.complete()
         notes.append(user_profile.to_markdown())
         if count > STRONG_REMINDER_THRESHOLD:
             notes.append(f"档案在 {count} 次对话前更新，请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
@@ -56,7 +56,7 @@ async def _(agent: CloversAgent, event: Event, block_days: int = 7):
         user_profile.block_until = block_t
     else:
         user_profile = UserProfile(nickname=event.nickname, block_until=block_t)
-    agent.complete("")
+    agent.complete()
 
 
 @TOOLS.register(

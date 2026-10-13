@@ -130,6 +130,8 @@ class Session:
         if "tools" not in self.payload:
             self.payload["tools"] = []
         self.payload["tools"].append(GET_IMAGE_BY_ID_INFO)
+        self.scripts_enum: list[str] = []
+        self.references_enum: list[str] = []
 
     def inactivate(self):
         # 按注入顺序删除
@@ -138,6 +140,8 @@ class Session:
         del self.api
         del self.payload
         del self.cursor
+        del self.scripts_enum
+        del self.references_enum
 
     @property
     def system_message(self) -> SystemMessage:

@@ -1,5 +1,4 @@
 import sys
-import locale
 import time
 import json
 import traceback
@@ -13,10 +12,10 @@ from clovers.logger import logger
 from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
-from .skill import SkillCore, Parameters
+from .skill import SkillCore, Parameters, invoker_wrapper
 from .session import Session
 from .embedding import SentenceTransformer
-from .utils import deep_add, save_json
+from .utils import deep_add, save_json, decode_bytes
 from typing import Protocol, Literal, TypedDict, Never, override
 from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
@@ -44,7 +43,7 @@ class Event(BaseEvent, Protocol):
 
 
 class TurnComplete(Exception):
-    def __init__(self, data: str) -> None:
+    def __init__(self, data: str | None) -> None:
         super().__init__()
         self.data = data
 
@@ -92,8 +91,6 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self._plugin_dirs = CONFIG.plugin_dirs
         self._skill_dirs = CONFIG.skill_dirs
         self.skill_parameters: Parameters[Literal["category"], BaseJSONSchemaType] = {"category": {"type": "string"}}
-        self.scripts_enum: list[str] = []
-        self.references_enum: list[str] = []
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
         # DEBUG
         self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
@@ -169,26 +166,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
         self.register(SKILL_MENU, SKILL_MENU_DESC, self.skill_parameters, BUILTIN_CATEGORY)(skill_menu)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
-        self.register(
-            EXECUTE_SCRIPT,
-            EXECUTE_SCRIPT_DESC,
-            {
-                "interpreter": {"type": "string"},
-                "path": {"type": "string", "enum": self.scripts_enum},
-                "args": {"type": "array", "items": {"type": "string"}},
-            },
-            BUILTIN_CATEGORY,
-            required=["path"],
-        )(execute_script)
-        self.register(
-            READ_REFERENCE,
-            READ_REFERENCE_DESC,
-            {"path": {"type": "string", "enum": self.references_enum}},
-            BUILTIN_CATEGORY,
-            required=["path"],
-        )(read_reference)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
+        self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
+        self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
         self.sync_menu()
 
     def sync_menu(self):
@@ -252,7 +233,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
         return self.sessions[session_id]
 
     @staticmethod
-    def complete(message: str) -> Never:
+    def complete(message: str | None = None) -> Never:
         raise TurnComplete(message)
 
     async def activate_category(self, name: str, event: Event) -> list[str] | None:
@@ -290,10 +271,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 if not content:
                     continue
                 return content
-            try:
-                messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
-            except TurnComplete as e:
-                return e.data
+            messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
             payload["messages"].append(message)
             payload["messages"].extend(messages)
         raise RuntimeError(f"Maximum tool call chain length exceeded")
@@ -312,6 +290,8 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             logger.info(f"[{self.name}][ROUTER] {category}")
             await self.intro_invoker[category](self, event)
             # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
+        except TurnComplete:
+            raise
         except Exception as e:
             logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
             category = await on_chat(self, event)
@@ -397,18 +377,14 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             text_input = [f"{a}\n{ASSISTANT_TAG.format(b)}" for a, b in session.router_recorder]
             text_input.append(content)
-            category = await self.router("\n".join(text_input), event, session.usage_counter)
             try:
-                category_prompts = await self.activate_category(category, event)
-            except TurnComplete as e:
-                return e.data
-            if category_prompts:
-                session.unit_prompts.extend(category_prompts)
-            self.scripts_enum.clear()
-            self.references_enum.clear()
-            try:
+                category = await self.router("\n".join(text_input), event, session.usage_counter)
+                if category_prompts := await self.activate_category(category, event):
+                    session.unit_prompts.extend(category_prompts)
                 session.activate()
                 result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
+            except TurnComplete as e:
+                result = e.data
             except Exception as e:
                 file = f"payload_{id(session.payload)} {datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
                 save_json(self.session_dir / session.session_id / file, session.payload)
@@ -416,9 +392,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 return
             finally:
                 session.inactivate()
-            session.last_active_time = timestamp
-            session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
-            save_json(self.recorder_file(session.session_id), session.recorder)
+            if result:
+                session.last_active_time = timestamp
+                session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
+                save_json(self.recorder_file(session.session_id), session.recorder)
             return result
 
     def update_usage(self, usage_counter: dict):
@@ -445,19 +422,6 @@ async def on_chat(agent: CloversAgent, event: Event):
     return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
 
 
-def skill_menu_select_tools(agent: CloversAgent, category: str):
-    tools = agent.select_tools(category).copy()
-    if scripts_map := agent.scripts_map.get(category):
-        existing = set(agent.scripts_enum)
-        agent.scripts_enum.extend(path for path in scripts_map if path not in existing)
-        tools.append(agent.manifest[EXECUTE_SCRIPT])
-    if references_map := agent.references_map.get(category):
-        existing = set(agent.references_enum)
-        agent.references_enum.extend(path for path in references_map if path not in existing)
-        tools.append(agent.manifest[READ_REFERENCE])
-    return tools
-
-
 async def skill_menu(agent: CloversAgent, event: Event, category: str):
     session = agent.current_session(event)
     if prompts := await agent.activate_category(category, event):
@@ -465,11 +429,54 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
     else:
         prompt = ""
     if "tools" not in session.payload:
-        session.payload["tools"] = [agent.manifest[SKILL_MENU], *skill_menu_select_tools(agent, category)]
+        session.payload["tools"] = [agent.manifest[SKILL_MENU], *agent.select_tools(category)]
     else:
         used = {tool["function"]["name"] for tool in session.payload["tools"]}
-        new_tools = skill_menu_select_tools(agent, category)
+        new_tools = agent.select_tools(category)
         session.payload["tools"].extend(x for x in new_tools if x["function"]["name"] not in used)
+
+    if scripts_map := agent.scripts_map.get(category):
+        if not session.scripts_enum:
+            session.payload["tools"].append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": EXECUTE_SCRIPT,
+                        "description": EXECUTE_SCRIPT_DESC,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "interpreter": {"type": "string"},
+                                "path": {"type": "string", "enum": session.scripts_enum},
+                                "args": {"type": "array", "items": {"type": "string"}},
+                                "timeout": {"type": "number"},
+                            },
+                            "required": ["path"],
+                        },
+                    },
+                }
+            )
+        existing = set(session.scripts_enum)
+        session.scripts_enum.extend(path for path in scripts_map if path not in existing)
+    if references_map := agent.references_map.get(category):
+        if not session.references_enum:
+            session.payload["tools"].append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": READ_REFERENCE,
+                        "description": READ_REFERENCE_DESC,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"path": {"type": "string", "enum": session.references_enum}},
+                            "required": ["path"],
+                        },
+                    },
+                }
+            )
+        existing = set(session.references_enum)
+        session.references_enum.extend(path for path in references_map if path not in existing)
+
     return prompt or f"Skills for '{category}' have been loaded."
 
 
@@ -517,21 +524,13 @@ async def execute_script(
         return f"ERROR: Permission denied – cannot execute script."
     except Exception as e:
         return f"ERROR: Unexpected error – {e}"
-    system_encoding = locale.getpreferredencoding(do_setlocale=False)
-    try:
-        out_text = stdout.decode(system_encoding, errors="replace")
-        err_text = stderr.decode(system_encoding, errors="replace")
-    except:
-        out_text = repr(stdout)
-        err_text = repr(stderr)
+    out_text = decode_bytes(stdout)
+    err_text = decode_bytes(stderr)
     return f"RETURN CODE: {process.returncode}\nOUT: {out_text}\nERR: {err_text}"
 
 
 async def read_reference(agent: CloversAgent, event: Event, path: str):
     file = Path(agent.references_map[path.split("/", 1)[0]][path])
-    for encoding in ["utf-8", None]:
-        try:
-            return file.read_text(encoding=encoding)
-        except UnicodeDecodeError:
-            continue
-    return "Encoding Error"
+    if not file.exists():
+        return f"ERROR: File '{path}' does not exist."
+    return decode_bytes(file.read_bytes())
