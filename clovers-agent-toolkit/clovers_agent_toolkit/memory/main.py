@@ -50,12 +50,13 @@ async def _(agent: CloversAgent, event: Event):
 async def _(agent: CloversAgent, event: Event, block_days: int = 7):
     user_id = event.user_id
     user_profile_json = USER_PROFILE / f"{user_id}.json"
-    block_t = min(max(block_days, 1), 30) * 86400
+    block_t = min(max(block_days, 1), 30) * 86400 + time.time()
     if user_profile_json.exists():
         user_profile = UserProfile.model_validate_json(user_profile_json.read_text(encoding="utf-8"))
         user_profile.block_until = block_t
     else:
         user_profile = UserProfile(nickname=event.nickname, block_until=block_t)
+    user_profile_json.write_text(user_profile.model_dump_json(indent=4), encoding="utf-8")
     return f"OK"
 
 
@@ -108,10 +109,10 @@ async def _(
     demote_memory_ids: list[int] | None = None,
 ):
     user_id = event.user_id
-    user_profile = USER_PROFILE / f"{user_id}.json"
+    user_profile_json = USER_PROFILE / f"{user_id}.json"
     USER_PROFILE.mkdir(parents=True, exist_ok=True)
-    if not user_profile.exists():
-        profile = UserProfile(
+    if not user_profile_json.exists():
+        user_profile = UserProfile(
             nickname=event.nickname,
             address_as=address_as,
             tags=tags,
@@ -120,17 +121,17 @@ async def _(
             memories=[{"id": i, "content": c, "star": 1} for i, c in enumerate(new_memories, 1)] if new_memories else [],
         )
     else:
-        profile = UserProfile.model_validate_json(user_profile.read_text(encoding="utf-8"))
-        profile.nickname = event.nickname
+        user_profile = UserProfile.model_validate_json(user_profile_json.read_text(encoding="utf-8"))
+        user_profile.nickname = event.nickname
         if address_as:
-            profile.address_as = address_as
+            user_profile.address_as = address_as
         if tags:
-            profile.tags = tags
+            user_profile.tags = tags
         if preferences:
-            profile.preferences = preferences
+            user_profile.preferences = preferences
         if impression:
-            profile.impression = impression
-        old_memories: dict[int, MemoryItemTuple] = {int(x["id"]): (x["content"], x["star"]) for x in profile.memories}
+            user_profile.impression = impression
+        old_memories: dict[int, MemoryItemTuple] = {int(x["id"]): (x["content"], x["star"]) for x in user_profile.memories}
         memories: list[MemoryItemTuple] = []
         if promote_memories:
             for x in promote_memories:
@@ -159,7 +160,7 @@ async def _(
         memories.extend(old_memories.values())
         dstar = 1 if len(memories) >= PROFILE_MEMORY_SIZE else 0
         memories = sorted((x for x in memories if x[1] >= dstar), key=lambda x: x[1], reverse=True)
-        profile.memories.clear()
-        profile.memories.extend({"id": i, "content": c, "star": star} for i, (c, star) in enumerate(memories, 1))
-    user_profile.write_text(profile.model_dump_json(indent=4), encoding="utf-8")
-    return profile.to_markdown()
+        user_profile.memories.clear()
+        user_profile.memories.extend({"id": i, "content": c, "star": star} for i, (c, star) in enumerate(memories, 1))
+    user_profile_json.write_text(user_profile.model_dump_json(indent=4), encoding="utf-8")
+    return user_profile.to_markdown()

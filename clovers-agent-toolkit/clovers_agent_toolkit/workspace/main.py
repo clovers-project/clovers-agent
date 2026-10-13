@@ -9,7 +9,6 @@ from ..toolkit import TOOLS, CONFIG
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
 DOCKER_IMAGE = CONFIG.docker_image
-README = WORKSPACE / "README.md"
 BUILTIN_TOOLS = ["ls", "read_files", "write_file"]
 
 
@@ -17,9 +16,11 @@ BUILTIN_TOOLS = ["ls", "read_files", "write_file"]
 async def _(agent: CloversAgent, event: Event):
     if not WORKSPACE.exists():
         WORKSPACE.mkdir(parents=True, exist_ok=True)
-    if not README.exists():
-        README.write_text("Clovers Agent Workspace")
     session = agent.current_session(event)
+    readme = WORKSPACE / session.session_id / "README.md"
+    prompts = ["# workspace 已初始化\n"]
+    if readme.exists():
+        prompts.append(decode_bytes(readme.read_bytes()))
     assert "tools" in session.payload
     if CONFIG.use_shell:
         try:
@@ -33,11 +34,13 @@ async def _(agent: CloversAgent, event: Event):
             await shell.activate()
             session.extra["shell"].workdir = "/workspace"
             session.payload["tools"].append(agent.manifest["execute_command"])
-            return f"workspace 已初始化，当前系统：Debian\n当前工作目录: /workspace"
+            prompts.append(f"当前系统：Debian\n当前工作目录: /workspace")
+            return "\n".join(prompts)
         except Exception as e:
             logger.error(e)
     session.payload["tools"].extend(agent.manifest[x] for x in BUILTIN_TOOLS)
-    return f"workspace 已初始化\n当前工作目录: /workspace"
+    prompts.append(f"当前工作目录: /workspace")
+    return "\n".join(prompts)
 
 
 def format_path(path: str):
