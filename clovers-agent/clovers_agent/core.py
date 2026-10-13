@@ -107,6 +107,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
         self.load_from_list(self._plugins)
         self.load_from_dirs(self._plugin_dirs)
+        self.reload_skills()
         self.sync_menu()
 
     @property
