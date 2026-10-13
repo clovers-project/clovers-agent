@@ -1,13 +1,17 @@
+from __future__ import annotations
 import asyncio
 from itertools import count
 from collections import deque
 from .api import OpenAIAPI
-from .embedding import SentenceTransformer, TopicDecoupler
-from collections.abc import Iterable
-from .typing import Payload, Message, AssistantMessage, SystemMessage
-from .typing.message import MultimodalContent, TextUserMessage
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+from .typing import Payload, Message, AssistantMessage, SystemMessage
+from .typing.message import MultimodalContent, TextUserMessage
+
+if TYPE_CHECKING:
+    from .embedding import SentenceTransformer
 
 
 def extract_plain_text(content: str | MultimodalContent) -> str:
@@ -49,6 +53,8 @@ class Session:
         self.unimportant = False
         self.unimportant_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.unimportant_size)
         # 主题分离
+        from .embedding import TopicDecoupler
+
         self.decoupler = TopicDecoupler(sentence_model, SESSION_CONFIG.decoupler_alpha)
         self.decouple_length = SESSION_CONFIG.decouple_length
 

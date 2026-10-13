@@ -5,11 +5,13 @@ from pathlib import Path
 from functools import wraps
 from clovers.logger import logger
 from collections.abc import Callable
-from typing import overload, final, Concatenate
+from typing import overload, final, Concatenate, TYPE_CHECKING
 from clovers.base import Coro
-from .core import CloversAgent, Event
 from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
+
+if TYPE_CHECKING:
+    from .core import CloversAgent, Event
 
 type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], str | Coro[str]]
 type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], Coro[str]]

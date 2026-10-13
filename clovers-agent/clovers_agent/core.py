@@ -14,12 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .skill import SkillCore, AgentCore, invoker_wrapper
 from .session import Session
-from .embedding import SentenceTransformer
 from .utils import deep_add, save_json, decode_bytes
-from typing import Protocol, TypedDict, Never, override
-from .typing import ToolMessage, ToolCallInfo, Payload
-from .typing.message import MultimodalContent
-from .typing.json_schema import BaseJSONSchemaType
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     SYSTEM_TAG,
@@ -36,6 +31,10 @@ from .constants import (
     READ_REFERENCE,
     READ_REFERENCE_DESC,
 )
+from typing import Protocol, TypedDict, Never, override
+from .typing import ToolMessage, ToolCallInfo, Payload
+from .typing.message import MultimodalContent
+from .typing.json_schema import BaseJSONSchemaType
 
 
 class Event(BaseEvent, Protocol):
@@ -65,6 +64,8 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         # 核心
         self._api = self.creat_api(CONFIG.api)
         self._apis = {name: self.creat_api(api_config) for name, api_config in CONFIG.apis.items()}
+        from .embedding import SentenceTransformer
+
         self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
         self.scheduler = scheduler
         # 文件
