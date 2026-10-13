@@ -12,7 +12,7 @@ from clovers.logger import logger
 from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
-from .skill import SkillCore, Parameters, invoker_wrapper
+from .skill import SkillCore, AgentCore, Parameters, invoker_wrapper
 from .session import Session
 from .embedding import SentenceTransformer
 from .utils import deep_add, save_json, decode_bytes
@@ -54,7 +54,7 @@ class ToolCallError(TypedDict):
     traceback: str
 
 
-class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
+class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
     """OpenAI API"""
 
     def __init__(self, name: str, async_client: httpx.AsyncClient, scheduler: AsyncIOScheduler) -> None:
@@ -189,8 +189,10 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 name_set.add(name)
             logger.info(f'[{self.name}][SKILLS] "{category or name}" loaded')
         self.skills = *((category, None) for category in category_set), *((None, name) for name in name_set)
-        self.skill_parameters["category"]["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.categories.items())
-        self.skill_parameters["category"]["enum"] = list(self.categories.keys())
+        self.skill_parameters["category"]["description"] = "\n".join(
+            f"{category}: {desc}" for category, desc in self.category_desc_map.items()
+        )
+        self.skill_parameters["category"]["enum"] = list(self.category_desc_map.keys())
 
     def daily_tasks(self):
         timestamp = time.time()
@@ -288,7 +290,7 @@ class CloversAgent(SkillCore, ModuleLoader[SkillCore]):
                 raise ValueError(f"message must contain tool_calls, but got {message}")
             category = message["tool_calls"][0]["function"]["name"]
             logger.info(f"[{self.name}][ROUTER] {category}")
-            await self.intro_invoker[category](self, event)
+            await self.invoker[category](self, event)
             # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         except TurnComplete:
             raise

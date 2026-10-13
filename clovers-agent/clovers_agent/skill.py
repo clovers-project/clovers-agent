@@ -2,7 +2,6 @@ from __future__ import annotations
 import importlib.util
 import frontmatter
 from pathlib import Path
-from itertools import count
 from functools import wraps
 from clovers.logger import logger
 from collections.abc import Callable
@@ -22,17 +21,14 @@ type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 
 class SkillCore:
     def __init__(self) -> None:
-        self.category_id = count()
         self.intro_tools: list[FunctionToolInfo] = []
-        self.intro_invoker: dict[str, WrappedToolFunction] = {}
         self.manifest: dict[str, FunctionToolInfo] = {}
         self.invoker: dict[str, WrappedToolFunction] = {}
-        self.__map_category_to_id: dict[str, int] = {}
-        self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
-        self.categories: dict[str, str] = {}
+        # self.__map_category_to_id: dict[str, int] = {}
+        # self.__map_id_to_tools: dict[int, list[FunctionToolInfo]] = {}
+        self.category_tools_map: dict[str, list[FunctionToolInfo]] = {}
+        self.category_desc_map: dict[str, str] = {}
         self.category_hooks: dict[str, list[ToolFunction]] = {}
-        self.scripts_map: dict[str, dict[str, str]] = {}
-        self.references_map: dict[str, dict[str, str]] = {}
 
     @final
     def select_tools(self, category: str) -> list[FunctionToolInfo]:
@@ -43,10 +39,9 @@ class SkillCore:
         Returns:
             list[FunctionToolInfo]: 工具列表。
         """
-
-        if category not in self.__map_category_to_id:
+        if category not in self.category_tools_map:
             return []
-        return self.__map_id_to_tools[self.__map_category_to_id[category]]
+        return self.category_tools_map[category]
 
     def on_category(self, category: str):
         """添加工具组触发时钩子
@@ -77,9 +72,9 @@ class SkillCore:
             Callable: 用于注册分类钩子的装饰器。
         """
 
-        if category in self.categories:
+        if category in self.category_desc_map:
             raise ValueError(f"Category {category} already exists")
-        self.categories[category] = description
+        self.category_desc_map[category] = description
         return self.on_category(category)
 
     def intro_decorator(self, info: FunctionToolInfo):
@@ -96,7 +91,7 @@ class SkillCore:
             name = info["function"]["name"]
             self.intro_tools.append(info)
             self.manifest[name] = info
-            self.intro_invoker[name] = invoker_wrapper(name, func)
+            self.invoker[name] = invoker_wrapper(name, func)
             return func
 
         return decorator
@@ -114,11 +109,9 @@ class SkillCore:
 
         def decorator(func: ToolFunction):
             name = info["function"]["name"]
-            category_id = self.__map_category_to_id[category] if category in self.__map_category_to_id else next(self.category_id)
-            self.__map_category_to_id[category] = category_id
-            if category_id not in self.__map_id_to_tools:
-                self.__map_id_to_tools[category_id] = []
-            self.__map_id_to_tools[category_id].append(info)
+            if category not in self.category_tools_map:
+                self.category_tools_map[category] = []
+            self.category_tools_map[category].append(info)
             self.manifest[name] = info
             self.invoker[name] = invoker_wrapper(name, func)
             return func
@@ -162,6 +155,38 @@ class SkillCore:
         else:
             return self.category_decorator(info, category)
 
+    def _remove_intro(self, name: str):
+        self.intro_tools.remove(self.manifest[name])
+        del self.manifest[name]
+        del self.invoker[name]
+
+    def _remove_category(self, category: str):
+        if not category in self.category_tools_map:
+            return
+        tools = self.category_tools_map[category]
+        for info in tools:
+            name = info["function"]["name"]
+            del self.manifest[name]
+            del self.invoker[name]
+        del self.category_tools_map[category]
+        del self.category_desc_map[category]
+        if category in self.category_hooks:
+            del self.category_hooks[category]
+
+    def _remove_single(self, category: str, name: str):
+        if not category in self.category_tools_map:
+            return
+        tools = self.category_tools_map[category]
+        tools.remove(self.manifest[name])
+        del self.manifest[name]
+        del self.invoker[name]
+        # if tools:
+        #     return
+        # del self.category_tools_map[category]
+        # del self.category_desc_map[category]
+        # if category in self.category_hooks:
+        #     del self.category_hooks[category]
+
     def remove(self, category: str | None, name: str | None):
         """移除已注册的工具。
 
@@ -169,78 +194,51 @@ class SkillCore:
             category (str | None): 要操作的工具组名称。如果为 None 则为初始化工具。。
             name (str | None): 要移除的工具名称。如果为 None 则表示移除所有工具。
         """
-
-        if name is None:
-            if category is None:
+        match category, name:
+            case None, None:
                 raise ValueError("Can'not remove all intro tools")
-            tools = self.select_tools(category)
-            if not tools:
-                return
-            for info in tools:
-                _name = info["function"]["name"]
-                del self.manifest[_name]
-                del self.invoker[_name]
-            tools.clear()
-            del self.categories[category]
-            if category in self.category_hooks:
-                del self.category_hooks[category]
-        elif name not in self.invoker:
-            return
-        elif category is None:
-            self.intro_tools.remove(self.manifest[name])
-            del self.manifest[name]
-            del self.invoker[name]
-        else:
-            tools = self.select_tools(category)
-            tools.remove(self.manifest[name])
-            del self.manifest[name]
-            del self.invoker[name]
-            if self.select_tools(category):
-                return
-            del self.categories[category]
-            if category in self.category_hooks:
-                del self.category_hooks[category]
-            # 不清除 category_id
+            case None, _:
+                self._remove_intro(name)
+            case _, None:
+                self._remove_category(category)
+            case _, _:
+                self._remove_single(category, name)
+
+    def validate_manifest(self):
+        """验证工具清单的完整性。
+        可选的工具信息必须存在于清单中。
+        """
+        manifest_co = {id(info) for info in self.manifest.values()}
+        select_co = {id(info) for infos in self.category_tools_map.values() for info in infos}
+        select_co.update(id(info) for info in self.intro_tools)
+        if select_co.difference(manifest_co):
+            raise ValueError("Manifest mismatch")
 
     def merge(self, others: "SkillCore"):
         """从其他 SkillCore 加载。
 
         Args:
             others (SkillCore): 加载的 SkillCore 实例。
-
-        Returns:
-            set[str] | None: 若存在冲突，则返回冲突的工具/工具组名称。
         """
-
-        conflict = (others.invoker.keys() & self.invoker.keys()) | (others.category_hooks.keys() & self.category_hooks.keys())
-        if conflict:
-            return conflict
+        others.validate_manifest()
+        manifest_conflict = others.manifest.keys() & self.manifest.keys()
+        if manifest_conflict:
+            raise ValueError(f"Manifest conflict: {manifest_conflict}")
+        category_conflict = others.category_tools_map.keys() & self.category_tools_map.keys()
+        if category_conflict:
+            raise ValueError(f"Category conflict: {category_conflict}")
+        # 这些是没有冲突的，可以直接添加
         self.intro_tools.extend(others.intro_tools)
-        self.intro_invoker.update(others.intro_invoker)
-        self.manifest.update(others.manifest)
-        for category, hooks in others.category_hooks.items():
-            if category in self.category_hooks:
-                self.category_hooks[category].extend(hooks)
-            else:
-                self.category_hooks[category] = hooks
+        self.manifest.update(others.manifest)  # 考虑到 others 的 invoker 可能动态添加工具，这里全部加载
         self.invoker.update(others.invoker)
-        for category, category_id in others.__map_category_to_id.items():
-            if category in self.__map_category_to_id:
-                self.__map_id_to_tools[self.__map_category_to_id[category]].extend(others.__map_id_to_tools[category_id])
+        self.category_tools_map.update(others.category_tools_map)
+        self.category_hooks.update(others.category_hooks)
+        # others 不可以创建一个已有的类，但是可以向一个已有的类添加工具。
+        for category, tools in others.category_tools_map.items():
+            if category in self.category_tools_map:
+                self.category_tools_map[category].extend(tools)
             else:
-                new_category_id = next(self.category_id)
-                self.__map_id_to_tools[new_category_id] = []
-                self.__map_id_to_tools[new_category_id].extend(others.__map_id_to_tools[category_id])
-                self.__map_category_to_id[category] = new_category_id
-        self.categories.update(others.categories)
-        for category in others.references_map:
-            if category not in self.references_map:
-                self.references_map[category] = {}
-            self.references_map[category].update(others.references_map[category])
-        for category in others.scripts_map:
-            if category not in self.scripts_map:
-                self.scripts_map[category] = {}
-            self.scripts_map[category].update(others.scripts_map[category])
+                self.category_tools_map[category] = tools
 
     def detach(self, others: "SkillCore"):
         """移除从其他 SkillCore 加载的内容。
@@ -256,7 +254,7 @@ class SkillCore:
         for category, hooks in others.category_hooks.items():
             for hook in hooks:
                 self.category_hooks[category].remove(hook)
-        for category in others.categories:
+        for category in others.category_desc_map:
             tools = self.select_tools(category)
             for info in others.select_tools(category):
                 name = info["function"]["name"]
@@ -266,7 +264,7 @@ class SkillCore:
             tools = self.select_tools(category)
             if tools:
                 continue
-            del self.categories[category]
+            del self.category_desc_map[category]
             if category in self.category_hooks:
                 del self.category_hooks[category]
         for category in others.references_map:
@@ -279,6 +277,14 @@ class SkillCore:
                 del self.scripts_map[category][key]
             if not self.scripts_map[category]:
                 del self.scripts_map[category]
+
+        return category, None
+
+
+class AgentCore(SkillCore):
+    def __init__(self) -> None:
+        self.scripts_map: dict[str, dict[str, str]] = {}
+        self.references_map: dict[str, dict[str, str]] = {}
 
     def load_skill_md(self, skill: SkillMD, category: str | None = None, func: ToolFunction | None = None):
         """从 Skill Markdown 数据中注册工具。
@@ -352,7 +358,6 @@ class SkillCore:
                 self.references_map[category] = {}
             path = category / reference_path.relative_to(skill_path)
             self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
-        return category, None
 
 
 def load_module_from_path(module_name: str, file: Path):
