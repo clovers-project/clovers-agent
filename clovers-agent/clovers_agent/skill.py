@@ -278,6 +278,7 @@ class SkillCore:
 
 
 class AgentCore(SkillCore):
+    name: str
 
     def __init__(self, skill_dirs: list[str]) -> None:
         super().__init__()
@@ -312,7 +313,7 @@ class AgentCore(SkillCore):
                 self._loaded_intros.add(name)
             else:
                 self._loaded_categories.add(category)
-        return category, name
+            return category, name
 
     def load_skill(self, skill_path: Path):
         """从指定路径加载 Skill。
@@ -336,7 +337,9 @@ class AgentCore(SkillCore):
         """
 
         if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
-            self.load_skill_md(skill_md, None)
+            intro_k = self.load_skill_md(skill_md, None)
+            if intro_k:
+                logger.info(f'[{self.name}][LOAD SKILL] "Intro - {intro_k[1]}" loaded')
             return
         md_file = skill_path / "SKILL.md"
         if not (md_file.exists() and (skill_md := parse_skill(md_file))):
@@ -346,7 +349,9 @@ class AgentCore(SkillCore):
         references = [file for file in (skill_path / "references").rglob("*") if file.is_file()]
         scripts = [file for file in (skill_path / "scripts").rglob("*") if file.is_file()]
         if not other_mds and not scripts and not references:
-            self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
+            intro_k = self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
+            if intro_k:
+                logger.info(f'[{self.name}][LOAD SKILL] "Intro - {intro_k[1]}" loaded')
             return
         category, desc, *_, content = skill_md
         # 加载的 skill 必须独占一个工具组
@@ -370,6 +375,7 @@ class AgentCore(SkillCore):
                 self.references_map[category] = {}
             path = category / reference_path.relative_to(skill_path)
             self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
+        logger.info(f'[{self.name}][LOAD SKILL] "Category - {category}" loaded')
 
     @property
     def skill_dirs(self):

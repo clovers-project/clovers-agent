@@ -6,7 +6,7 @@ from .api import OpenAIAPI
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import Never, TYPE_CHECKING
 from .typing import Payload, Message, AssistantMessage, SystemMessage
 from .typing.message import MultimodalContent, TextUserMessage
 
@@ -23,6 +23,12 @@ def char_count(content: str | MultimodalContent):
 
 
 type Record = tuple[TextUserMessage, AssistantMessage, float]
+
+
+class SessionComplete(Exception):
+    def __init__(self, data: str | None) -> None:
+        super().__init__()
+        self.data = data
 
 
 class Session:
@@ -49,6 +55,8 @@ class Session:
         self.extra = {}
         self.usage_counter = {}
         self.unit_prompts: list[str] = []
+        self.scripts_enum: list[str] = []
+        self.references_enum: list[str] = []
         # 不重要信息
         self.unimportant = False
         self.unimportant_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.unimportant_size)
@@ -136,8 +144,12 @@ class Session:
         if "tools" not in self.payload:
             self.payload["tools"] = []
         self.payload["tools"].append(GET_IMAGE_BY_ID_INFO)
-        self.scripts_enum: list[str] = []
-        self.references_enum: list[str] = []
+
+    def complete(self, message: str | None = None) -> Never:
+        self.api = None  # type: ignore
+        self.payload = None  # type: ignore
+        self.cursor = 0
+        raise SessionComplete(message)
 
     def inactivate(self):
         # 按注入顺序删除
@@ -146,8 +158,8 @@ class Session:
         del self.api
         del self.payload
         del self.cursor
-        del self.scripts_enum
-        del self.references_enum
+        self.scripts_enum.clear()
+        self.references_enum.clear()
 
     @property
     def system_message(self) -> SystemMessage:

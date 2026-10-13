@@ -13,7 +13,7 @@ from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .skill import SkillCore, AgentCore, invoker_wrapper
-from .session import Session
+from .session import Session, SessionComplete
 from .utils import deep_add, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
@@ -31,7 +31,7 @@ from .constants import (
     READ_REFERENCE,
     READ_REFERENCE_DESC,
 )
-from typing import Protocol, TypedDict, Never, override
+from typing import Protocol, TypedDict, override
 from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
@@ -39,12 +39,6 @@ from .typing.json_schema import BaseJSONSchemaType
 
 class Event(BaseEvent, Protocol):
     extra_context: list[str] = []
-
-
-class TurnComplete(Exception):
-    def __init__(self, data: str | None) -> None:
-        super().__init__()
-        self.data = data
 
 
 class ToolCallError(TypedDict):
@@ -139,9 +133,9 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         try:
             self.merge(tools)
         except Exception as e:
-            logger.error(f'[{self.name}] "{package}" load failed: {e}')
+            logger.error(f'[{self.name}][LOAD TOOLS] "{package}" load failed: {e}')
             return
-        logger.info(f'[{self.name}][TOOLS] "{package}" loaded')
+        logger.info(f'[{self.name}][LOAD TOOLS] "{package}" loaded')
 
     @staticmethod
     def load_prompt(md: Path, default_prompt: str):
@@ -221,10 +215,6 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
                     logger.error(f"[{self.name}][RECORDER_LOAD] {e}")
         return self.sessions[session_id]
 
-    @staticmethod
-    def complete(message: str | None = None) -> Never:
-        raise TurnComplete(message)
-
     async def activate_category(self, name: str, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
         if hooks:
@@ -245,7 +235,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
                 return {"role": "tool", "tool_call_id": call_info["id"], "content": f'工具 "{name}" 不存在。'}
             content = await self.invoker[name](self, event, **kwargs)
             return {"role": "tool", "tool_call_id": call_info["id"], "content": content}
-        except TurnComplete:
+        except SessionComplete:
             raise
         except Exception as e:
             logger.exception(e)
@@ -279,7 +269,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
             logger.info(f"[{self.name}][ROUTER] {category}")
             await self.invoker[category](self, event)
             # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
-        except TurnComplete:
+        except SessionComplete:
             raise
         except Exception as e:
             logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
@@ -367,12 +357,12 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
             text_input = [f"{a}\n{ASSISTANT_TAG.format(b)}" for a, b in session.router_recorder]
             text_input.append(content)
             try:
-                category = await self.router("\n".join(text_input), event, session.usage_counter)
-                if category_prompts := await self.activate_category(category, event):
-                    session.unit_prompts.extend(category_prompts)
+                intro = await self.router("\n".join(text_input), event, session.usage_counter)
+                if intro_prompts := await self.activate_category(intro, event):
+                    session.unit_prompts.extend(intro_prompts)
                 session.activate()
                 result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
-            except TurnComplete as e:
+            except SessionComplete as e:
                 result = e.data
             except Exception as e:
                 file = f"payload_{id(session.payload)} {datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
