@@ -119,5 +119,13 @@ async def _(agent: CloversAgent, event: Event, image_url: str):
     if not image_url.startswith("http"):
         image_url = f"https://{image_url}"
     session = agent.current_session(event)
-    session.current_input.append({"type": "image_url", "image_url": {"url": image_url}})
+    b64url = await session.api.download_url(image_url)
+    if not b64url:
+        return "图片下载失败"
+    if not b64url.startswith("data:image/"):
+        return "图片格式错误"
+    mime = b64url[11 : b64url.find(";")]
+    if mime not in ("png", "jpeg", "webp"):
+        return "图片格式错误"
+    session.current_input.append({"type": "image_url", "image_url": {"url": b64url}})
     return "OK"
