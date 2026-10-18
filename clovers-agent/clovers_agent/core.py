@@ -292,6 +292,8 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
             session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
             if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
                 return
+            if session.execute_lock.locked() or session.wait_lock.locked():
+                return
             async with session.execute_lock, session.wait_lock:
                 content = "\n".join(x for x, _ in session.silence_recorder)
                 try:
