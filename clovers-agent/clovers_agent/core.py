@@ -28,8 +28,9 @@ from .constants import (
     BUILTIN_CATEGORY,
     GET_IMAGE_BY_ID_INFO,
     EXECUTE_SCRIPT,
+    EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
+    EXECUTE_SCRIPT_MAX_TIMEOUT,
     EXECUTE_SCRIPT_DESC,
-    EXECUTE_SCRIPT_TIMEOUT,
     EXECUTE_SCRIPT_MAX_TAIL_LEN,
     READ_REFERENCE,
     READ_REFERENCE_DESC,
@@ -471,25 +472,28 @@ async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
 
 
 async def cleanup_process(process: asyncio.subprocess.Process):
+    if process.returncode is not None:
+        return
     process.terminate()
     try:
         await asyncio.wait_for(process.wait(), timeout=5)
     except asyncio.TimeoutError:
         with contextlib.suppress(Exception):
             process.kill()
-            await process.wait()
+            await asyncio.wait_for(process.wait(), timeout=5)
 
 
 async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
     maxlen = tail_length + 2
     buffer = deque[str](maxlen=maxlen)
     async for line in reader:
-        buffer.append(decode_bytes(line.rstrip().rsplit(b"\r", 1)[-1]))
+        buffer.extend(decode_bytes(line.rstrip().rsplit(b"\r", 1)[-1]))
+        buffer.append("\n")
     if len(buffer) == maxlen:
         buffer.popleft()
         buffer.popleft()
         buffer.popleft()
-        buffer.appendleft("...")
+        buffer.extendleft("...")
     return "".join(buffer)
 
 
@@ -499,7 +503,7 @@ async def execute_script(
     interpreter: str = "",
     path: str = "",
     args: list[str] | None = None,
-    timeout: int = 120,
+    timeout: int = EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
 ):
     if not path:
         return "Error: path is missing."
@@ -514,22 +518,30 @@ async def execute_script(
         cmd.extend(args)
     try:
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        tasks = (
-            decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
-            decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
-            process.wait(),
-        )
-        out_text, err_text, returncode = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
-    except asyncio.TimeoutError:
-        asyncio.create_task(cleanup_process(process))
-        return f"ERROR: Script execution timed out after {timeout} seconds."
     except FileNotFoundError:
         return f"ERROR: Interpreter '{interpreter}' not found."
     except PermissionError:
         return f"ERROR: Permission denied – cannot execute script."
     except Exception as e:
         return f"ERROR: Unexpected error – {e}"
-    return f"RETURN CODE: {returncode}\nOUT: {out_text}\nERR: {err_text}"
+    try:
+        tasks = (
+            decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
+            decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
+            process.wait(),
+        )
+        if not isinstance(timeout, int):
+            timeout = EXECUTE_SCRIPT_DEFAULT_TIMEOUT
+        else:
+            timeout = min(timeout, EXECUTE_SCRIPT_MAX_TIMEOUT)
+        out_text, err_text, returncode = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
+        return f"RETURN CODE: {returncode}\nOUT: {out_text}\nERR: {err_text}"
+    except asyncio.TimeoutError:
+        await cleanup_process(process)
+        return f"ERROR: Script execution timed out after {timeout} seconds."
+    except Exception as e:
+        await cleanup_process(process)
+        return f"ERROR: Unexpected error – {e}"
 
 
 async def read_reference(agent: CloversAgent, event: Event, path: str):

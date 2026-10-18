@@ -85,4 +85,4 @@ def decode_bytes(btext: bytes | bytearray):
     try:
         return btext.decode(encoding=encoding or "ascii")
     except (UnicodeDecodeError, LookupError):
-        return "Encoding Error"
+        return ""

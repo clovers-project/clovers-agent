@@ -171,7 +171,10 @@ class ConstantConfig(BaseModel):
 请现在开始分析图像并生成描述。
 """
     EXECUTE_SCRIPT: str = "execute_script"
-    EXECUTE_SCRIPT_DESC: str = """\
+    EXECUTE_SCRIPT_DEFAULT_TIMEOUT: int = 120
+    EXECUTE_SCRIPT_MAX_TIMEOUT: int = 1800
+    EXECUTE_SCRIPT_MAX_TAIL_LEN: int = 1600
+    EXECUTE_SCRIPT_DESC: str = f"""\
 执行一个脚本文件，可指定解释器或直接执行。
 
 **参数**：
@@ -182,14 +185,12 @@ class ConstantConfig(BaseModel):
 
 **说明**：
 - 该工具只能执行 Skill 的脚本文件，不能执行任意 shell 命令。
-- 执行超时默认为 120 秒，超时后会终止进程。
+- 执行超时默认为 {EXECUTE_SCRIPT_DEFAULT_TIMEOUT} 秒，超时后会终止进程。
 
 **示例**：
 - 执行 Python 脚本：`interpreter="python"`，`args=["--verbose", "data.txt"]`
 - 执行可直接运行的脚本：`interpreter="./"`，`args=["--help"]`
 """
-    EXECUTE_SCRIPT_TIMEOUT: int = 1800
-    EXECUTE_SCRIPT_MAX_TAIL_LEN: int = 1600
     READ_REFERENCE: str = "read_reference"
     READ_REFERENCE_DESC: str = """\
 读取参考资料。
