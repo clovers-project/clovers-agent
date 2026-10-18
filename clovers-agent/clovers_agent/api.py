@@ -65,16 +65,24 @@ class OpenAIAPI:
                 await asyncio.sleep(delay)
         raise RuntimeError("API retries exhausted")
 
-    async def download_url(self, url: str):
+    async def download_url(
+        self,
+        url: str,
+        allowed_subtype: tuple[str, ...] = ("png", "jpeg", "webp", "gif"),
+        max_size: int = 1024 * 1024 * 10,
+    ):
         if not url.startswith("http"):
             return url
         try:
             resp = await self.async_client.get(url, timeout=60)
             resp.raise_for_status()
-            return data_url(resp.content)
         except Exception as e:
             logger.exception(e)
             return None
+        data = resp.content
+        if len(data) > max_size:
+            return None
+        return data_url(resp.content, allowed_subtype)
 
 
 class HybridOpenAIAPI(OpenAIAPI):
@@ -91,21 +99,18 @@ class HybridOpenAIAPI(OpenAIAPI):
         if isinstance(content := message["content"], str):
             return await super().call_api(payload, usage_counter)
         texts = []
-        has_image = False
+        images = []
         for seg in content:
             match seg["type"]:
                 case "text":
-                    texts.append(seg["text"])
+                    texts.append(seg)
                 case "image_url":
-                    has_image = True
-        contents = []
-        if has_image and (desc := await self.call_vision(content, usage_counter)):
-            contents.append(VISION_TAG.format(desc))
-            contents.append("\n")
-        contents.append("".join(texts))
-        message["content"] = "".join(contents)  # type: ignore
+                    images.append(seg)
+        if images and (desc := await self.call_vision(images, usage_counter)):
+            content.clear()
+            content.extend([{"type": "text", "text": VISION_TAG.format(desc)}])
+            content.extend(texts)
         result = await super().call_api(payload, usage_counter)
-        message["content"] = content  # type: ignore 临时用一下 payload
         return result
 
     async def call_vision(self, content: MultimodalContent, usage_counter: dict):
