@@ -5,7 +5,6 @@ from clovers.logger import logger
 from clovers_client import Event as EventProtocol
 from clovers_client.result import SegmentedResult, SegmentedMessage
 from clovers_apscheduler import scheduler
-from typing import 
 from .core import Event, CloversAgent
 from .config import CHECK
 
