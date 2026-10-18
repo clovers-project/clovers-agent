@@ -514,8 +514,12 @@ async def execute_script(
         cmd.extend(args)
     try:
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        tasks = (decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN), decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN))  # type: ignore
-        out_text, err_text = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
+        tasks = (
+            decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
+            decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
+            process.wait(),
+        )
+        out_text, err_text, returncode = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
     except asyncio.TimeoutError:
         asyncio.create_task(cleanup_process(process))
         return f"ERROR: Script execution timed out after {timeout} seconds."
@@ -525,7 +529,7 @@ async def execute_script(
         return f"ERROR: Permission denied – cannot execute script."
     except Exception as e:
         return f"ERROR: Unexpected error – {e}"
-    return f"RETURN CODE: {process.returncode}\nOUT: {out_text}\nERR: {err_text}"
+    return f"RETURN CODE: {returncode}\nOUT: {out_text}\nERR: {err_text}"
 
 
 async def read_reference(agent: CloversAgent, event: Event, path: str):
