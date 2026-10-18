@@ -367,7 +367,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
                 return e.data
             except Exception as e:
                 session.inactivate()
-                file = f"payload_{id(session.payload)} {datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+                file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
                 save_json(self.session_dir / session.session_id / file, session.payload)
                 logger.exception(e)
                 return
