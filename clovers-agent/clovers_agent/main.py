@@ -8,9 +8,9 @@ from clovers_apscheduler import scheduler
 from .core import Event, CloversAgent
 from .config import CHECK
 
+AGENT = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), scheduler)
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
-AGENT = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), scheduler)
 PLUGIN.shutdown(AGENT.async_client.aclose)
 
 

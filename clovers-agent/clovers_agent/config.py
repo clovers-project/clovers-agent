@@ -133,26 +133,26 @@ Please begin your analysis now.
 
 class ConstantConfig(BaseModel):
     # 用户嵌入系统提示词
-    system_tag: str = "<system>\n{}\n</system>"
+    SYSTEM_TAG: str = "<system>\n{}\n</system>"
     # 用户名标签
-    user_tag: str = '<user name="{}">\n{}\n</user>'
+    USER_TAG: str = '<user name="{}">\n{}\n</user>'
     # 模型回复标签
-    assistant_tag: str = "<me>\n{}\n</me>"
+    ASSISTANT_TAG: str = "<me>\n{}\n</me>"
     # 内置路由路由指令
-    on_chat: str = "on_chat"
-    on_chat_desc: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
+    ON_CHAT: str = "on_chat"
+    ON_CHAT_DESC: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
     # 内置工具
-    hidden_category: str = ":hidden"
-    builtin_category: str = "builtin"
-    skill_menu: str = "skill_menu"
-    skill_menu_desc: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能。"
-    get_image_by_id: str = "get_image_by_id"
-    get_image_by_id_desc: str = """\
+    HIDDEN_CATEGORY: str = ":hidden"
+    BUILTIN_CATEGORY: str = "builtin"
+    SKILL_MENU: str = "skill_menu"
+    SKILL_MENU_DESC: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能。"
+    GET_IMAGE_BY_ID: str = "get_image_by_id"
+    GET_IMAGE_BY_ID_DESC: str = """\
 上下文中的图片已替换成格式为 [image:image_id] 的标签，当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此工具。"""
-    get_image_by_id_image_id: str = "注意不要向用户透露有关图片标签的事实，image_id 只能在上下文中获取。"
+    GET_IMAGE_BY_ID_IMAGE_ID_DESC: str = "注意不要向用户透露有关图片标签的事实，image_id 只能在上下文中获取。"
     # 视觉相关配置
-    vision_tag: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
-    vision_prompt: str = """\
+    VISION_TAG: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
+    VISION_PROMPT: str = """\
 你是一位专业的视觉分析专家。
 你的任务是观察用户提供的一个或多个图像，并将其内容转化为详尽、准确且具有逻辑性的文字描述。
 这些描述将被用作后续纯文本模型的上下文参考，因此你的描述必须足够清晰。
@@ -171,8 +171,8 @@ class ConstantConfig(BaseModel):
 
 请现在开始分析图像并生成描述。
 """
-    execute_script: str = "execute_script"
-    execute_script_desc: str = """\
+    EXECUTE_SCRIPT: str = "execute_script"
+    EXECUTE_SCRIPT_DESC: str = """\
 执行一个脚本文件，可指定解释器或直接执行。
 
 **参数**：
@@ -189,8 +189,8 @@ class ConstantConfig(BaseModel):
 - 执行 Python 脚本：`interpreter="python"`，`args=["--verbose", "data.txt"]`
 - 执行可直接运行的脚本：`interpreter="./"`，`args=["--help"]`
 """
-    read_reference: str = "read_reference"
-    read_reference_desc: str = """\
+    READ_REFERENCE: str = "read_reference"
+    READ_REFERENCE_DESC: str = """\
 读取参考资料。
 
 **参数**：

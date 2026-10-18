@@ -2,31 +2,31 @@ from .typing import FunctionToolInfo
 from .config import CONSTANT
 
 # constant
-SYSTEM_TAG = CONSTANT.system_tag
-USER_TAG = CONSTANT.user_tag
-ASSISTANT_TAG = CONSTANT.assistant_tag
-ON_CHAT = CONSTANT.on_chat
-ON_CHAT_DESC = CONSTANT.on_chat_desc
-HIDDEN_CATEGORY = CONSTANT.hidden_category
-BUILTIN_CATEGORY = CONSTANT.builtin_category
-SKILL_MENU = CONSTANT.skill_menu
-SKILL_MENU_DESC = CONSTANT.skill_menu_desc
-GET_IMAGE_BY_ID = CONSTANT.get_image_by_id
+SYSTEM_TAG = CONSTANT.SYSTEM_TAG
+USER_TAG = CONSTANT.USER_TAG
+ASSISTANT_TAG = CONSTANT.ASSISTANT_TAG
+ON_CHAT = CONSTANT.ON_CHAT
+ON_CHAT_DESC = CONSTANT.ON_CHAT_DESC
+HIDDEN_CATEGORY = CONSTANT.HIDDEN_CATEGORY
+BUILTIN_CATEGORY = CONSTANT.BUILTIN_CATEGORY
+SKILL_MENU = CONSTANT.SKILL_MENU
+SKILL_MENU_DESC = CONSTANT.SKILL_MENU_DESC
+GET_IMAGE_BY_ID = CONSTANT.GET_IMAGE_BY_ID
 GET_IMAGE_BY_ID_INFO: FunctionToolInfo = {
     "type": "function",
     "function": {
         "name": GET_IMAGE_BY_ID,
-        "description": CONSTANT.get_image_by_id_desc,
+        "description": CONSTANT.GET_IMAGE_BY_ID_DESC,
         "parameters": {
             "type": "object",
-            "properties": {"image_id": {"type": "integer", "description": CONSTANT.get_image_by_id_image_id}},
+            "properties": {"image_id": {"type": "integer", "description": CONSTANT.GET_IMAGE_BY_ID_IMAGE_ID_DESC}},
             "required": ["image_id"],
         },
     },
 }
-VISION_TAG = CONSTANT.vision_tag
-VISION_PROMPT = CONSTANT.vision_prompt
-EXECUTE_SCRIPT = CONSTANT.execute_script
-EXECUTE_SCRIPT_DESC = CONSTANT.execute_script_desc
-READ_REFERENCE = CONSTANT.read_reference
-READ_REFERENCE_DESC = CONSTANT.read_reference_desc
+VISION_TAG = CONSTANT.VISION_TAG
+VISION_PROMPT = CONSTANT.VISION_PROMPT
+EXECUTE_SCRIPT = CONSTANT.EXECUTE_SCRIPT
+EXECUTE_SCRIPT_DESC = CONSTANT.EXECUTE_SCRIPT_DESC
+READ_REFERENCE = CONSTANT.READ_REFERENCE
+READ_REFERENCE_DESC = CONSTANT.READ_REFERENCE_DESC
