@@ -230,7 +230,7 @@ class Config(BaseConfig):
     """
     sentence_model: str = "BAAI/bge-small-zh-v1.5"
     """词嵌入向量模型"""
-    sentence_model_cache: str = "./data/clovers-agent/sentence_model_cache"
+    sentence_model_cache: str = "./data/CloversAgent/sentence_model_cache"
     """词嵌入向量模型缓存路径"""
     call_depth: int = 40
     """最大调用深度"""
