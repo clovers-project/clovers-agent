@@ -37,7 +37,7 @@ else:
 @PLUGIN.handle(None, ["user_id", "group_id", "nickname", "to_me", "image_list", "at"], rule=check, priority=2, block=False)
 async def _(event: Event) -> SegmentedResult | None:
     result = await AGENT.chat(event)
-    if result is None:
+    if not result:
         return None
     session = AGENT.current_session(event)
     if "sending_lock" not in session.extra:

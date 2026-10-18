@@ -194,11 +194,14 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
 
     def current_session(self, event: Event):
         session_id = self.session_id(event)
-        if session_id not in self.sessions:
-            self.sessions[session_id] = Session(session_id, self.sentence_model)
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+        else:
+            session = self.sessions[session_id] = Session(session_id, self.sentence_model)
             if records := load_jsonl(self.recorder_file(session_id)):
-                self.sessions[session_id].recorder.extend(records)
-        return self.sessions[session_id]
+                session.recorder.extend(records)
+                session.decouple_count = sum(len(m["content"]) for m in session)
+        return session
 
     async def activate_category(self, name: str, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
@@ -477,6 +480,19 @@ async def cleanup_process(process: asyncio.subprocess.Process):
             await process.wait()
 
 
+async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
+    maxlen = tail_length + 3
+    buffer = deque[str](maxlen=maxlen)
+    async for line in reader:
+        buffer.append(decode_bytes(line.rstrip().rsplit(b"\r", 1)[-1]))
+    if len(buffer) == maxlen:
+        buffer.popleft()
+        buffer.popleft()
+        buffer.popleft()
+        buffer.appendleft("...")
+    return "".join(buffer)
+
+
 async def execute_script(
     agent: CloversAgent,
     event: Event,
@@ -498,7 +514,8 @@ async def execute_script(
         cmd.extend(args)
     try:
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=min(timeout, EXECUTE_SCRIPT_TIMEOUT))
+        tasks = (decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN), decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN))  # type: ignore
+        out_text, err_text = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
     except asyncio.TimeoutError:
         asyncio.create_task(cleanup_process(process))
         return f"ERROR: Script execution timed out after {timeout} seconds."
@@ -508,13 +525,6 @@ async def execute_script(
         return f"ERROR: Permission denied – cannot execute script."
     except Exception as e:
         return f"ERROR: Unexpected error – {e}"
-    out_text = decode_bytes(stdout)
-    MAX_TAIL_LEN = EXECUTE_SCRIPT_MAX_TAIL_LEN + 3
-    if len(out_text) > MAX_TAIL_LEN:
-        out_text = "..." + out_text[-EXECUTE_SCRIPT_MAX_TAIL_LEN:]
-    err_text = decode_bytes(stderr)
-    if len(err_text) > MAX_TAIL_LEN:
-        err_text = "..." + err_text[-EXECUTE_SCRIPT_MAX_TAIL_LEN:]
     return f"RETURN CODE: {process.returncode}\nOUT: {out_text}\nERR: {err_text}"
 
 

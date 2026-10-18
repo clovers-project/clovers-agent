@@ -37,7 +37,7 @@ class OpenAIAPI:
                 resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
                 if x := resp.headers.get("retry-after"):
                     with contextlib.suppress(ValueError):
-                        retry_after = float(x)
+                        retry_after = min(float(x), 3)
                 resp.raise_for_status()
                 data = resp.json()
                 deep_add(usage_counter, {payload["model"]: data.get("usage")})
@@ -130,7 +130,7 @@ def pretty_payload(payload: Payload):
                 else:
                     yield prefix + "".join(x["text"] if x["type"] == "text" else f"[IMAGE]" for x in message["content"])
             case "assistant":
-                content = prefix + message.get("content", "")
+                content = prefix + message.get("content") or ""
                 if "tool_calls" in message:
                     content += "".join(f"\n[CALL][{x["function"]["name"]}]{x["function"]["arguments"]}" for x in message["tool_calls"])
                 yield content
