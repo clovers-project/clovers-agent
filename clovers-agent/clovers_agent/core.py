@@ -77,33 +77,29 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
                 self.usage_counter = json.load(f)
         else:
             self.usage_counter = {}
-        # 配置
+        # 聊天配置
         self.call_depth = CONFIG.call_depth
         self.wait_cooldown = CONFIG.wait_cooldown
         self.chime_in_cooldown = CONFIG.chime_in_cooldown
-        # 技能
-        self._plugins = CONFIG.plugins
-        self._plugin_dirs = CONFIG.plugin_dirs
-        self._category_schema: BaseJSONSchemaType = {"type": "string"}
-        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
         # DEBUG
         self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
         self.extra = {}
-
-    def sync_menu(self):
-        self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
-        self._category_schema["enum"] = list(self.category_desc_map.keys())
-
-    def skill_init(self):
+        # 技能初始化
+        self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
         self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, BUILTIN_CATEGORY)(skill_menu)
         self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
         self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
-        self.load_from_list(self._plugins)
-        self.load_from_dirs(self._plugin_dirs)
+        self.load_from_list(CONFIG.plugins)
+        self.load_from_dirs(CONFIG.plugin_dirs)
         self.reload_skills()
         self.sync_menu()
+        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
+
+    def sync_menu(self):
+        self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
+        self._category_schema["enum"] = list(self.category_desc_map.keys())
 
     @property
     def skill_dirs(self):

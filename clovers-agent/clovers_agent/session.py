@@ -6,16 +6,12 @@ from .api import OpenAIAPI
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 from collections.abc import Iterable
-from typing import Never, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from .typing import Payload, Message, AssistantMessage, SystemMessage
 from .typing.message import MultimodalContent, TextUserMessage
 
 if TYPE_CHECKING:
     from .embedding import SentenceTransformer
-
-
-def extract_plain_text(content: str | MultimodalContent) -> str:
-    return content if isinstance(content, str) else "\n".join(text["text"] for text in content if text["type"] == "text")
 
 
 def char_count(content: str | MultimodalContent):
@@ -145,7 +141,7 @@ class Session:
             self.payload["tools"] = []
         self.payload["tools"].append(GET_IMAGE_BY_ID_INFO)
 
-    def complete(self, message: str | None = None) -> Never:
+    def complete(self, message: str | None = None):
         self.api = None  # type: ignore
         self.payload = None  # type: ignore
         self.cursor = 0
