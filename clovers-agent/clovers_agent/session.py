@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 from itertools import count
 from collections import deque
-from .api import OpenAIAPI
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 from collections.abc import Iterable
@@ -11,6 +10,7 @@ from .typing import Payload, Message, AssistantMessage, SystemMessage
 from .typing.message import MultimodalContent, TextUserMessage
 
 if TYPE_CHECKING:
+    from .api import OpenAIAPI
     from .embedding import SentenceTransformer
 
 
@@ -129,17 +129,22 @@ class Session:
         return self.decoupler.step(message)
 
     def activate(self):
-        for rec in self.unimportant_recorder:
-            self.payload["messages"].extend(rec[:2])
-        self.cursor = len(self.payload["messages"])
-        unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
-        self.current_input.insert(0, {"type": "text", "text": unit_prompt})
-        self.payload["messages"].append({"role": "user", "content": self.current_input})
-        if not self.image_recorder:
-            return
-        if "tools" not in self.payload:
-            self.payload["tools"] = []
-        self.payload["tools"].append(GET_IMAGE_BY_ID_INFO)
+        try:
+            self.api
+            payload = self.payload
+            for rec in self.unimportant_recorder:
+                payload["messages"].extend(rec[:2])
+            self.cursor = len(payload["messages"])
+            unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
+            self.current_input.insert(0, {"type": "text", "text": unit_prompt})
+            payload["messages"].append({"role": "user", "content": self.current_input})
+            if not self.image_recorder:
+                return
+            if "tools" not in payload:
+                payload["tools"] = []
+            payload["tools"].append(GET_IMAGE_BY_ID_INFO)
+        except AttributeError:
+            self.complete()
 
     def complete(self, message: str | None = None):
         self.api = None  # type: ignore

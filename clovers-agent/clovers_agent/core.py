@@ -223,20 +223,28 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
                     prompts.append(await coro)
             return prompts
 
-    async def activate_skill(self, event: Event, call_info: ToolCallInfo) -> ToolMessage:
+    async def invoke_tool(self, event: Event, call_info: ToolCallInfo) -> ToolMessage:
+        name = call_info["function"]["name"]
+        tc_id = call_info["id"]
+        raw_args = call_info["function"]["arguments"]
+        if name not in self.invoker:
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: not found"}
         try:
-            name = call_info["function"]["name"]
-            kwargs = json.loads(call_info["function"]["arguments"])
-            if name not in self.invoker:
-                return {"role": "tool", "tool_call_id": call_info["id"], "content": f'工具 "{name}" 不存在。'}
-            content = await self.invoker[name](self, event, **kwargs)
-            return {"role": "tool", "tool_call_id": call_info["id"], "content": content}
+            args = json.loads(raw_args)
+        except json.JSONDecodeError as e:
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}`: bad JSON args"}
+        try:
+            invoker = self.invoker[name](self, event, **args)
+        except TypeError as e:
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}: invalid args: {e}"}
+        try:
+            return {"role": "tool", "tool_call_id": tc_id, "content": await invoker}
         except SessionComplete:
             raise
         except Exception as e:
             logger.exception(e)
-            self.tool_failures.appendleft({"name": name, "args": kwargs, "traceback": "".join(traceback.format_exception(e))})
-            return {"role": "tool", "tool_call_id": call_info["id"], "content": f"工具发生内部错误，请稍后再试。"}
+            self.tool_failures.appendleft({"name": name, "args": args, "traceback": "".join(traceback.format_exception(e))})
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
 
     async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):
         for _ in range(self.call_depth):
@@ -246,7 +254,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
                 if not content:
                     continue
                 return content
-            messages = await asyncio.gather(*(self.activate_skill(event, x) for x in tool_calls))
+            messages = await asyncio.gather(*(self.invoke_tool(event, x) for x in tool_calls))
             payload["messages"].append(message)
             payload["messages"].extend(messages)
         raise RuntimeError(f"Maximum tool call chain length exceeded")
