@@ -129,32 +129,30 @@ class Session:
         return self.decoupler.step(message)
 
     def activate(self):
-        try:
-            self.api
-            payload = self.payload
-            for rec in self.unimportant_recorder:
-                payload["messages"].extend(rec[:2])
-            self.cursor = len(payload["messages"])
-            unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
-            self.current_input.insert(0, {"type": "text", "text": unit_prompt})
-            payload["messages"].append({"role": "user", "content": self.current_input})
-            if not self.image_recorder:
-                return
-            if "tools" not in payload:
-                payload["tools"] = []
-            payload["tools"].append(GET_IMAGE_BY_ID_INFO)
-        except AttributeError:
-            self.complete()
+        payload = self.payload
+        for rec in self.unimportant_recorder:
+            payload["messages"].extend(rec[:2])
+        self.cursor = len(payload["messages"])
+        unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
+        self.current_input.insert(0, {"type": "text", "text": unit_prompt})
+        payload["messages"].append({"role": "user", "content": self.current_input})
+        if not self.image_recorder:
+            return
+        if "tools" not in payload:
+            payload["tools"] = []
+        payload["tools"].append(GET_IMAGE_BY_ID_INFO)
 
     def complete(self, message: str | None = None):
-        self.api = None  # type: ignore
-        self.payload = None  # type: ignore
-        self.cursor = 0
+        self.inactivate()
         raise SessionComplete(message)
 
     def inactivate(self):
         # 按注入顺序删除
         self.unit_prompts.clear()
+        self.current_input = None  # type: ignore
+        self.api = None  # type: ignore
+        self.payload = None  # type: ignore
+        self.cursor = None  # type: ignore
         del self.current_input
         del self.api
         del self.payload

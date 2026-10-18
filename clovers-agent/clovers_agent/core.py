@@ -262,22 +262,16 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
     async def router(self, text_input: str, event: Event, usage_counter: dict):
         if len(self.intro_tools) < 2:
             return await on_chat(self, event)
-        try:
-            api = self.api("router")
-            payload = api.build_payload(({"role": "user", "content": text_input},), self.router_prompt)
-            payload["tools"] = self.intro_tools
-            message = await api.call_api(payload, usage_counter)
-            if "tool_calls" not in message:
-                raise ValueError(f"message must contain tool_calls, but got {message}")
-            category = message["tool_calls"][0]["function"]["name"]
-            logger.info(f"[{self.name}][ROUTER] {category}")
-            await self.invoker[category](self, event)
-            # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
-        except SessionComplete:
-            raise
-        except Exception as e:
-            logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
-            category = await on_chat(self, event)
+        api = self.api("router")
+        payload = api.build_payload(({"role": "user", "content": text_input},), self.router_prompt)
+        payload["tools"] = self.intro_tools
+        message = await api.call_api(payload, usage_counter)
+        if "tool_calls" not in message:
+            raise ValueError(f"message must contain tool_calls, but got {message}")
+        category = message["tool_calls"][0]["function"]["name"]
+        logger.info(f"[{self.name}][ROUTER] {category}")
+        await self.invoker[category](self, event)
+        # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return category
 
     async def chime_in(self, session: Session, content: str):
@@ -362,19 +356,32 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
             text_input.append(content)
             try:
                 intro = await self.router("\n".join(text_input), event, session.usage_counter)
+                session.api
+                session.payload
+            except SessionComplete as e:
+                return e.data
+            except Exception as e:
+                logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
+                intro = await on_chat(self, event)
+            try:
                 if intro_prompts := await self.activate_category(intro, event):
                     session.unit_prompts.extend(intro_prompts)
-                session.activate()
+            except SessionComplete as e:
+                return e.data
+            except Exception as e:
+                logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
+            session.activate()
+            try:
                 result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
             except SessionComplete as e:
-                result = e.data
+                return e.data
             except Exception as e:
+                session.inactivate()
                 file = f"payload_{id(session.payload)} {datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
                 save_json(self.session_dir / session.session_id / file, session.payload)
                 logger.exception(e)
                 return
-            finally:
-                session.inactivate()
+            session.inactivate()
             if result:
                 session.last_active_time = timestamp
                 session.over(chat_content, {"role": "assistant", "content": result}, timestamp)

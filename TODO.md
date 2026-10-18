@@ -10,10 +10,6 @@
 
 ## P0 — 正确性与安全（先修，直接影响可用性）
 
-- [ ] **3. `Session.inactivate()` 用 `del` 删属性，可能掩盖原始异常** `clovers_agent/session.py:150-158` `S`
-      `activate()` 之前若发生异常（如 router/hook 抛错），`cursor` 属性不存在，`finally` 里的 `del self.cursor` 会抛 `AttributeError`，把真正的错误吞掉。
-      修法：这些运行时字段在 `__init__` 中初始化为 `None`/`0`，`inactivate` 改成赋值 `None` 而不是 `del`；顺带避免 `del self.api` 后外部再访问直接报错。
-
 - [ ] **4. `execute_script` 缺少资源与安全边界** `clovers_agent/core.py:465-502` `M`
       ① 输出无截断，一段大 stdout 就能撑爆上下文/费用；② `timeout` 由模型传入且无上限（schema 默认 120，但模型可传 86400）；③ 未设置 `cwd`，脚本只能靠相对路径碰运气；④ `interpreter` 是任意字符串（如 `cmd`/`powershell`），虽路径受限仍建议白名单；⑤ 超时分支依赖 `process` 已定义；⑥ 裸 `except:`。
       修法：`timeout = min(max(timeout, 1), 300)`；stdout/stderr 各截断（如 32KB）；`cwd=脚本所在目录`；解释器白名单 + `python` 映射 `sys.executable`；`process.terminate()` 后 `kill()`；改用 `contextlib.suppress`。
