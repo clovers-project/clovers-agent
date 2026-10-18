@@ -8,15 +8,17 @@ from clovers_apscheduler import scheduler
 from .core import Event, CloversAgent
 from .config import CHECK
 
-ASYNC_CLIENT = httpx.AsyncClient(timeout=300)
-AGENT = CloversAgent("CloversAgent", ASYNC_CLIENT, scheduler)
-
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
 
 
-PLUGIN.startup(AGENT.skill_init)
-PLUGIN.shutdown(ASYNC_CLIENT.aclose)
+@PLUGIN.startup
+def _():
+    global AGENT
+    AGENT = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), scheduler)
+
+
+PLUGIN.shutdown(AGENT.async_client.aclose)
 
 
 def check(e: Event) -> bool: ...
