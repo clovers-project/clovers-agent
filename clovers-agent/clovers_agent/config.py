@@ -189,6 +189,8 @@ class ConstantConfig(BaseModel):
 - 执行 Python 脚本：`interpreter="python"`，`args=["--verbose", "data.txt"]`
 - 执行可直接运行的脚本：`interpreter="./"`，`args=["--help"]`
 """
+    EXECUTE_SCRIPT_TIMEOUT: int = 1800
+    EXECUTE_SCRIPT_MAX_TAIL_LEN: int = 1600
     READ_REFERENCE: str = "read_reference"
     READ_REFERENCE_DESC: str = """\
 读取参考资料。

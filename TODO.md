@@ -10,10 +10,6 @@
 
 ## P0 — 正确性与安全（先修，直接影响可用性）
 
-- [ ] **4. `execute_script` 缺少资源与安全边界** `clovers_agent/core.py:465-502` `M`
-      ① 输出无截断，一段大 stdout 就能撑爆上下文/费用；② `timeout` 由模型传入且无上限（schema 默认 120，但模型可传 86400）；③ 未设置 `cwd`，脚本只能靠相对路径碰运气；④ `interpreter` 是任意字符串（如 `cmd`/`powershell`），虽路径受限仍建议白名单；⑤ 超时分支依赖 `process` 已定义；⑥ 裸 `except:`。
-      修法：`timeout = min(max(timeout, 1), 300)`；stdout/stderr 各截断（如 32KB）；`cwd=脚本所在目录`；解释器白名单 + `python` 映射 `sys.executable`；`process.terminate()` 后 `kill()`；改用 `contextlib.suppress`。
-
 - [ ] **5. `read_reference` 无大小上限** `clovers_agent/core.py:505-509` `S`
       直接返回整份文件，模型可能读到一个几 MB 的日志/数据文件。
       修法：限制返回字节数（如 64KB）并附"已截断"提示；明确只允许 `references/` 下的文件（当前靠 map key 约束，尚可）。

@@ -158,8 +158,10 @@ async def _(
         if new_memories:
             memories.extend((x, 1) for x in new_memories)
         memories.extend(old_memories.values())
-        dstar = 1 if len(memories) >= PROFILE_MEMORY_SIZE else 0
-        memories = sorted((x for x in memories if x[1] >= dstar), key=lambda x: x[1], reverse=True)
+        if len(memories) >= PROFILE_MEMORY_SIZE:
+            memories = sorted(((c, star - 1) for c, star in memories if star >= 1), key=lambda x: x[1], reverse=True)
+        else:
+            memories = sorted((x for x in memories if x[1] >= 0), key=lambda x: x[1], reverse=True)
         user_profile.memories.clear()
         user_profile.memories.extend({"id": i, "content": c, "star": star} for i, (c, star) in enumerate(memories, 1))
     user_profile_json.write_text(user_profile.model_dump_json(indent=4), encoding="utf-8")

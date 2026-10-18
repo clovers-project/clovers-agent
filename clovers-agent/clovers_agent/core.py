@@ -2,6 +2,7 @@ import sys
 import time
 import json
 import traceback
+import contextlib
 import asyncio
 import httpx
 from pathlib import Path
@@ -28,6 +29,8 @@ from .constants import (
     GET_IMAGE_BY_ID_INFO,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DESC,
+    EXECUTE_SCRIPT_TIMEOUT,
+    EXECUTE_SCRIPT_MAX_TAIL_LEN,
     READ_REFERENCE,
     READ_REFERENCE_DESC,
 )
@@ -477,6 +480,16 @@ async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
     return "OK"
 
 
+async def cleanup_process(process: asyncio.subprocess.Process):
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(Exception):
+            process.kill()
+            await process.wait()
+
+
 async def execute_script(
     agent: CloversAgent,
     event: Event,
@@ -498,13 +511,9 @@ async def execute_script(
         cmd.extend(args)
     try:
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=min(timeout, EXECUTE_SCRIPT_TIMEOUT))
     except asyncio.TimeoutError:
-        try:
-            process.kill()
-            await process.wait()
-        except:
-            pass
+        asyncio.create_task(cleanup_process(process))
         return f"ERROR: Script execution timed out after {timeout} seconds."
     except FileNotFoundError:
         return f"ERROR: Interpreter '{interpreter}' not found."
@@ -513,7 +522,12 @@ async def execute_script(
     except Exception as e:
         return f"ERROR: Unexpected error – {e}"
     out_text = decode_bytes(stdout)
+    MAX_TAIL_LEN = EXECUTE_SCRIPT_MAX_TAIL_LEN + 3
+    if len(out_text) > MAX_TAIL_LEN:
+        out_text = "..." + out_text[-EXECUTE_SCRIPT_MAX_TAIL_LEN:]
     err_text = decode_bytes(stderr)
+    if len(err_text) > MAX_TAIL_LEN:
+        err_text = "..." + err_text[-EXECUTE_SCRIPT_MAX_TAIL_LEN:]
     return f"RETURN CODE: {process.returncode}\nOUT: {out_text}\nERR: {err_text}"
 
 
