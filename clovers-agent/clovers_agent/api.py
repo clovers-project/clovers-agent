@@ -1,10 +1,11 @@
+import contextlib
 import httpx
 import asyncio
 from clovers.logger import logger
 from collections.abc import Iterable
 from .utils import data_url, deep_add
 from typing import override
-from .typing import Message, UserMessage, AssistantMessage, Payload
+from .typing import Message, AssistantMessage, Payload
 from .typing.message import MultimodalContent
 from .config import OpenAIConfig, HybridOpenAIConfig
 from .constants import VISION_TAG, VISION_PROMPT
@@ -20,18 +21,6 @@ class OpenAIAPI:
         self.headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
         self.extra_body = config.extra_body
 
-    @staticmethod
-    def build_message(text: str, image_list: list[str] | None) -> UserMessage:
-        if not image_list:
-            return {"role": "user", "content": text}
-        else:
-            content = []
-            if text:
-                content.append({"type": "text", "text": text})
-            if image_list:
-                content.extend({"type": "image_url", "image_url": {"url": image_url}} for image_url in image_list)
-            return {"role": "user", "content": content}
-
     def build_payload(self, context: Iterable[Message] | None = None, system_prompt: str | None = None) -> Payload:
         payload: Payload = {"model": self.model, "messages": [], **self.extra_body}  # type: ignore 这里允许额外请求体
         if system_prompt:
@@ -42,8 +31,12 @@ class OpenAIAPI:
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
         for delay in RETRY_DELAYS:
+            retry_after = None
             try:
                 resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
+                if x := resp.headers.get("retry-after"):
+                    with contextlib.suppress(ValueError):
+                        retry_after = float(x)
                 resp.raise_for_status()
                 data = resp.json()
                 deep_add(usage_counter, {payload["model"]: data.get("usage")})
@@ -62,7 +55,7 @@ class OpenAIAPI:
             except Exception as e:
                 raise RuntimeError(f"Response validation failed: {e}") from e
             if delay:
-                await asyncio.sleep(delay)
+                await asyncio.sleep(retry_after or delay)
         raise RuntimeError("API retries exhausted")
 
     async def download_url(

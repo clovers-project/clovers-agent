@@ -15,7 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .skill import SkillCore, AgentCore, invoker_wrapper
 from .session import Session, SessionComplete
-from .utils import deep_add, load_json, save_json, decode_bytes
+from .utils import deep_add, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     SYSTEM_TAG,
@@ -99,12 +99,8 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
         self._category_schema["enum"] = list(self.category_desc_map.keys())
 
-    @property
-    def skill_dirs(self):
-        return (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir).expanduser()).exists() for _p in _dir.iterdir())
-
     def recorder_file(self, session_id: str):
-        return self.session_dir / session_id / "recorder.json"
+        return self.session_dir / session_id / "recorder.jsonl"
 
     @property
     def usage_file(self):
@@ -200,8 +196,8 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         session_id = self.session_id(event)
         if session_id not in self.sessions:
             self.sessions[session_id] = Session(session_id, self.sentence_model)
-            if record := load_json(self.recorder_file(session_id)):
-                self.sessions[session_id].recorder.extend(record)
+            if records := load_jsonl(self.recorder_file(session_id)):
+                self.sessions[session_id].recorder.extend(records)
         return self.sessions[session_id]
 
     async def activate_category(self, name: str, event: Event) -> list[str] | None:
@@ -304,8 +300,9 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
                     logger.exception(e)
                     return
                 session.last_active_time = timestamp
-                session.over(content, {"role": "assistant", "content": result}, timestamp)
-                save_json(self.recorder_file(session.session_id), session.recorder)
+                pending_records = session.over(content, {"role": "assistant", "content": result}, timestamp)
+                if pending_records:
+                    extend_jsonl(self.recorder_file(session.session_id), pending_records)
                 return result
         session.refresh(timestamp)
         session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
@@ -374,8 +371,9 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
             session.inactivate()
             if result:
                 session.last_active_time = timestamp
-                session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
-                save_json(self.recorder_file(session.session_id), session.recorder)
+                pending_records = session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
+                if pending_records:
+                    extend_jsonl(self.recorder_file(session.session_id), pending_records)
             return result
 
     def update_usage(self, usage_counter: dict):

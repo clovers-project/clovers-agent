@@ -6,43 +6,9 @@
 
 图例：`S` ≈ 半小时内，`M` ≈ 半天，`L` ≈ 1 天以上。
 
-## P1 — 工程化与稳定性（决定项目能否长期维护）
-
-- [ ] **21. 用量统计可能丢数据** `clovers_agent/core.py:174-183,385-389` `S`
-      `chat()` 中 `update_usage` 不在 `finally` 里，`handle_chat` 抛异常时本轮用量丢失；`daily_tasks` 清空 `usage_counter` 前没有落盘；2:00 前跨天仍写前一天的文件。
-      修法：`try/finally` 保证落盘；`daily_tasks` 先 `save_json` 再清空；以 `datetime.now().date()` 判断跨天，而不是只在 2 点更新。
-
-- [ ] **22. 异常兜底时 dump 的调试文件会无限增长** `clovers_agent/core.py:364-365` `S`
-      文件名用 `id(session.payload)`（内存地址，无意义）且永不清理；payload 里含 base64 图片，单文件可达数十 MB。
-      修法：改用 `session_id + 时间戳`，只保留最近 N 份；写入前剥离 data URL 或替换成 `[image]`。
-
-- [ ] **23. 依赖策略：体积、下限与环境** `pyproject.toml:8-20` `M`
-  - `torch` + `sentence-transformers` + `numpy` 是硬依赖（安装量级 GB），但只用于话题解耦器；建议改成 optional extra `[embedding]`，缺失时降级为"不做话题解耦"而非 import 失败。
-  - `numpy>=2.4.4` 下限过新，会排除大量已有环境（代码只用到 `quantile/mean/std`）；建议 `numpy>=1.26`，或说明为何必须 2.4。
-  - `torch` 无上界（`>=2.5.0`），大版本升级可能破坏 API；建议 `>=2.5,<3`。
-  - 增加 `[dependency-groups] dev` 或 `uv.lock`，固定可复现开发环境；文档注明推荐 3.12/3.13。
-
-- [ ] **24. 配置层的健壮性与密钥管理** `clovers_agent/config.py:18,207-224,231-233` `S`
-  - `extra_body: dict[str, Any] = {}`、`whitelist/blacklist: list[str] = []` 是可变的类级默认值（pydantic 会拷贝，但 lint 会报，也易误用），改用 `Field(default_factory=...)`。
-  - `path`、`sentence_model_cache` 默认相对 CWD（`./data/...`），从不同目录启动会读到不同数据；建议基于用户数据目录或显式要求绝对路径。
-  - `api_key` 明文存配置；至少支持 `${ENV_VAR}` 展开，或在 README 中提示权限设置。
-  - `url` 未做校验/归一化，若用户填了完整的 `/chat/completions` 会拼成两遍。
-
 ---
 
 ## P2 — 性能、架构与体验
-
-- [ ] **25. 拆分 `core.py`（509 行）里的多重职责** `L`
-      `CloversAgent` 同时负责：提示词加载、模型工厂、会话存取、路由、工具注册/执行、脚本沙箱、持久化、定时任务。建议拆成 `PromptStore`、`SessionStore`、`AgentRuntime`（路由 + 工具循环）、`ToolSandbox`、`UsageRecorder`，`handle_chat` 中的 chime-in / wait / execute 三个分支各抽一个方法。收益：可测试性、可替换模型、降低 #1/#3 类 bug 的复发率。
-
-- [ ] **26. 持久化改为增量写入** `M`
-      当前每条消息都重写整个 `recorder.json`，历史越长写入越慢（O(n²) I/O）。改成按行追加 `recorder.jsonl` + 定期 compact；或仅在本轮结束时 append 两条记录。
-
-- [ ] **27. 会话生命周期与内存** `M`
-      `self.sessions` 只有每日 2 点清理；`Session` 内含 `TopicDecoupler`（torch 张量）与图片 deque。建议 TTL + LRU 上限（如 1000 会话）、`image_recorder` 按字节/数量双限、`nicknames` 字典设上限，并在清理时跳过持有 `execute_lock` 的会话。
-
-- [ ] **28. 工具并发上限** `S`
-      `core.py:249` 用 `asyncio.gather` 无限制并发执行工具；多个 `execute_script` 可同时拉起大量进程。加 `asyncio.Semaphore(4)` 或按工具类型限流，并处理 `gather` 中一个工具抛 `SessionComplete` 时其余协程的取消。
 
 - [ ] **29. 清理死代码与重复实现** `S`
   - `core.py:104-106` 与 `skill.py:380-382` 重复的 `skill_dirs` property；

@@ -14,10 +14,6 @@ if TYPE_CHECKING:
     from .embedding import SentenceTransformer
 
 
-def char_count(content: str | MultimodalContent):
-    return len(content) if isinstance(content, str) else sum(len(text["text"]) for text in content if text["type"] == "text")
-
-
 type Record = tuple[TextUserMessage, AssistantMessage, float]
 
 
@@ -61,6 +57,7 @@ class Session:
 
         self.decoupler = TopicDecoupler(sentence_model, SESSION_CONFIG.decoupler_alpha)
         self.decouple_length = SESSION_CONFIG.decouple_length
+        self.decouple_count = 0
 
     def __iter__(self):
         for a, b, _ in self.recorder:
@@ -82,16 +79,20 @@ class Session:
                         self.image_recorder.append((image_id, url, timestamp))
             content = "".join(contents)
         record: Record = ({"role": "user", "content": content}, reply, timestamp)
+        pending_records = list[Record]()
         self.router_recorder.append((content, reply["content"]))
         if self.unimportant:
             self.unimportant_recorder.append(record)
             self.unimportant = False
         else:
             if self.unimportant_recorder:
-                self.recorder.extend(self.unimportant_recorder)
+                pending_records.extend(self.unimportant_recorder)
                 self.unimportant_recorder.clear()
-            self.recorder.append(record)
+            pending_records.append(record)
+            self.recorder.extend(pending_records)
+            self.decouple_count += sum(len(u["content"]) + len(a["content"]) for u, a, _ in pending_records)
         self.silence_recorder.clear()
+        return pending_records
 
     def clear(self):
         """清理记录"""
@@ -100,6 +101,7 @@ class Session:
         self.router_recorder.clear()
         self.unimportant_recorder.clear()
         self.silence_recorder.clear()
+        self.decouple_count = 0
 
     def image_url(self, image_id: int) -> str | None:
         return next((url for i, url, _ in self.image_recorder if i == image_id), None)
@@ -124,7 +126,7 @@ class Session:
         timeout = timestamp - self.memory_timeout
         if self.recorder[0][2] < timeout:
             return True
-        if sum(char_count(msg["content"]) for msg in self) < self.decouple_length:
+        if self.decouple_count < self.decouple_length:
             return False
         return self.decoupler.step(message)
 

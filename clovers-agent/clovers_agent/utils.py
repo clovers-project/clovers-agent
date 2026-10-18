@@ -58,6 +58,25 @@ def save_json(path: Path, data):
     tmp.replace(path)
 
 
+def load_jsonl(path: Path):
+    if not path.exists():
+        return
+    arr = []
+    with path.open("r", encoding="utf-8") as f:
+        try:
+            arr.extend(json.loads(data) for line in f if (data := line.strip()))
+        except json.JSONDecodeError:
+            return
+    return arr
+
+
+def extend_jsonl(path: Path, arr: list):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        for data in arr:
+            f.write(json.dumps(data, ensure_ascii=False) + "\n")
+
+
 def decode_bytes(btext: bytes | bytearray):
     encoding = chardet.detect(btext)["encoding"]
     try:
