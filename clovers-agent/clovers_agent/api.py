@@ -1,3 +1,4 @@
+import random
 import contextlib
 import httpx
 import asyncio
@@ -55,7 +56,7 @@ class OpenAIAPI:
             except Exception as e:
                 raise RuntimeError(f"Response validation failed: {e}") from e
             if delay:
-                await asyncio.sleep(retry_after or delay)
+                await asyncio.sleep(retry_after or delay * random.uniform(0.75, 1.25))
         raise RuntimeError("API retries exhausted")
 
     async def download_url(

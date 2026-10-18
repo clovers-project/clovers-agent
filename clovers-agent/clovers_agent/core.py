@@ -59,8 +59,8 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         self.name = name
         self.async_client = async_client
         # 核心
-        self._api = self.creat_api(CONFIG.api)
-        self._apis = {name: self.creat_api(api_config) for name, api_config in CONFIG.apis.items()}
+        self._api = self.create_api(CONFIG.api)
+        self._apis = {name: self.create_api(api_config) for name, api_config in CONFIG.apis.items()}
         from .embedding import SentenceTransformer
 
         self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
@@ -106,7 +106,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
     def usage_file(self):
         return self.usage_dir / f"{self.today}.json"
 
-    def creat_api(self, config: HybridOpenAIConfig):
+    def create_api(self, config: HybridOpenAIConfig):
         if config.vision:
             return HybridOpenAIAPI(self.async_client, config)
         else:

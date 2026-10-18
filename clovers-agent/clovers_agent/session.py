@@ -174,9 +174,9 @@ class Session:
         if not self.unimportant_recorder and self.recorder:
             yield from self.recorder[-1][:2]
 
-    def update_context(self, messags: Iterable[Message]):
-        messages = [self.system_message, *messags]
-        cursor = len(messages)
-        messages.extend(self.payload["messages"][self.cursor :])
+    def update_context(self, messages: Iterable[Message]):
+        _m = [self.system_message, *messages]
+        cursor = len(_m)
+        _m.extend(self.payload["messages"][self.cursor :])
         self.cursor = cursor
-        self.payload["messages"] = messages
+        self.payload["messages"] = _m
