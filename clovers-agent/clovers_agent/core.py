@@ -481,7 +481,7 @@ async def cleanup_process(process: asyncio.subprocess.Process):
 
 
 async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
-    maxlen = tail_length + 3
+    maxlen = tail_length + 2
     buffer = deque[str](maxlen=maxlen)
     async for line in reader:
         buffer.append(decode_bytes(line.rstrip().rsplit(b"\r", 1)[-1]))
