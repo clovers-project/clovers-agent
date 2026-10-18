@@ -5,19 +5,13 @@ from clovers.logger import logger
 from clovers_client import Event as EventProtocol
 from clovers_client.result import SegmentedResult, SegmentedMessage
 from clovers_apscheduler import scheduler
+from typing import 
 from .core import Event, CloversAgent
 from .config import CHECK
 
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
-
-
-@PLUGIN.startup
-def _():
-    global AGENT
-    AGENT = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), scheduler)
-
-
+AGENT = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), scheduler)
 PLUGIN.shutdown(AGENT.async_client.aclose)
 
 
