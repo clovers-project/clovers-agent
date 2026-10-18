@@ -14,8 +14,11 @@ def is_base64(s: str) -> bool:
 
 
 def data_url(data: bytes, allowed_subtype: tuple[str, ...]) -> str | None:
-    mime = puremagic.from_string(data, mime=True)
-    if allowed_subtype and mime.split("/")[1] not in allowed_subtype:
+    mime = puremagic.from_string(data, mime=True).split("/", 2)
+    if len(mime) != 2:
+        return
+    subtype = mime[1]
+    if allowed_subtype and subtype not in allowed_subtype:
         return
     b64 = base64.b64encode(data).decode()
     return f"data:{mime};base64,{b64}"
