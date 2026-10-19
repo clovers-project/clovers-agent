@@ -33,12 +33,13 @@ async def _(agent: CloversAgent, event: Event):
                 session.extra["shell"] = shell
             await shell.activate()
             session.extra["shell"].workdir = "/workspace"
+            session.extend_tools((agent.manifest["execute_command"],))
             session.payload["tools"].append(agent.manifest["execute_command"])
             prompts.append(f"当前系统：Debian\n当前工作目录: /workspace")
             return "\n".join(prompts)
         except Exception as e:
             logger.error(e)
-    session.payload["tools"].extend(agent.manifest[x] for x in FALLBACK_TOOLS)
+    session.extend_tools(agent.manifest[x] for x in FALLBACK_TOOLS)
     prompts.append(f"当前工作目录: /workspace")
     return "\n".join(prompts)
 

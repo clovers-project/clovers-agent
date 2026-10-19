@@ -5,8 +5,9 @@ from collections import deque
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
-from .typing import Payload, Message, AssistantMessage, SystemMessage
+from typing import TYPE_CHECKING, TypeGuard
+from .typing import Payload, Message, AssistantMessage, SystemMessage, FunctionToolInfo
+from .typing.payload import PayloadWithTools
 from .typing.message import MultimodalContent, TextUserMessage
 
 if TYPE_CHECKING:
@@ -180,3 +181,12 @@ class Session:
         _m.extend(self.payload["messages"][self.cursor :])
         self.cursor = cursor
         self.payload["messages"] = _m
+
+    def extend_tools(self, extends: Iterable[FunctionToolInfo]) -> PayloadWithTools:
+        if "tools" not in self.payload:
+            self.payload["tools"] = []
+            self.payload["tools"].extend(extends)
+        else:
+            used = {tool["function"]["name"] for tool in self.payload["tools"]}
+            self.payload["tools"].extend(x for x in extends if x["function"]["name"] not in used)
+        return self.payload  # type: ignore
