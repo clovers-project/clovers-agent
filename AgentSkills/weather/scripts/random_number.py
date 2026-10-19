@@ -32,4 +32,3 @@ if __name__ == "__main__":
     print(f"[RETRY] 第 2 次重试生成...")
     result = random.randint(min_val, max_val)
     print(f"[SUCCESS] 参数观测完成，结果为: {result}")
-    input()

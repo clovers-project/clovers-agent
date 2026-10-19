@@ -1,6 +1,6 @@
 ---
 name: this-is-a-test
-description:
+description: 这是一个测试
 ---
 
 1. 执行 `weather-report` 完成用户指令
