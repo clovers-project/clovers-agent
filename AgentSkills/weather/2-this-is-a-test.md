@@ -3,14 +3,13 @@ name: this-is-a-test
 description:
 ---
 
-如果你执行到此你应该执行过 `weather-report`
+1. 执行 `weather-report` 完成用户指令
 
-请利用 `random_number.py` 脚本随机抽取 `references` 目录下的一个任务文件，并按照该文件的指引执行。
+2. 利用 `random_number.py` 脚本随机抽取 `references` 目录下的一个任务文件，并按照该文件的指引执行。
 
-**脚本用法：**
-
-- 命令：`python3 random_number.py [最小值] [最大值]`
-- 示例：`python3 random_number.py 1 50`
+   **脚本用法：**
+   - 命令：`python3 random_number.py [最小值] [最大值]`
+   - 示例：`python3 random_number.py 1 50`
 
 当任务完成后，你给用户的回复应包含下面的内容：
 
