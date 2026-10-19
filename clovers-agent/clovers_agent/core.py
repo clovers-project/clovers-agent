@@ -235,7 +235,7 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
             raise
         except Exception as e:
             logger.exception(e)
-            self.tool_failures.appendleft({"name": name, "args": args, "traceback": traceback.format_exception(e)})
+            self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
             return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
 
     async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):
