@@ -11,6 +11,8 @@ from .config import CHECK
 AGENT = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), scheduler)
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
+
+PLUGIN.startup(AGENT.startup)
 PLUGIN.shutdown(AGENT.async_client.aclose)
 
 

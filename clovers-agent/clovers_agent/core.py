@@ -62,16 +62,20 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         # 核心
         self._api = self.create_api(CONFIG.api)
         self._apis = {name: self.create_api(api_config) for name, api_config in CONFIG.apis.items()}
-        from .embedding import SentenceTransformer
-
-        self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
         self.scheduler = scheduler
         # 文件
         path = Path(CONFIG.path)
         self.usage_dir = path / "usages"
         self.session_dir = path / "sessions"
         self.prompts_dir = path / "prompts"
-        self.init_prompts()
+        # Prompts
+        self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
+        self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
+        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
+        self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
+        self._chime_in_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
+        self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
+        self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
         # 状态
         self.today = datetime.now().strftime("%Y-%m-%d")
         self.sessions: dict[str, Session] = {}
@@ -90,11 +94,16 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
         self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
         self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
+
+    def startup(self):
+        from .embedding import SentenceTransformer
+
+        self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
         self.load_from_list(CONFIG.plugins)
         self.load_from_dirs(CONFIG.plugin_dirs)
         self.reload_skills()
         self.sync_menu()
-        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
     def sync_menu(self):
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
@@ -137,16 +146,6 @@ class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
             md.parent.mkdir(parents=True, exist_ok=True)
             md.write_text(prompt, encoding="utf-8")
         return prompt
-
-    def init_prompts(self):
-        logger.info(f"[{self.name}][LOADING PROMPTS]")
-        self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
-        self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
-        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
-        self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
-        self._chime_in_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
-        self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
-        self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
 
     @property
     def style_prompt(self) -> str:
