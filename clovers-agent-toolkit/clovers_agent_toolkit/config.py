@@ -20,7 +20,7 @@ class Config(BaseConfig):
     """docker镜像名称"""
     reminder_threshold: int = 5
     """提醒个人档案更新对话轮数"""
-    profile_memory_size: int = 15
+    profile_memory_size: int = 30
     """个人档案保留记忆条数"""
     strong_reminder_threshold: int = 10
     """强提醒个人档案更新对话轮数"""

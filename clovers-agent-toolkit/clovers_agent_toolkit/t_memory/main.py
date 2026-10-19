@@ -1,5 +1,4 @@
 import time
-from datetime import datetime
 from pathlib import Path
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
