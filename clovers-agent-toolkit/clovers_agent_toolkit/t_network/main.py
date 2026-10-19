@@ -4,7 +4,7 @@ import trafilatura
 from clovers_agent import CloversAgent, Event
 from clovers_agent.utils import is_base64
 from clovers.logger import logger
-from .toolkit import TOOLS, CONFIG
+from ..base import TOOLS, CONFIG
 
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
 BRAVE_URL = CONFIG.BRAVE_URL
@@ -107,20 +107,3 @@ async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: d
         if is_base64(content):
             return "返回结果为 base64 编码, 已拦截。"
     return content
-
-
-# @TOOLS.register(
-#     "get_image_by_url",
-#     "当助手需要查看一个URL图片时调用此工具。",
-#     {"image_url": {"type": "string", "description": "图片的完整 URL 地址"}},
-#     "network",
-# )
-# async def _(agent: CloversAgent, event: Event, image_url: str):
-#     if not image_url.startswith("http"):
-#         image_url = f"https://{image_url}"
-#     session = agent.current_session(event)
-#     b64url = await session.api.download_url(image_url)
-#     if not b64url:
-#         return "资源不存在或非图片格式"
-#     session.current_input.append({"type": "image_url", "image_url": {"url": b64url}})
-#     return "OK"

@@ -5,7 +5,7 @@ import importlib
 from clovers_agent import CloversAgent, Event
 from clovers_agent.core import SKILL_MENU
 from clovers.logger import logger
-from .toolkit import TOOLS
+from ..base import TOOLS
 
 logger.warning("Debug 模式已启用，请勿将此模式用于生产环境。")
 

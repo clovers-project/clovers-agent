@@ -5,11 +5,11 @@ from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY
 from clovers_agent.utils import decode_bytes
 from clovers.logger import logger
-from ..toolkit import TOOLS, CONFIG
+from ..base import TOOLS, CONFIG
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
 DOCKER_IMAGE = CONFIG.docker_image
-BUILTIN_TOOLS = ["ls", "read_files", "write_file"]
+FALLBACK_TOOLS = ["ls", "read_files", "write_file"]
 
 
 @TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
@@ -38,7 +38,7 @@ async def _(agent: CloversAgent, event: Event):
             return "\n".join(prompts)
         except Exception as e:
             logger.error(e)
-    session.payload["tools"].extend(agent.manifest[x] for x in BUILTIN_TOOLS)
+    session.payload["tools"].extend(agent.manifest[x] for x in FALLBACK_TOOLS)
     prompts.append(f"当前工作目录: /workspace")
     return "\n".join(prompts)
 

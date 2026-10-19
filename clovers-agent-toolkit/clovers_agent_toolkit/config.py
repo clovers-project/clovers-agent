@@ -1,5 +1,13 @@
 # from typing import Literal
+from enum import Enum
 from clovers_client import Config as BaseConfig
+
+
+class CATEGORIES(str, Enum):
+    MEMORY = "memory"
+    WORKSPACE = "workspace"
+    NETWORK = "network"
+    DEBUD = "debug"
 
 
 class Config(BaseConfig):
@@ -16,5 +24,8 @@ class Config(BaseConfig):
     """个人档案保留记忆条数"""
     strong_reminder_threshold: int = 10
     """强提醒个人档案更新对话轮数"""
-    debug_mode: bool = False
-    """是否加载调试工具"""
+    use_categories: list[str] = [
+        CATEGORIES.MEMORY,
+        CATEGORIES.WORKSPACE,
+        CATEGORIES.NETWORK,
+    ]
