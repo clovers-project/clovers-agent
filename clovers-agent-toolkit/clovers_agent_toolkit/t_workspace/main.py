@@ -2,14 +2,31 @@ from pathlib import Path
 from datetime import datetime
 from clovers_agent import CloversAgent, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
-from clovers_agent.constants import HIDDEN_CATEGORY
+from clovers_agent.constants import HIDDEN_CATEGORY, SKILL_MENU
 from clovers_agent.utils import decode_bytes
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
 DOCKER_IMAGE = CONFIG.docker_image
-FALLBACK_TOOLS = ["ls", "read_files", "write_file"]
+MAX_SUBAGENT_COUNT = CONFIG.max_subagent_count
+
+SUCCESS_TOOLIST = ("execute_command", "subagent")
+FALLBACK_TOOLIST = ("ls", "read_files", "write_file")
+
+
+@TOOLS.register(
+    "upload_file",
+    "把文件上传给用户。工作区可能对用户不可见，如你想让用户收到文件则必须使用此工具。",
+    {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
+    "workspace",
+)
+async def on_skill(agent: CloversAgent, event: Event, content: str):
+    session = agent.current_session(event)
+    session.api = agent.api("skill")
+    session.payload = session.api.build_payload(session, f"{content}\n{agent.base_prompt}")
+    session.payload["tools"] = [agent.manifest[SKILL_MENU]]
+    return ""
 
 
 @TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
@@ -33,13 +50,12 @@ async def _(agent: CloversAgent, event: Event):
                 session.extra["shell"] = shell
             await shell.activate()
             session.extra["shell"].workdir = "/workspace"
-            session.extend_tools((agent.manifest["execute_command"],))
-            session.payload["tools"].append(agent.manifest["execute_command"])
+            session.extend_tools(agent.manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append(f"当前系统：Debian\n当前工作目录: /workspace")
             return "\n".join(prompts)
         except Exception as e:
             logger.error(e)
-    session.extend_tools(agent.manifest[x] for x in FALLBACK_TOOLS)
+    session.extend_tools(agent.manifest[x] for x in FALLBACK_TOOLIST)
     prompts.append(f"当前工作目录: /workspace")
     return "\n".join(prompts)
 

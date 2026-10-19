@@ -16,6 +16,8 @@ class Config(BaseConfig):
     # use_shell: Literal["docker", "local"] = "docker"
     use_shell: bool = True
     """是否使用shell"""
+    max_subagent_count: int = 8
+    """最大子代理数量"""
     docker_image: str = "nikolaik/python-nodejs:python3.12-nodejs20"
     """docker镜像名称"""
     reminder_threshold: int = 5
