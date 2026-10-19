@@ -27,7 +27,7 @@ FailureRecord = tuple[int, str, ToolCallError]
 
 
 @TOOLS.create_category(DEBUG_UTILS, "调试工具：重新加载模块、查看工具源码、查看工具失败详情")
-async def debug_category(agent: CloversAgent, event: Event) -> str:
+async def _(agent: CloversAgent, event: Event) -> str:
     sections = ["### Debug 模式"]
     if module_name := agent.extra.get("debug_module_name"):
         sections.append(f"当前 Debug 目标: {module_name}")
@@ -136,7 +136,7 @@ Traceback:
     category=DEBUG_UTILS,
     required=[],
 )
-async def reload_module(agent: CloversAgent, event: Event, module_name: str | None = None) -> str:
+async def _(agent: CloversAgent, event: Event, module_name: str | None = None) -> str:
     if module_name is not None:
         agent.extra["debug_module_name"] = module_name
         logger.info("调试目标模块已切换为 %s", module_name)
