@@ -10,9 +10,6 @@ logger.warning("Debug 模式已启用，请勿将此模式用于生产环境。"
 
 DEBUG_UTILS = "debug_utils"
 DEBUG_PROMPT = """\
-### Debug 模式
-{tips}
-
 1. 如工具未正常工作，必须明确告知用户未正常工作工具的完整名称。
 2. `reload_module`不该在工具未正常工作后立即自行调用，必须在开发者要求重试此前发生错误的操作时调用。
     - 若确定调用`reload_module`，那么`reload_module`的调用必须先于其他工具，且不能并行调用其他工具。
@@ -23,12 +20,16 @@ DEBUG_PROMPT = """\
 
 @TOOLS.create_category(DEBUG_UTILS, "调试工具: 包含重新加载模块、查看工具源码、获取上次报错")
 async def _(agent: CloversAgent, event: Event):
-    tips = []
+    tips = ["### Debug 模式"]
     if module_name := agent.extra.get("debug_module_name"):
-        tips.append(f"当前 Debug 目标: {module_name}")
+        tips.append(f"当前 Debug 目标: {module_name}\n")
     else:
-        tips.append(f"当前未指定 Debug 目标，请向用户获取。")
-    return DEBUG_PROMPT.format(tips=tips)
+        tips.append(f"当前未指定 Debug 目标，请向用户获取。\n")
+    tips.append("历史报错信息（靠前较新）：")
+    agent.tool_failures
+
+    tips.append(DEBUG_PROMPT)
+    return "\n".join(tips)
 
 
 @TOOLS.register(
