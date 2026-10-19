@@ -26,6 +26,4 @@ async def weather_report(agent: CloversAgent, event: Event, content: str, city: 
                 continue
             forecast.append(f"{dt.strftime('%Y-%m-%d %H:%M')}|{hour['weatherDesc'][0]['value']}|{hour['tempC']}°C|{hour['precipMM']}mm")
     kwargs["forecast"] = "\n".join(forecast)
-    content = content.format(**kwargs)
-    await event.send("text", content)
-    return content
+    return content.format(**kwargs)
