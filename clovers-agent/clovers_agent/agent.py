@@ -1,8 +1,8 @@
 import sys
-import time
-import json
 import traceback
 import contextlib
+import time
+import json
 import asyncio
 import httpx
 from pathlib import Path
@@ -13,7 +13,7 @@ from clovers.logger import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import invoker_wrapper, AgentTools, AgentSkills, Event
-from .session import Session, TurnSession, SessionComplete
+from .session import iter_recoder, Session, TurnSession, SessionComplete
 from .utils import deep_add, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
@@ -34,10 +34,37 @@ from .constants import (
     READ_REFERENCE,
     READ_REFERENCE_DESC,
 )
-from typing import override
+from typing import override, TypedDict
 from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
+
+
+class ToolCallError(TypedDict):
+    name: str
+    args: dict
+    traceback: list[str]
+
+
+@property
+def style_prompt(self) -> str:
+    """Agent 人物设定核心提示
+
+    需要角色连贯性的回复应含有此系统提示，并在此提示后接该调用系统提示的具体的要求。
+    """
+    return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
+
+
+@property
+def chat_prompt(self) -> str:
+    """Agent 预设的聊天场景。"""
+    return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
+
+
+@property
+def chime_in_prompt(self) -> str:
+    """Agent 主动回复要求"""
+    return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chime_in_prompt) if x)
 
 
 class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
@@ -74,7 +101,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.wait_cooldown = CONFIG.wait_cooldown
         self.chime_in_cooldown = CONFIG.chime_in_cooldown
         # DEBUG
-        self.tool_failures = deque(maxlen=5)
+        self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
         self.extra = {}
         # 技能初始化
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
@@ -93,6 +120,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.load_from_dirs(CONFIG.plugin_dirs)
         self.reload_skills()
         self.sync_menu()
+        self.validate_manifest()
 
     def sync_menu(self):
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
@@ -136,24 +164,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             md.write_text(prompt, encoding="utf-8")
         return prompt
 
-    @property
-    def style_prompt(self) -> str:
-        """Agent 人物设定核心提示
-
-        需要角色连贯性的回复应含有此系统提示，并在此提示后接该调用系统提示的具体的要求。
-        """
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
-
-    @property
-    def chat_prompt(self) -> str:
-        """Agent 预设的聊天场景。"""
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
-
-    @property
-    def chime_in_prompt(self) -> str:
-        """Agent 主动回复要求"""
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chime_in_prompt) if x)
-
     def daily_tasks(self):
         timestamp = time.time()
         sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
@@ -166,7 +176,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.usage_counter.clear()
 
     async def summary_context(self, session: Session):
-        api = self.api("summary")
+        payload = self.sum.build_payload()
+        payload
         payload = api.build_payload((*session, {"role": "user", "content": self.summary_prompt}))
         try:
             summary = (await api.call_api(payload, session.usage_counter))["content"].strip()
@@ -198,7 +209,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             return
         return [coro if isinstance((coro := hook(self, session, event)), str) else await coro for hook in hooks]
 
-    async def invoke_tool(self, event: Event, call_info: ToolCallInfo) -> ToolMessage:
+    async def invoke_tool(self, call_info: ToolCallInfo, session: TurnSession, event: Event) -> ToolMessage:
         name = call_info["function"]["name"]
         tc_id = call_info["id"]
         raw_args = call_info["function"]["arguments"]
@@ -209,7 +220,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except json.JSONDecodeError as e:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}`: bad JSON args"}
         try:
-            invoker = self.invoker[name](self, event, **args)
+            invoker = self.invoker[name](self, session, event, **args)
         except TypeError as e:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}: invalid args: {e}"}
         try:
@@ -218,7 +229,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             raise
         except Exception as e:
             logger.exception(e)
-            self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
+            if self.tool_failures is not None:
+                self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
             return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
 
     async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):
@@ -387,7 +399,7 @@ async def on_chat(agent: CloversAgent, session: TurnSession, event: Event):
     return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
 
 
-async def skill_menu(agent: CloversAgent, event: Event, category: str):
+async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, category: str):
     session = agent.current_session(event)
     if prompts := await agent.activate_category(category, event):
         prompt = "\n".join(x for x in prompts if x)

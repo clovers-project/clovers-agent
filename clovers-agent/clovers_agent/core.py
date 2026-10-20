@@ -1,21 +1,25 @@
-import json
-import traceback
+from __future__ import annotations
 import importlib.util
 import frontmatter
 from pathlib import Path
 from functools import wraps
 from clovers.logger import logger
-from collections import deque, Counter
+from collections import Counter
 from collections.abc import Callable
-from typing import overload, Concatenate, Protocol, TypedDict
+from typing import overload, Concatenate, Protocol, TYPE_CHECKING
 from clovers.base import Coro
-from .typing import FunctionToolInfo, ToolCallInfo, ToolMessage
+from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
-from .session import TurnSession, SessionComplete
+from .session import TurnSession
 from clovers_client import Event as BaseEvent
 
-type ToolFunction[**P] = Callable[Concatenate[AgentTools, TurnSession, Event, P], str | Coro[str]]
-type WrappedToolFunction[**P] = Callable[Concatenate[AgentTools, TurnSession, Event, P], Coro[str]]
+if TYPE_CHECKING:
+    from .agent import CloversAgent
+
+type RawInvoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], ReturnT]
+type Invoker[**P] = RawInvoker[P, Coro[str]]
+
+
 type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
 type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 type IntroK = tuple[None, str]
@@ -27,30 +31,23 @@ class Event(BaseEvent, Protocol):
     extra_context: list[str] = []
 
 
-class ToolCallError(TypedDict):
-    name: str
-    args: dict
-    traceback: list[str]
-
-
 EMPTY_ITER = ()
 
 
 class AgentTools:
     name: str = ""
-    tool_failures: deque[ToolCallError] | None = None
 
     def __init__(
         self,
     ) -> None:
         self.manifest: dict[str, FunctionToolInfo] = {}
-        self.invoker: dict[str, WrappedToolFunction] = {}
+        self.invoker: dict[str, Invoker] = {}
         self.intro_manifest: dict[str, FunctionToolInfo] = {}
-        self.intro_invoker: dict[str, WrappedToolFunction] = {}
+        self.intro_invoker: dict[str, Invoker] = {}
         # 工具组
         self.category_tools_map: dict[str, list[str]] = {}
         self.category_desc_map: dict[str, str] = {}
-        self.category_hooks: dict[str, Counter[ToolFunction]] = {}
+        self.category_hooks: dict[str, Counter[Invoker]] = {}
         # inner
         self._merged: set[AgentTools] = set()
 
@@ -77,7 +74,7 @@ class AgentTools:
             Callable: 用于注册分类钩子的装饰器。
         """
 
-        def decorator(func: ToolFunction) -> ToolFunction:
+        def decorator(func: RawInvoker):
             if category not in self.category_hooks:
                 self.category_hooks[category] = Counter()
             self.category_hooks[category][func] += 1
@@ -111,7 +108,7 @@ class AgentTools:
             Callable: 用于注册工具函数的装饰器。
         """
 
-        def decorator(func: ToolFunction):
+        def decorator(func: RawInvoker):
             name = info["function"]["name"]
             if name in self.intro_invoker:
                 raise ValueError(f"Intro {name} already exists.")
@@ -133,7 +130,7 @@ class AgentTools:
             Callable: 用于注册工具函数的装饰器。
         """
 
-        def decorator(func: ToolFunction):
+        def decorator(func: RawInvoker):
             name = info["function"]["name"]
             if name in self.invoker:
                 raise ValueError(f"Tool {name} already exists.")
@@ -327,36 +324,6 @@ class AgentTools:
             del self.invoker[name]
         self._merged.remove(others)
 
-    async def activate_category(self, name: str, session: TurnSession, event: Event) -> list[str] | None:
-        hooks = self.category_hooks.get(name)
-        if not hooks:
-            return
-        return [coro if isinstance((coro := hook(self, session, event)), str) else await coro for hook in hooks]
-
-    async def invoke_tool(self, call_info: ToolCallInfo, session: TurnSession, event: Event) -> ToolMessage:
-        name = call_info["function"]["name"]
-        tc_id = call_info["id"]
-        raw_args = call_info["function"]["arguments"]
-        if name not in self.invoker:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: not found"}
-        try:
-            args = json.loads(raw_args)
-        except json.JSONDecodeError as e:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}`: bad JSON args"}
-        try:
-            invoker = self.invoker[name](self, session, event, **args)
-        except TypeError as e:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}: invalid args: {e}"}
-        try:
-            return {"role": "tool", "tool_call_id": tc_id, "content": await invoker}
-        except SessionComplete:
-            raise
-        except Exception as e:
-            logger.exception(e)
-            if self.tool_failures is not None:
-                self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
-
 
 class AgentSkills(AgentTools):
     def __init__(self, skill_dirs: list[str]) -> None:
@@ -368,11 +335,11 @@ class AgentSkills(AgentTools):
         self._loaded_categories: set[str] = set()
 
     @overload
-    def load_skill_md(self, skill: SkillMD, category: None, func: ToolFunction | None = None) -> IntroK: ...
+    def load_skill_md(self, skill: SkillMD, category: None, func: RawInvoker | None = None) -> IntroK: ...
     @overload
-    def load_skill_md(self, skill: SkillMD, category: str, func: ToolFunction | None = None) -> SingleK: ...
+    def load_skill_md(self, skill: SkillMD, category: str, func: RawInvoker | None = None) -> SingleK: ...
 
-    def load_skill_md(self, skill: SkillMD, category: str | None = None, func: ToolFunction | None = None):
+    def load_skill_md(self, skill: SkillMD, category: str | None = None, func: RawInvoker | None = None):
         """从 Skill Markdown 数据中注册工具。
 
         Args:
@@ -474,9 +441,9 @@ class AgentSkills(AgentTools):
             self.load_skill(path)
 
 
-def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
+def invoker_wrapper[**P](name: str, func: RawInvoker[P, ...]) -> Invoker[P]:
     @wraps(func)
-    async def wrapper(agent: AgentTools, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+    async def wrapper(agent: CloversAgent, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
         logger.info(f"[{agent.name}][CALL][{name}] called")
         logger.debug(kwargs)
         content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
@@ -500,7 +467,7 @@ def load_module_from_path(module_name: str, file: Path):
     return module
 
 
-def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunction | None:
+def skill_wrapper(content: str, func: RawInvoker | None = None):
     if not content:
         return func
     if func:
