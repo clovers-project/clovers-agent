@@ -38,7 +38,7 @@ EMPTY_ITER = ()
 
 class AgentTools:
     name: str = ""
-    tool_failures: deque[ToolCallError] | None
+    tool_failures: deque[ToolCallError] | None = None
 
     def __init__(
         self,
@@ -51,8 +51,6 @@ class AgentTools:
         self.category_tools_map: dict[str, list[str]] = {}
         self.category_desc_map: dict[str, str] = {}
         self.category_hooks: dict[str, Counter[ToolFunction]] = {}
-        # 报错记录器
-        self.tool_failures = None
 
     def select_tools(self, category: str) -> tuple[FunctionToolInfo, ...]:
         """选择指定工具组中的所有工具。
