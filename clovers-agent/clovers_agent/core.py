@@ -198,7 +198,7 @@ class AgentTools:
             others (SkillCore): 加载的 SkillCore 实例。
         """
         others.validate_manifest()
-        conflict_intros = self.intro_manifest.keys() - self.intro_invoker.keys()
+        conflict_intros = others.intro_manifest.keys() - self.intro_manifest.keys()
         if conflict_intros:
             raise ValueError(f"Intro Manifest conflict: {conflict_intros}")
         conflict_tools = others.manifest.keys() & self.manifest.keys()
