@@ -3,10 +3,9 @@ import contextlib
 import httpx
 import asyncio
 from clovers.logger import logger
-from collections.abc import Iterable
 from .utils import data_url, deep_add
 from typing import override
-from .typing import Message, AssistantMessage, Payload
+from .typing import AssistantMessage, Payload
 from .typing.message import MultimodalContent
 from .config import OpenAIConfig, HybridOpenAIConfig
 from .constants import VISION_TAG, VISION_PROMPT

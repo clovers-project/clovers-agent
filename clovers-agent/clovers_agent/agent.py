@@ -10,7 +10,6 @@ from datetime import datetime
 from collections import deque
 from clovers.core import ModuleLoader
 from clovers.logger import logger
-from clovers_client import Event as BaseEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import AgentTools, AgentSkills, invoker_wrapper
@@ -39,10 +38,6 @@ from typing import Protocol, TypedDict, override
 from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
-
-
-class Event(BaseEvent, Protocol):
-    extra_context: list[str] = []
 
 
 class ToolCallError(TypedDict):

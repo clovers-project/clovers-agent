@@ -1,32 +1,48 @@
-from __future__ import annotations
+import json
+import traceback
 import importlib.util
 import frontmatter
 from pathlib import Path
 from functools import wraps
 from clovers.logger import logger
+from collections import deque, Counter
 from collections.abc import Callable
-from typing import overload, Concatenate, TYPE_CHECKING
+from typing import overload, Concatenate, Protocol, TypedDict
 from clovers.base import Coro
-from .typing import FunctionToolInfo
+from .typing import FunctionToolInfo, ToolCallInfo, ToolMessage
 from .typing.json_schema import JSONSchemaType
+from .session import TurnSession, SessionComplete
+from clovers_client import Event as BaseEvent
 
-if TYPE_CHECKING:
-    from .agent import CloversAgent, Event
-    from .session import TurnSession
-
-type ToolFunction[**P] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], str | Coro[str]]
-type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], Coro[str]]
+type ToolFunction[**P] = Callable[Concatenate[AgentTools, TurnSession, Event, P], str | Coro[str]]
+type WrappedToolFunction[**P] = Callable[Concatenate[AgentTools, TurnSession, Event, P], Coro[str]]
 type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
 type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 type IntroK = tuple[None, str]
 type CategoryK = tuple[str, None]
 type SingleK = tuple[str, str]
 
+
+class Event(BaseEvent, Protocol):
+    extra_context: list[str] = []
+
+
+class ToolCallError(TypedDict):
+    name: str
+    args: dict
+    traceback: list[str]
+
+
 EMPTY_ITER = ()
 
 
 class AgentTools:
-    def __init__(self) -> None:
+    name: str = ""
+    tool_failures: deque[ToolCallError] | None
+
+    def __init__(
+        self,
+    ) -> None:
         self.manifest: dict[str, FunctionToolInfo] = {}
         self.invoker: dict[str, WrappedToolFunction] = {}
         self.intro_manifest: dict[str, FunctionToolInfo] = {}
@@ -34,7 +50,9 @@ class AgentTools:
         # 工具组
         self.category_tools_map: dict[str, list[str]] = {}
         self.category_desc_map: dict[str, str] = {}
-        self.category_hooks: dict[str, set[ToolFunction]] = {}
+        self.category_hooks: dict[str, Counter[ToolFunction]] = {}
+        # 报错记录器
+        self.tool_failures = None
 
     def select_tools(self, category: str) -> tuple[FunctionToolInfo, ...]:
         """选择指定工具组中的所有工具。
@@ -42,7 +60,7 @@ class AgentTools:
             category (str): 选择的工具组。
 
         Returns:
-            list[FunctionToolInfo]: 工具列表。
+            tuple[FunctionToolInfo, ...]: 工具列表。
         """
         if category not in self.category_tools_map.keys():
             return EMPTY_ITER
@@ -61,8 +79,8 @@ class AgentTools:
 
         def decorator(func: ToolFunction) -> ToolFunction:
             if category not in self.category_hooks:
-                self.category_hooks[category] = set()
-            self.category_hooks[category].add(func)
+                self.category_hooks[category] = Counter()
+            self.category_hooks[category][func] += 1
             return func
 
         return decorator
@@ -189,6 +207,23 @@ class AgentTools:
         unimplemented_tools = self.manifest.keys() - self.invoker.keys()
         if unimplemented_tools:
             raise ValueError(f"Unimplemented tools: {unimplemented_tools}")
+        # 存在 Category Desc 一定是本实例 Create 的 Category
+        # 实例可以为非自己创建的 Category 添加 Hook
+        # 但是自己创建的 Category 必须要有 Hook 或者 Tools
+        # 这里验证是修复而非报错
+        for category in list(self.category_desc_map.keys()):
+            if category in self.category_tools_map and not self.category_tools_map[category]:
+                del self.category_tools_map[category]
+            if category in self.category_hooks:
+                self_hooks = self.category_hooks[category]
+                hooks = +self_hooks
+                if hooks:
+                    self_hooks.clear()
+                    self_hooks.update(hooks)
+                else:
+                    del self.category_hooks[category]
+            if category not in self.category_tools_map and category not in self.category_hooks:
+                del self.category_desc_map[category]
         manifest_keys = set(self.manifest.keys())
         if any(set(namelist).difference(manifest_keys) for namelist in self.category_tools_map.values()):
             raise ValueError("Manifest mismatch")
@@ -245,6 +280,12 @@ class AgentTools:
         for category in others.category_desc_map:
             if not category in self.category_desc_map:
                 raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
+        for category, other_hooks in others.category_hooks.items():
+            if not category in self.category_hooks:
+                raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
+            self_hooks = self.category_hooks[category]
+            if set(other_hooks.keys()).difference(self_hooks.keys()):
+                raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
         if missing_intros := others.intro_manifest.keys() - self.intro_manifest.keys():
             raise ValueError(f"Cannot detach: intro_manifest keys {missing_intros} are not present in the current instance.")
         if missing_tools := others.manifest.keys() - self.manifest.keys():
@@ -259,18 +300,49 @@ class AgentTools:
         for category in others.category_desc_map:
             del self.category_desc_map[category]
         for category, other_hooks in others.category_hooks.items():
-            if not category in self.category_hooks:
-                continue
             self_hooks = self.category_hooks[category]
-            self_hooks.difference_update(other_hooks)
-            if not self_hooks:
+            hooks = self_hooks - other_hooks
+            if not hooks:
                 del self.category_hooks[category]
+            else:
+                self_hooks.clear()
+                self_hooks.update(hooks)
         for name in others.intro_manifest.keys():
             del self.intro_manifest[name]
             del self.intro_invoker[name]
         for name in others.manifest.keys():
             del self.manifest[name]
             del self.invoker[name]
+
+    async def activate_category(self, name: str, session: TurnSession, event: Event) -> list[str] | None:
+        hooks = self.category_hooks.get(name)
+        if not hooks:
+            return
+        return [coro if isinstance((coro := hook(self, session, event)), str) else await coro for hook in hooks]
+
+    async def invoke_tool(self, call_info: ToolCallInfo, session: TurnSession, event: Event) -> ToolMessage:
+        name = call_info["function"]["name"]
+        tc_id = call_info["id"]
+        raw_args = call_info["function"]["arguments"]
+        if name not in self.invoker:
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: not found"}
+        try:
+            args = json.loads(raw_args)
+        except json.JSONDecodeError as e:
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}`: bad JSON args"}
+        try:
+            invoker = self.invoker[name](self, session, event, **args)
+        except TypeError as e:
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}: invalid args: {e}"}
+        try:
+            return {"role": "tool", "tool_call_id": tc_id, "content": await invoker}
+        except SessionComplete:
+            raise
+        except Exception as e:
+            logger.exception(e)
+            if self.tool_failures is not None:
+                self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
 
 
 class AgentSkills(AgentTools):
@@ -393,7 +465,7 @@ class AgentSkills(AgentTools):
 
 def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
     @wraps(func)
-    async def wrapper(agent: CloversAgent, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+    async def wrapper(agent: AgentTools, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
         logger.info(f"[{agent.name}][CALL][{name}] called")
         logger.debug(kwargs)
         content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
