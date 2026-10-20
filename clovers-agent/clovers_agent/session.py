@@ -5,9 +5,8 @@ from collections import deque
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, override
 from .typing import Payload, Message, AssistantMessage, SystemMessage, FunctionToolInfo
-from .typing.payload import PayloadWithTools
 from .typing.message import MultimodalContent, TextUserMessage
 
 if TYPE_CHECKING:
@@ -24,14 +23,53 @@ class SessionComplete(Exception):
         self.data = data
 
 
-class Session:
+class TurnSession:
+    api: OpenAIAPI
+    payload: Payload
+    current_input: MultimodalContent
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        self.usage_counter = {}
+        self.unit_prompts: list[str] = []
+        self.scripts_enum: list[str] = []
+        self.references_enum: list[str] = []
+
+    def activate(self):
+        self.cursor = len(self.payload["messages"])
+        unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
+        self.current_input.insert(0, {"type": "text", "text": unit_prompt})
+        self.payload["messages"].append({"role": "user", "content": self.current_input})
+
+    def complete(self, message: str | None = None):
+        self.inactivate()
+        raise SessionComplete(message)
+
+    def inactivate(self):
+        # 按注入顺序删除
+        self.unit_prompts.clear()
+        self.current_input = None  # type: ignore
+        self.api = None  # type: ignore
+        self.payload = None  # type: ignore
+        self.cursor = None  # type: ignore
+        del self.current_input
+        del self.api
+        del self.payload
+        del self.cursor
+        self.scripts_enum.clear()
+        self.references_enum.clear()
+
+    def extend_tools(self, extends: Iterable[FunctionToolInfo]):
+        return extend_tools(self.payload, extends)
+
+
+class Session(TurnSession):
     api: OpenAIAPI
     payload: Payload
     current_input: MultimodalContent
 
     def __init__(self, session_id: str, sentence_model: SentenceTransformer) -> None:
-        # 会话 id
-        self.session_id = session_id
+        super().__init__(session_id)
         # 标准记录
         self.recorder: list[Record] = []
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=SESSION_CONFIG.silence_size)
@@ -46,10 +84,6 @@ class Session:
         self.wait_lock = asyncio.Lock()
         self.last_active_time = 0.0
         self.extra = {}
-        self.usage_counter = {}
-        self.unit_prompts: list[str] = []
-        self.scripts_enum: list[str] = []
-        self.references_enum: list[str] = []
         # 不重要信息
         self.unimportant = False
         self.unimportant_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.unimportant_size)
@@ -59,6 +93,15 @@ class Session:
         self.decoupler = TopicDecoupler(sentence_model, SESSION_CONFIG.decoupler_alpha)
         self.decouple_length = SESSION_CONFIG.decouple_length
         self.decouple_count = 0
+
+    @override
+    def activate(self):
+        for rec in self.unimportant_recorder:
+            self.payload["messages"].extend(rec[:2])
+        if self.image_recorder:
+            self.extend_tools((GET_IMAGE_BY_ID_INFO,))
+            return
+        super().activate()
 
     def __iter__(self):
         for a, b, _ in self.recorder:
@@ -131,38 +174,6 @@ class Session:
             return False
         return self.decoupler.step(message)
 
-    def activate(self):
-        payload = self.payload
-        for rec in self.unimportant_recorder:
-            payload["messages"].extend(rec[:2])
-        self.cursor = len(payload["messages"])
-        unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
-        self.current_input.insert(0, {"type": "text", "text": unit_prompt})
-        payload["messages"].append({"role": "user", "content": self.current_input})
-        if not self.image_recorder:
-            return
-        if "tools" not in payload:
-            payload["tools"] = []
-        payload["tools"].append(GET_IMAGE_BY_ID_INFO)
-
-    def complete(self, message: str | None = None):
-        self.inactivate()
-        raise SessionComplete(message)
-
-    def inactivate(self):
-        # 按注入顺序删除
-        self.unit_prompts.clear()
-        self.current_input = None  # type: ignore
-        self.api = None  # type: ignore
-        self.payload = None  # type: ignore
-        self.cursor = None  # type: ignore
-        del self.current_input
-        del self.api
-        del self.payload
-        del self.cursor
-        self.scripts_enum.clear()
-        self.references_enum.clear()
-
     @property
     def system_message(self) -> SystemMessage:
         message = self.payload["messages"][0]
@@ -182,11 +193,12 @@ class Session:
         self.cursor = cursor
         self.payload["messages"] = _m
 
-    def extend_tools(self, extends: Iterable[FunctionToolInfo]) -> PayloadWithTools:
-        if "tools" not in self.payload:
-            self.payload["tools"] = []
-            self.payload["tools"].extend(extends)
-        else:
-            used = {tool["function"]["name"] for tool in self.payload["tools"]}
-            self.payload["tools"].extend(x for x in extends if x["function"]["name"] not in used)
-        return self.payload  # type: ignore
+
+def extend_tools(payload, extends: Iterable[FunctionToolInfo]) -> list[FunctionToolInfo]:
+    if "tools" not in payload:
+        payload["tools"] = []
+        payload["tools"].extend(extends)
+    else:
+        used = {tool["function"]["name"] for tool in payload["tools"]}
+        payload["tools"].extend(x for x in extends if x["function"]["name"] not in used)
+    return payload["tools"]

@@ -38,7 +38,3 @@ class Payload(TypedDict):
     messages: list[Message]
     tools: NotRequired[list[FunctionToolInfo]]
     response_format: NotRequired[ResponseFormat]
-
-
-class PayloadWithTools(Payload):
-    tools: list[FunctionToolInfo]

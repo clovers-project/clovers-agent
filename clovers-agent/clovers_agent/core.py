@@ -411,10 +411,10 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
         prompt = "\n".join(x for x in prompts if x)
     else:
         prompt = ""
-    payload = session.extend_tools((agent.manifest[SKILL_MENU], *agent.select_tools(category)))
+    payload_tools = session.extend_tools((agent.manifest[SKILL_MENU], *agent.select_tools(category)))
     if scripts_map := agent.scripts_map.get(category):
         if not session.scripts_enum:
-            payload["tools"].append(
+            payload_tools.append(
                 {
                     "type": "function",
                     "function": {
@@ -437,7 +437,7 @@ async def skill_menu(agent: CloversAgent, event: Event, category: str):
         session.scripts_enum.extend(path for path in scripts_map if path not in existing)
     if references_map := agent.references_map.get(category):
         if not session.references_enum:
-            payload["tools"].append(
+            payload_tools.append(
                 {
                     "type": "function",
                     "function": {

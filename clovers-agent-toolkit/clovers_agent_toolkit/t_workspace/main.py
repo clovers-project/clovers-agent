@@ -1,55 +1,42 @@
 from pathlib import Path
 from datetime import datetime
 from clovers_agent import CloversAgent, Event
+from clovers_agent.session import Session
+from clovers_agent.utils import decode_bytes
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, SKILL_MENU
-from clovers_agent.utils import decode_bytes
 from clovers.logger import logger
-from ..base import TOOLS, CONFIG
+from ..base import TOOLS, CONFIG, CATEGORIES
+from .subagent import SubAgent
 
 WORKSPACE = Path(AGENT_CONFIG.path) / "workspace"
 DOCKER_IMAGE = CONFIG.docker_image
 MAX_SUBAGENT_COUNT = CONFIG.max_subagent_count
 
-SUCCESS_TOOLIST = ("execute_command", "subagent")
+SUCCESS_TOOLIST = ("execute_command", "workspace_subagent")
 FALLBACK_TOOLIST = ("ls", "read_files", "write_file")
 
 
-@TOOLS.register(
-    "upload_file",
-    "把文件上传给用户。工作区可能对用户不可见，如你想让用户收到文件则必须使用此工具。",
-    {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
-    "workspace",
-)
-async def on_skill(agent: CloversAgent, event: Event, content: str):
-    session = agent.current_session(event)
-    session.api = agent.api("skill")
-    session.payload = session.api.build_payload(session, f"{content}\n{agent.base_prompt}")
-    session.payload["tools"] = [agent.manifest[SKILL_MENU]]
-    return ""
-
-
-@TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
-async def _(agent: CloversAgent, event: Event):
-    if not WORKSPACE.exists():
-        WORKSPACE.mkdir(parents=True, exist_ok=True)
-    session = agent.current_session(event)
-    readme = WORKSPACE / session.session_id / "README.md"
+async def enter_workspace(agent: CloversAgent, session: Session):
+    workspace_session = session
     prompts = ["# workspace 已初始化\n"]
+    workspace = WORKSPACE / workspace_session.session_id
+    if not workspace.exists():
+        workspace.mkdir(parents=True, exist_ok=True)
+    readme = workspace / "README.md"
     if readme.exists():
         prompts.append(decode_bytes(readme.read_bytes()))
-    assert "tools" in session.payload
     if CONFIG.use_shell:
         try:
-            if "shell" in session.extra:
-                shell = session.extra["shell"]
+            if "shell" in workspace_session.extra:
+                shell = workspace_session.extra["shell"]
             else:
                 from .docker import Shell
 
-                shell = Shell(session.session_id, WORKSPACE, DOCKER_IMAGE)
-                session.extra["shell"] = shell
+                shell = Shell(workspace_session.session_id, WORKSPACE, DOCKER_IMAGE)
+                workspace_session.extra["shell"] = shell
             await shell.activate()
-            session.extra["shell"].workdir = "/workspace"
+            workspace_session.extra["shell"].workdir = "/workspace"
             session.extend_tools(agent.manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append(f"当前系统：Debian\n当前工作目录: /workspace")
             return "\n".join(prompts)
@@ -58,6 +45,25 @@ async def _(agent: CloversAgent, event: Event):
     session.extend_tools(agent.manifest[x] for x in FALLBACK_TOOLIST)
     prompts.append(f"当前工作目录: /workspace")
     return "\n".join(prompts)
+
+
+@TOOLS.register("on_task", "当前用户指令为一个需要调用工具的任务时，调用此工具")
+async def _(agent: CloversAgent, event: Event):
+    session = agent.current_session(event)
+    session.api = agent.api("on_task")
+    session.payload = session.api.build_payload(session, agent.style_prompt)
+    session.payload["tools"] = [
+        agent.manifest[SKILL_MENU],
+        *agent.select_tools(CATEGORIES.WORKSPACE),
+        *agent.select_tools(CATEGORIES.NETWORK),
+    ]
+    return await enter_workspace(agent, session)
+
+
+@TOOLS.create_category("workspace", "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
+async def workspace_category(agent: CloversAgent, event: Event):
+    session = agent.current_session(event)
+    return await enter_workspace(agent, session)
 
 
 def format_path(path: str):
@@ -86,21 +92,55 @@ async def _(agent: CloversAgent, event: Event, file_path: str):
     return "上传成功！"
 
 
-if CONFIG.use_shell:
+@TOOLS.register(
+    "execute_command",
+    "在工作区环境下执行命令",
+    {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
+    HIDDEN_CATEGORY,
+)
+async def _(agent: CloversAgent, event: Event, command: str):
     from .docker import Shell
 
-    @TOOLS.register(
-        "execute_command",
-        "在工作区环境下执行命令",
-        {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
-        HIDDEN_CATEGORY,
-    )
-    async def _(agent: CloversAgent, event: Event, command: str):
-        extra = agent.current_session(event).extra
-        if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
-            return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
-        output = await shell.execute(command)
-        return f"{output}\n当前工作目录: {shell.workdir}"
+    extra = agent.current_session(event).extra
+    if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
+        return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
+    output = await shell.execute(command)
+    return f"{output}\n当前工作目录: {shell.workdir}"
+
+
+@TOOLS.register(
+    "workspace_subagent",
+    "创建一个子代理执行你的指令",
+    {"command": {"type": "string", "description": "任务描述"}},
+    HIDDEN_CATEGORY,
+)
+async def _(agent: CloversAgent, event: Event, command: str):
+    from .docker import Shell
+
+    extra = agent.current_session(event).extra
+    if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
+        return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
+    output = await shell.execute(command)
+    return f"{output}\n当前工作目录: {shell.workdir}"
+
+
+@TOOLS.register(
+    "subagent",
+    "执行一个子代理，返回子代理的编号",
+    {
+        "command": {"type": "string", "description": "给子代理的任务"},
+        "agent_id": {"type": "string", "description": "给子代理的任务"},
+    },
+    HIDDEN_CATEGORY,
+)
+async def _(agent: CloversAgent, event: Event, command: str):
+    from .docker import Shell
+
+    extra = agent.current_session(event).extra
+    if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
+        return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
+    output = await shell.execute(command)
+    return f"{output}\n当前工作目录: {shell.workdir}"
 
 
 def format_size(size: float) -> str:

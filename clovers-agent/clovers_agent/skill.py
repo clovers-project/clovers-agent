@@ -12,9 +12,10 @@ from .typing.json_schema import JSONSchemaType
 
 if TYPE_CHECKING:
     from .core import CloversAgent, Event
+    from .session import TurnSession
 
-type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], str | Coro[str]]
-type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, Event, P], Coro[str]]
+type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Session, Event, P], str | Coro[str]]
+type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, Session, Event, P], Coro[str]]
 type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
 type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 type IntroK = tuple[None, str]
@@ -410,10 +411,10 @@ def load_module_from_path(module_name: str, file: Path):
 
 def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
     @wraps(func)
-    async def wrapper(agent: CloversAgent, event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+    async def wrapper(agent, session, event, /, *args: P.args, **kwargs: P.kwargs) -> str:
         logger.info(f"[{agent.name}][CALL][{name}] called")
         logger.debug(kwargs)
-        content = coro if isinstance(coro := func(agent, event, *args, **kwargs), str) else await coro
+        content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
         logger.debug(f"[{name}][RETURNED] {content}")
         return content
 
@@ -426,11 +427,11 @@ def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunctio
     if func:
 
         @wraps(func)
-        def wrapper(agent, event, **kwargs):
-            return func(agent, event, content=content, **kwargs)
+        def wrapper(agent, session, event, **kwargs):
+            return func(agent, session, event, content=content, **kwargs)
 
         return wrapper
-    return lambda agent, event: content
+    return lambda *_: content
 
 
 def parse_skill(md: Path) -> SkillMD | None:
