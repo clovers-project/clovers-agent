@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from .core import CloversAgent, Event
     from .session import TurnSession
 
-type ToolFunction[**P] = Callable[Concatenate[CloversAgent, Session, Event, P], str | Coro[str]]
-type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, Session, Event, P], Coro[str]]
+type ToolFunction[**P] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], str | Coro[str]]
+type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], Coro[str]]
 type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
 type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 type IntroK = tuple[None, str]
