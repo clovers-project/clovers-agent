@@ -5,7 +5,7 @@ from clovers.logger import logger
 from clovers_client import Event as EventProtocol
 from clovers_client.result import SegmentedResult, SegmentedMessage
 from clovers_apscheduler import scheduler
-from .core import Event, CloversAgent
+from .agent import Event, CloversAgent
 from .config import CHECK
 
 AGENT = CloversAgent("CloversAgent", httpx.AsyncClient(timeout=300), scheduler)

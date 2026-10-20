@@ -1,545 +1,456 @@
-import sys
-import time
-import json
-import traceback
-import contextlib
-import asyncio
-import httpx
+from __future__ import annotations
+import importlib.util
+import frontmatter
 from pathlib import Path
-from datetime import datetime
-from collections import deque
-from clovers.core import ModuleLoader
+from functools import wraps
 from clovers.logger import logger
-from clovers_client import Event as BaseEvent
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from .api import OpenAIAPI, HybridOpenAIAPI
-from .skill import SkillCore, AgentCore, invoker_wrapper
-from .session import Session, SessionComplete
-from .utils import deep_add, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
-from .config import HybridOpenAIConfig, CONFIG, PROMPTS
-from .constants import (
-    SYSTEM_TAG,
-    USER_TAG,
-    ASSISTANT_TAG,
-    ON_CHAT,
-    ON_CHAT_DESC,
-    SKILL_MENU,
-    SKILL_MENU_DESC,
-    BUILTIN_CATEGORY,
-    GET_IMAGE_BY_ID_INFO,
-    EXECUTE_SCRIPT,
-    EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
-    EXECUTE_SCRIPT_MAX_TIMEOUT,
-    EXECUTE_SCRIPT_DESC,
-    EXECUTE_SCRIPT_MAX_TAIL_LEN,
-    READ_REFERENCE,
-    READ_REFERENCE_DESC,
-)
-from typing import Protocol, TypedDict, override
-from .typing import ToolMessage, ToolCallInfo, Payload
-from .typing.message import MultimodalContent
-from .typing.json_schema import BaseJSONSchemaType
+from collections.abc import Callable
+from typing import overload, final, Concatenate, TYPE_CHECKING
+from clovers.base import Coro
+from .typing import FunctionToolInfo
+from .typing.json_schema import JSONSchemaType
+
+if TYPE_CHECKING:
+    from .agent import CloversAgent, Event
+    from .session import TurnSession
+
+type ToolFunction[**P] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], str | Coro[str]]
+type WrappedToolFunction[**P] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], Coro[str]]
+type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
+type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
+type IntroK = tuple[None, str]
+type CategoryK = tuple[str, None]
+type SingleK = tuple[str, str]
 
 
-class Event(BaseEvent, Protocol):
-    extra_context: list[str] = []
+class AgentTools:
+    def __init__(self) -> None:
+        self.manifest: dict[str, FunctionToolInfo] = {}
+        self.invoker: dict[str, WrappedToolFunction] = {}
+        self.intro_manifest: list[FunctionToolInfo] = []
+        self.intro_invoker: dict[str, WrappedToolFunction] = {}
+        # 工具组
+        self.category_tools_map: dict[str, list[FunctionToolInfo]] = {}
+        self.category_desc_map: dict[str, str] = {}
+        self.category_hooks: dict[str, list[ToolFunction]] = {}
 
+    @final
+    def select_tools(self, category: str) -> list[FunctionToolInfo]:
+        """选择指定工具组中的所有工具。
+        Args:
+            category (str): 选择的工具组。
 
-class ToolCallError(TypedDict):
-    name: str
-    args: dict
-    traceback: list[str]
-
-
-class CloversAgent(AgentCore, ModuleLoader[SkillCore]):
-    """OpenAI API"""
-
-    def __init__(self, name: str, async_client: httpx.AsyncClient, scheduler: AsyncIOScheduler) -> None:
-        AgentCore.__init__(self, CONFIG.skill_dirs)
-        ModuleLoader.__init__(self, ["TOOLS"], SkillCore)
-        self.name = name
-        self.async_client = async_client
-        # 核心
-        self._api = self.create_api(CONFIG.api)
-        self._apis = {name: self.create_api(api_config) for name, api_config in CONFIG.apis.items()}
-        self.scheduler = scheduler
-        # 文件
-        path = Path(CONFIG.path)
-        self.usage_dir = path / "usages"
-        self.session_dir = path / "sessions"
-        self.prompts_dir = path / "prompts"
-        # Prompts
-        self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
-        self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
-        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
-        self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
-        self._chime_in_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
-        self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
-        self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
-        # 状态
-        self.today = datetime.now().strftime("%Y-%m-%d")
-        self.sessions: dict[str, Session] = {}
-        self.usage_counter = load_json(self.usage_file) or {}
-        # 聊天配置
-        self.call_depth = CONFIG.call_depth
-        self.wait_cooldown = CONFIG.wait_cooldown
-        self.chime_in_cooldown = CONFIG.chime_in_cooldown
-        # DEBUG
-        self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
-        self.extra = {}
-        # 技能初始化
-        self._category_schema: BaseJSONSchemaType = {"type": "string"}
-        self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
-        self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, BUILTIN_CATEGORY)(skill_menu)
-        self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
-        self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
-        self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
-        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
-
-    def startup(self):
-        from .embedding import SentenceTransformer
-
-        self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
-        self.load_from_list(CONFIG.plugins)
-        self.load_from_dirs(CONFIG.plugin_dirs)
-        self.reload_skills()
-        self.sync_menu()
-
-    def sync_menu(self):
-        self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
-        self._category_schema["enum"] = list(self.category_desc_map.keys())
-
-    def recorder_file(self, session_id: str):
-        return self.session_dir / session_id / "recorder.jsonl"
-
-    @property
-    def usage_file(self):
-        return self.usage_dir / f"{self.today}.json"
-
-    def create_api(self, config: HybridOpenAIConfig):
-        if config.vision:
-            return HybridOpenAIAPI(self.async_client, config)
-        else:
-            return OpenAIAPI(self.async_client, config)
-
-    def api(self, key: str):
-        return self._apis.get(key, self._api)
-
-    @override
-    def _load(self, package: str):
-        tools = super()._load(package)
-        if tools is None:
-            return
-        try:
-            self.merge(tools)
-        except Exception as e:
-            logger.error(f'[{self.name}][LOAD TOOLS] "{package}" load failed: {e}')
-            return
-        logger.info(f'[{self.name}][LOAD TOOLS] "{package}" loaded')
-
-    @staticmethod
-    def load_prompt(md: Path, default_prompt: str):
-        if md.exists():
-            prompt = md.read_text("utf-8")
-        else:
-            prompt = default_prompt
-            md.parent.mkdir(parents=True, exist_ok=True)
-            md.write_text(prompt, encoding="utf-8")
-        return prompt
-
-    @property
-    def style_prompt(self) -> str:
-        """Agent 人物设定核心提示
-
-        需要角色连贯性的回复应含有此系统提示，并在此提示后接该调用系统提示的具体的要求。
+        Returns:
+            list[FunctionToolInfo]: 工具列表。
         """
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
+        if category not in self.category_tools_map:
+            return []
+        return self.category_tools_map[category]
 
-    @property
-    def chat_prompt(self) -> str:
-        """Agent 预设的聊天场景。"""
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
+    def on_category(self, category: str):
+        """添加工具组触发时钩子
 
-    @property
-    def chime_in_prompt(self) -> str:
-        """Agent 主动回复要求"""
-        return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chime_in_prompt) if x)
+        Args:
+            category (str): 要绑定钩子的工具组名称。
 
-    def daily_tasks(self):
-        timestamp = time.time()
-        sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
-        for sessions_id in sessions_ids:
-            del self.sessions[sessions_id]
-        logger.info(f"[{self.name}][SESSIONS_CLEAR]")
-        usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
-        logger.info(f"[{self.name}][USAGE_TODAY] {usage}")
-        self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
-        self.usage_counter.clear()
+        Returns:
+            Callable: 用于注册分类钩子的装饰器。
+        """
 
-    async def summary_context(self, session: Session):
-        api = self.api("summary")
-        payload = api.build_payload((*session, {"role": "user", "content": self.summary_prompt}))
-        try:
-            summary = (await api.call_api(payload, session.usage_counter))["content"].strip()
-            logger.info(f"[{self.name}][SUMMARY]")
-            logger.debug(summary)
-            return summary
-        except Exception as e:
-            logger.error(f"[{self.name}][SUMMARY] {e}")
-            return
+        def decorator(func: ToolFunction) -> ToolFunction:
+            if category not in self.category_hooks:
+                self.category_hooks[category] = []
+            self.category_hooks[category].append(func)
+            return func
 
-    @staticmethod
-    def session_id(event: Event) -> str:
-        return event.group_id or f"private-{event.user_id}"
+        return decorator
 
-    def current_session(self, event: Event):
-        session_id = self.session_id(event)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
+    def create_category(self, category: str, description: str):
+        """创建一个新的工具组。
+
+        Args:
+            category (str): 工具组名称。
+            description (str): 工具组的描述信息。
+
+        Returns:
+            Callable: 用于注册分类钩子的装饰器。
+        """
+
+        if category in self.category_desc_map:
+            raise ValueError(f"Category {category} already exists")
+        self.category_desc_map[category] = description
+        return self.on_category(category)
+
+    def intro_decorator(self, info: FunctionToolInfo):
+        """注册初始化装饰器
+
+        Args:
+            info (FunctionToolInfo): 工具的 OpenAI Function Tool 信息。
+
+        Returns:
+            Callable: 用于注册工具函数的装饰器。
+        """
+
+        def decorator(func: ToolFunction):
+            name = info["function"]["name"]
+            self.intro_manifest.append(info)
+            self.intro_invoker[name] = invoker_wrapper(name, func)
+            return func
+
+        return decorator
+
+    def category_decorator(self, info: FunctionToolInfo, category: str):
+        """注册可分类工具装饰器
+
+        Args:
+            info (FunctionToolInfo): 工具的 OpenAI Function Tool 信息。
+            category (str): 工具所属的工具组。
+
+        Returns:
+            Callable: 用于注册工具函数的装饰器。
+        """
+
+        def decorator(func: ToolFunction):
+            name = info["function"]["name"]
+            if category not in self.category_tools_map:
+                self.category_tools_map[category] = []
+            self.category_tools_map[category].append(info)
+            self.manifest[name] = info
+            self.invoker[name] = invoker_wrapper(name, func)
+            return func
+
+        return decorator
+
+    def register(
+        self,
+        name: str,
+        description: str,
+        parameters: Parameters | None = None,
+        category: str | None = None,
+        required: list[str] | None = None,
+    ):
+        """注册一个工具。
+
+        根据是否指定工具组，将工具注册为介绍类工具或指定工具组中的工具。
+
+        Args:
+            name (str): 工具名称。
+            description (str): 工具描述。
+            parameters (Parameters | None): 工具参数的 JSON Schema 定义。
+            category (str | None): 工具所属的工具组。如果为 None 则注册为初始化工具。。
+            required (list[str] | None): 必填参数名称列表。如果为 None，则所有参数均视为必填。
+
+        Returns:
+            Callable: 用于注册工具函数的装饰器。
+        """
+
+        if name in self.invoker:
+            raise ValueError(f"Tool {name} already exists.")
+        info: FunctionToolInfo = {"type": "function", "function": {"name": name, "description": description}}
+        if parameters:
+            info["function"]["parameters"] = {
+                "type": "object",
+                "properties": parameters,
+                "required": required if required is not None else list(parameters.keys()),
+            }
+        if not category:
+            return self.intro_decorator(info)
         else:
-            session = self.sessions[session_id] = Session(session_id, self.sentence_model)
-            if records := load_jsonl(self.recorder_file(session_id)):
-                session.recorder.extend(records)
-                session.decouple_count = sum(len(m["content"]) for m in session)
-        return session
+            return self.category_decorator(info, category)
 
-    async def activate_category(self, name: str, event: Event) -> list[str] | None:
-        hooks = self.category_hooks.get(name)
-        if hooks:
-            prompts = []
-            for hook in hooks:
-                coro = hook(self, event)
-                if isinstance(coro, str):
-                    prompts.append(coro)
-                else:
-                    prompts.append(await coro)
-            return prompts
+    def remove_intro(self, name: str):
+        """移除初始化工具。
 
-    async def invoke_tool(self, event: Event, call_info: ToolCallInfo) -> ToolMessage:
-        name = call_info["function"]["name"]
-        tc_id = call_info["id"]
-        raw_args = call_info["function"]["arguments"]
-        if name not in self.invoker:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: not found"}
+        Args:
+            name (str): 工具名名称。
+        """
+
+        self.intro_manifest.remove(self.manifest[name])
+        del self.intro_invoker[name]
+
+    def remove_category(self, category: str):
+        """移除工具组。
+
+        Args:
+            category (str): 工具组名。
+        """
+        if category in self.category_tools_map:
+            for info in self.category_tools_map[category]:
+                name = info["function"]["name"]
+                del self.manifest[name]
+                del self.invoker[name]
+            del self.category_tools_map[category]
+        if category in self.category_desc_map:
+            del self.category_desc_map[category]
+        if category in self.category_hooks:
+            del self.category_hooks[category]
+
+    def validate_manifest(self):
+        """验证工具清单的完整性。
+        1. 可选的工具信息必须是清单中的对象。
+        2. 清单中的对象必须拥有实现。
+        """
+        unimplemented = self.manifest.keys() - self.invoker.keys()
+        if unimplemented:
+            raise ValueError(f"Unimplemented tools: {unimplemented}")
+        manifest_co = {id(info) for info in self.manifest.values()}
+        select_co = {id(info) for infos in self.category_tools_map.values() for info in infos}
+        select_co.update(id(info) for info in self.intro_manifest)
+        if select_co.difference(manifest_co):
+            raise ValueError("Manifest mismatch")
+
+    def merge(self, others: "AgentTools"):
+        """从其他 SkillCore 加载。
+
+        Args:
+            others (SkillCore): 加载的 SkillCore 实例。
+        """
+        others.validate_manifest()
+        manifest_conflict = others.manifest.keys() & self.manifest.keys()
+        if manifest_conflict:
+            raise ValueError(f"Manifest conflict: {manifest_conflict}")
+        category_conflict = others.category_desc_map.keys() & self.category_desc_map.keys()
+        if category_conflict:
+            raise ValueError(f"Category conflict: {category_conflict}")
+        # 这些是没有冲突的，可以直接添加
+        self.intro_manifest.extend(others.intro_manifest)
+        self.manifest.update(others.manifest)  # 考虑到 others 的 invoker 可能动态添加工具，这里全部加载
+        self.invoker.update(others.invoker)
+        self.category_desc_map.update(others.category_desc_map)
+        # others 不可以创建一个已有的类，但是可以向一个已有的类添加工具。
+        for category, hook in others.category_hooks.items():
+            if category in self.category_hooks:
+                self.category_hooks[category].extend(hook)
+            else:
+                self.category_hooks[category] = hook.copy()
+        for category, tools in others.category_tools_map.items():
+            if category in self.category_tools_map:
+                self.category_tools_map[category].extend(tools)
+            else:
+                self.category_tools_map[category] = tools.copy()
+
+    def detach(self, others: "AgentTools"):
+        """移除从其他 SkillCore 加载的内容。
+
+        Args:
+            others (SkillCore): 被移除的 SkillCore 实例，`others` 必须是 `self.merge` 过的实例 。
+        """
+        others.validate_manifest()
+        # 验证
+        if any(info not in self.intro_manifest for info in others.intro_manifest):
+            raise ValueError(f"Cannot detach: intro_tools from others are not present in the current instance.")
+        for category, other_tools in others.category_tools_map.items():
+            if not category in self.category_tools_map:
+                raise ValueError(f"Cannot detach: category '{category}' does not exist in the current instance.")
+            self_tools = self.category_tools_map[category]
+            if any(tool not in self_tools for tool in other_tools):
+                raise ValueError(f"Cannot detach: category '{category}' from others are not present in the current instance.")
+        for category in others.category_desc_map:
+            if not category in self.category_desc_map:
+                raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
+        for category, other_hooks in others.category_hooks.items():
+            if not category in self.category_hooks:
+                raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
+            self_hooks = self.category_hooks[category]
+            if any(hook not in self_hooks for hook in other_hooks):
+                raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
+        if missing := others.manifest.keys() - self.manifest.keys():
+            raise ValueError(f"Cannot detach: manifest keys {missing} are not present in the current instance.")
+        # 操作
+        for info in others.intro_manifest:
+            self.intro_manifest.remove(info)
+        for category, other_tools in others.category_tools_map.items():
+            self_tools = self.category_tools_map[category]
+            for info in other_tools:
+                self_tools.remove(info)
+            if not self_tools:
+                del self.category_tools_map[category]
+        for category in others.category_desc_map:
+            del self.category_desc_map[category]
+        for category, other_hooks in others.category_hooks.items():
+            self_hooks = self.category_hooks[category]
+            for hook in other_hooks:
+                self_hooks.remove(hook)
+            if not self_hooks:
+                del self.category_hooks[category]
+        for name in others.manifest.keys():
+            del self.manifest[name]
+            del self.invoker[name]
+
+
+class AgentSkills(AgentTools):
+    name: str
+
+    def __init__(self, skill_dirs: list[str]) -> None:
+        super().__init__()
+        self.scripts_map: dict[str, dict[str, str]] = {}
+        self.references_map: dict[str, dict[str, str]] = {}
+        self._skill_dirs = skill_dirs
+        self._loaded_intros: set[str] = set()
+        self._loaded_categories: set[str] = set()
+
+    @overload
+    def load_skill_md(self, skill: SkillMD, category: None, func: ToolFunction | None = None) -> IntroK: ...
+    @overload
+    def load_skill_md(self, skill: SkillMD, category: str, func: ToolFunction | None = None) -> SingleK: ...
+
+    def load_skill_md(self, skill: SkillMD, category: str | None = None, func: ToolFunction | None = None):
+        """从 Skill Markdown 数据中注册工具。
+
+        Args:
+            skill (SkillMD): 解析后的 Skill Markdown 数据。
+            category (str | None): 工具所属的工具组。
+            func (ToolFunction | None): 工具对应的实际函数。
+
+        Returns:
+            tuple[str | None, str]: 工具组名称和工具名称。
+        """
+
+        name, desc, parameters, required, content = skill
+        register = self.register(name, desc, parameters, category, required)
+        if skill_func := skill_wrapper(content, func):
+            register(skill_func)
+            if category is None:
+                self._loaded_intros.add(name)
+            else:
+                self._loaded_categories.add(category)
+            return category, name
+
+    def load_skill(self, skill_path: Path):
+        """从指定路径加载 Skill。
+
+        1. 当 `skill_path` 指向 Markdown 文件或只有 `SKILL.md` 一篇 `.md` 文件的文件夹:
+            该 Markdown文件会被注册成初始化工具。
+        2. 当 `skill_path 指向包含 `SKILL.md` 和其他 `.md` 文件的文件夹:
+            - `SKILL.md` Front Matter 中的 `name` 会作为工具组名称，`description` 会作为工具组描述，正文会作为工具组 hook 的返回内容。
+            - `*.md` 会被注册为该工具组下的工具。
+
+        当 `skill_path` 指向文件夹时，若 `./skill.py` 内有与 `./*.md` 内定义的工具同名的函数。
+
+        那么 CloversAgent 在调用该工具时会得到 `skill.py` 中同名函数的返回值。
+
+        同名函数必须是一个第3个参数名固定为 `content` ，值为 Markdown 正文文本的 `ToolFunction`
+
+        详见 `AgentSkills/weather`
+
+        Args:
+            skill_path (Path): Skill 文件或 Skill 目录的路径。
+        """
+
+        if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
+            intro_k = self.load_skill_md(skill_md, None)
+            if intro_k:
+                logger.info(f'[{self.name}][LOAD SKILL] "Intro - {intro_k[1]}" loaded')
+            return
+        md_file = skill_path / "SKILL.md"
+        if not (md_file.exists() and (skill_md := parse_skill(md_file))):
+            return
+        module = load_module_from_path(skill_md[0], skill_path / "skill.py")
+        other_mds = [md for file in skill_path.rglob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
+        references = [file for file in (skill_path / "references").rglob("*") if file.is_file()]
+        scripts = [file for file in (skill_path / "scripts").rglob("*") if file.is_file()]
+        if not other_mds and not scripts and not references:
+            intro_k = self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
+            if intro_k:
+                logger.info(f'[{self.name}][LOAD SKILL] "Intro - {intro_k[1]}" loaded')
+            return
+        category, desc, *_, content = skill_md
+        # 加载的 skill 必须独占一个工具组
+        register = self.create_category(category, desc)
+        if skill_func := skill_wrapper(content, getattr(module, category, None)):
+            register(skill_func)
         try:
-            args = json.loads(raw_args)
-        except json.JSONDecodeError as e:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}`: bad JSON args"}
-        try:
-            invoker = self.invoker[name](self, event, **args)
-        except TypeError as e:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}: invalid args: {e}"}
-        try:
-            return {"role": "tool", "tool_call_id": tc_id, "content": await invoker}
-        except SessionComplete:
+            for md in other_mds:
+                self.load_skill_md(md, category, getattr(module, md[0], None))
+        except Exception:
+            self._loaded_categories.discard(category)
+            self.remove_category(category)
             raise
-        except Exception as e:
-            logger.exception(e)
-            self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
+        for script_path in scripts:
+            if not category in self.scripts_map:
+                self.scripts_map[category] = {}
+            path = category / script_path.relative_to(skill_path)
+            self.scripts_map[category][path.as_posix()] = script_path.resolve().as_posix()
+        for reference_path in references:
+            if not category in self.references_map:
+                self.references_map[category] = {}
+            path = category / reference_path.relative_to(skill_path)
+            self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
+        logger.info(f'[{self.name}][LOAD SKILL] "Category - {category}" loaded')
 
-    async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):
-        for _ in range(self.call_depth):
-            message = await api.call_api(payload, usage_counter)
-            if not (tool_calls := message.get("tool_calls")):
-                return message["content"].strip()
-            messages = await asyncio.gather(*(self.invoke_tool(event, x) for x in tool_calls))
-            payload["messages"].append(message)
-            payload["messages"].extend(messages)
-        raise RuntimeError(f"Maximum tool call chain length exceeded")
+    @property
+    def skill_dirs(self):
+        return (_p for _s_dir in self._skill_dirs if (_dir := Path(_s_dir).expanduser()).exists() for _p in _dir.iterdir())
 
-    async def router(self, text_input: str, event: Event, usage_counter: dict):
-        if len(self.intro_tools) < 2:
-            return await on_chat(self, event)
-        api = self.api("router")
-        payload = api.build_payload(({"role": "user", "content": text_input},), self.router_prompt)
-        payload["tools"] = self.intro_tools
-        message = await api.call_api(payload, usage_counter)
-        if "tool_calls" not in message:
-            raise ValueError(f"message must contain tool_calls, but got {message}")
-        category = message["tool_calls"][0]["function"]["name"]
-        logger.info(f"[{self.name}][ROUTER] {category}")
-        await self.invoker[category](self, event)
-        # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
-        return category
-
-    async def chime_in(self, session: Session, content: str):
-        api = self.api("chime_in")
-        payload = api.build_payload(({"role": "user", "content": content},), self.chime_in_prompt)
-        logger.info(f"[{self.name}][CHIME_IN]")
-        resp = await api.call_api(payload, session.usage_counter)
-        return resp["content"].strip()
-
-    async def wait_reply(self, session: Session, content: str):
-        api = self.api("wait")
-        wait_prompt = f"{content}\n{SYSTEM_TAG.format(self.wait_prompt)}"
-        payload = api.build_payload((*session, {"role": "user", "content": wait_prompt}), self.style_prompt)
-        resp = await api.call_api(payload, session.usage_counter)
-        return resp["content"].strip()
-
-    async def handle_chat(self, session: Session, event: Event):
-        timestamp = time.time()
-        now = datetime.fromtimestamp(timestamp)
-        if "nicknames" not in session.extra:
-            session.extra["nicknames"] = {}
-        nicknames = session.extra["nicknames"]
-        nicknames[event.user_id] = event.nickname
-        at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
-        message = event.message
-        if "extra_context" in event.properties:
-            body = f"@ME {at}{message}\n{"\n".join(event.extra_context)}"
-        elif event.to_me:
-            body = f"@ME {at}{message}"
-        else:
-            body = f"{at}{message}"
-            session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
-            if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
-                return
-            if session.execute_lock.locked() or session.wait_lock.locked():
-                return
-            async with session.execute_lock, session.wait_lock:
-                content = "\n".join(x for x, _ in session.silence_recorder)
-                try:
-                    result = await self.chime_in(session, content)
-                except Exception as e:
-                    logger.exception(e)
-                    return
-                session.last_active_time = timestamp
-                pending_records = session.over(content, {"role": "assistant", "content": result}, timestamp)
-                if pending_records:
-                    extend_jsonl(self.recorder_file(session.session_id), pending_records)
-                return result
-        session.refresh(timestamp)
-        session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
-        content = "\n".join(x for x, _ in session.silence_recorder)
-        if session.execute_lock.locked():
-            if session.wait_lock.locked():
-                return
-            silence_duration = timestamp - session.last_active_time
-            if silence_duration < self.wait_cooldown:
-                return
-            async with session.wait_lock:
-                try:
-                    result = await self.wait_reply(session, content)
-                except Exception as e:
-                    logger.exception(e)
-                    return
-                session.last_active_time = timestamp
-                return result
-        async with session.execute_lock:
-            if session.step(body, timestamp) and (summary := await self.summary_context(session)):
-                session.clear()
-                content = summary + "\n" + content
-            quote_content: MultimodalContent = []
-            if (call := event.call("flat_context")) and (flat_context := await call):
-                quote_content.append({"type": "text", "text": "<quote>\n"})
-                for unit in flat_context:
-                    if unit["text"]:
-                        quote_content.append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
-                    if unit["images"]:
-                        quote_content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
-                quote_content.append({"type": "text", "text": "\n</quote>"})
-            chat_content: MultimodalContent = [{"type": "text", "text": content}]
-            image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
-            chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
-            session.current_input = [*quote_content, *chat_content]
-            session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            text_input = [f"{a}\n{ASSISTANT_TAG.format(b)}" for a, b in session.router_recorder]
-            text_input.append(content)
-            try:
-                intro = await self.router("\n".join(text_input), event, session.usage_counter)
-                session.api
-                session.payload
-            except SessionComplete as e:
-                return e.data
-            except Exception as e:
-                logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
-                intro = await on_chat(self, event)
-            try:
-                if intro_prompts := await self.activate_category(intro, event):
-                    session.unit_prompts.extend(intro_prompts)
-            except SessionComplete as e:
-                return e.data
-            except Exception as e:
-                logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
-            session.activate()
-            try:
-                result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
-            except SessionComplete as e:
-                return e.data
-            except Exception as e:
-                session.inactivate()
-                file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
-                save_json(self.session_dir / session.session_id / file, session.payload)
-                logger.exception(e)
-                return
-            session.inactivate()
-            if result:
-                session.last_active_time = timestamp
-                pending_records = session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
-                if pending_records:
-                    extend_jsonl(self.recorder_file(session.session_id), pending_records)
-            return result
-
-    def update_usage(self, usage_counter: dict):
-        if not usage_counter:
-            return
-        deep_add(self.usage_counter, usage_counter)
-        usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
-        usage_counter.clear()
-        logger.info(f"[{self.name}][USAGE] {usage}")
-        save_json(self.usage_file, self.usage_counter)
-
-    async def chat(self, event: Event):
-        session = self.current_session(event)
-        result = await self.handle_chat(session, event)
-        self.update_usage(session.usage_counter)
-        return result
+    def reload_skills(self):
+        for name in self._loaded_intros:
+            self.remove_intro(name)
+        self._loaded_intros.clear()
+        for category in self._loaded_categories:
+            self.remove_category(category)
+        self._loaded_categories.clear()
+        self.scripts_map.clear()
+        self.references_map.clear()
+        for path in self.skill_dirs:
+            self.load_skill(path)
 
 
-async def on_chat(agent: CloversAgent, event: Event):
-    session = agent.current_session(event)
-    session.api = agent.api("chat")
-    session.payload = session.api.build_payload(session, agent.chat_prompt)
-    session.payload["tools"] = [*agent.select_tools(ON_CHAT), agent.manifest[SKILL_MENU]]
-    return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
-
-
-async def skill_menu(agent: CloversAgent, event: Event, category: str):
-    session = agent.current_session(event)
-    if prompts := await agent.activate_category(category, event):
-        prompt = "\n".join(x for x in prompts if x)
-    else:
-        prompt = ""
-    payload_tools = session.extend_tools((agent.manifest[SKILL_MENU], *agent.select_tools(category)))
-    if scripts_map := agent.scripts_map.get(category):
-        if not session.scripts_enum:
-            payload_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": EXECUTE_SCRIPT,
-                        "description": EXECUTE_SCRIPT_DESC,
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "interpreter": {"type": "string"},
-                                "path": {"type": "string", "enum": session.scripts_enum},
-                                "args": {"type": "array", "items": {"type": "string"}},
-                                "timeout": {"type": "number"},
-                            },
-                            "required": ["path"],
-                        },
-                    },
-                }
-            )
-        existing = set(session.scripts_enum)
-        session.scripts_enum.extend(path for path in scripts_map if path not in existing)
-    if references_map := agent.references_map.get(category):
-        if not session.references_enum:
-            payload_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": READ_REFERENCE,
-                        "description": READ_REFERENCE_DESC,
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"path": {"type": "string", "enum": session.references_enum}},
-                            "required": ["path"],
-                        },
-                    },
-                }
-            )
-        existing = set(session.references_enum)
-        session.references_enum.extend(path for path in references_map if path not in existing)
-    return prompt or f"Skills for '{category}' have been loaded."
-
-
-async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
-    session = agent.current_session(event)
-    url = session.image_url(image_id)
-    if not url:
-        return f"Error: [image:{image_id}] is missing."
-    session.current_input.append({"type": "image_url", "image_url": {"url": url}})
-    return "OK"
-
-
-async def cleanup_process(process: asyncio.subprocess.Process):
-    if process.returncode is not None:
+def load_module_from_path(module_name: str, file: Path):
+    spec = importlib.util.spec_from_file_location(module_name, file)
+    if spec is None:
         return
-    process.terminate()
+    module = importlib.util.module_from_spec(spec)
+    if spec.loader is None:
+        return
     try:
-        await asyncio.wait_for(process.wait(), timeout=5)
-    except asyncio.TimeoutError:
-        with contextlib.suppress(Exception):
-            process.kill()
-            await asyncio.wait_for(process.wait(), timeout=5)
+        spec.loader.exec_module(module)
+    except:
+        return
+    return module
 
 
-async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
-    maxlen = tail_length + 2
-    buffer = deque[str](maxlen=maxlen)
-    async for line in reader:
-        buffer.extend(decode_bytes(line.rstrip().rsplit(b"\r", 1)[-1]))
-        buffer.append("\n")
-    if len(buffer) == maxlen:
-        buffer.popleft()
-        buffer.popleft()
-        buffer.popleft()
-        buffer.extendleft("...")
-    return "".join(buffer)
+def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
+    @wraps(func)
+    async def wrapper(agent: CloversAgent, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+        logger.info(f"[{agent.name}][CALL][{name}] called")
+        logger.debug(kwargs)
+        content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
+        logger.debug(f"[{name}][RETURNED] {content}")
+        return content
+
+    return wrapper
 
 
-async def execute_script(
-    agent: CloversAgent,
-    event: Event,
-    interpreter: str = "",
-    path: str = "",
-    args: list[str] | None = None,
-    timeout: int = EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
-):
-    if not path:
-        return "Error: path is missing."
-    if interpreter in ("python", "python3"):
-        cmd = [sys.executable]
-    elif not interpreter:
-        cmd = []
-    else:
-        cmd = [interpreter]
-    cmd.append(agent.scripts_map[path.split("/", 1)[0]][path])  # path 是映射路径，路径规则 "{category}/relative_path"
-    if args:
-        cmd.extend(args)
+def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunction | None:
+    if not content:
+        return func
+    if func:
+
+        @wraps(func)
+        def wrapper(agent, session, event, **kwargs):
+            return func(agent, session, event, content=content, **kwargs)
+
+        return wrapper
+    return lambda *_: content
+
+
+def parse_skill(md: Path) -> SkillMD | None:
     try:
-        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    except FileNotFoundError:
-        return f"ERROR: Interpreter '{interpreter}' not found."
-    except PermissionError:
-        return f"ERROR: Permission denied – cannot execute script."
-    except Exception as e:
-        return f"ERROR: Unexpected error – {e}"
-    try:
-        tasks = (
-            decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
-            decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
-            process.wait(),
-        )
-        if not isinstance(timeout, int):
-            timeout = EXECUTE_SCRIPT_DEFAULT_TIMEOUT
+        skill = frontmatter.loads(md.read_text("utf-8"))
+        name = skill.get("name")
+        if not name or not isinstance(name, str):
+            return
+        desc = skill["description"]
+        if not desc or not isinstance(desc, str):
+            return
+        if schema := skill.get("parameters"):
+            parameters = schema["properties"]  # type: ignore
+            required = schema.get("required")  # type: ignore
         else:
-            timeout = min(timeout, EXECUTE_SCRIPT_MAX_TIMEOUT)
-        out_text, err_text, returncode = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
-        return f"RETURN CODE: {returncode}\nOUT: {out_text}\nERR: {err_text}"
-    except asyncio.TimeoutError:
-        await cleanup_process(process)
-        return f"ERROR: Script execution timed out after {timeout} seconds."
+            parameters = None
+            required = None
+        content = skill.content.strip()
     except Exception as e:
-        await cleanup_process(process)
-        return f"ERROR: Unexpected error – {e}"
-
-
-async def read_reference(agent: CloversAgent, event: Event, path: str):
-    file = Path(agent.references_map[path.split("/", 1)[0]][path])
-    if not file.exists():
-        return f"ERROR: File '{path}' does not exist."
-    return decode_bytes(file.read_bytes())
+        logger.exception(e)
+        return
+    return name.replace("-", "_"), desc, parameters, required, content

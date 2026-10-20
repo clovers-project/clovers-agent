@@ -133,7 +133,7 @@ Please begin your analysis now.
 
 class ConstantConfig(BaseModel):
     # 用户嵌入系统提示词
-    SYSTEM_TAG: str = "<system>\n{}\n</system>"
+    SYSTEM_TAG: str = "<system-reminder>\n{}\n</system-reminder>"
     # 用户名标签
     USER_TAG: str = '<user name="{}">\n{}\n</user>'
     # 模型回复标签

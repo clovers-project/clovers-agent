@@ -6,7 +6,7 @@ from typing import Any
 
 from clovers.logger import logger
 from clovers_agent import CloversAgent, Event
-from clovers_agent.core import ToolCallError
+from clovers_agent.agent import ToolCallError
 
 from ..base import TOOLS
 

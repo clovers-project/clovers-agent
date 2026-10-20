@@ -35,6 +35,11 @@ class TurnSession:
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
 
+    def build_payload(self, system_prompt: str | None = None):
+        if self.cursor is not None:
+            raise RuntimeError("Cannot build payload when session is active")
+        self.payload = self.api.build_payload(system_prompt)
+
     def activate(self):
         self.cursor = len(self.payload["messages"])
         unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
@@ -51,16 +56,21 @@ class TurnSession:
         self.current_input = None  # type: ignore
         self.api = None  # type: ignore
         self.payload = None  # type: ignore
-        self.cursor = None  # type: ignore
+        self.cursor = None
         del self.current_input
         del self.api
         del self.payload
-        del self.cursor
         self.scripts_enum.clear()
         self.references_enum.clear()
 
     def extend_tools(self, extends: Iterable[FunctionToolInfo]):
         return extend_tools(self.payload, extends)
+
+
+def iter_recoder(recorder: Iterable[Record]):
+    for a, b, _ in recorder:
+        yield a
+        yield b
 
 
 class Session(TurnSession):
@@ -104,17 +114,11 @@ class Session(TurnSession):
 
     @override
     def activate(self):
-        for rec in self.unimportant_recorder:
-            self.payload["messages"].extend(rec[:2])
+        self.payload["messages"].extend(iter_recoder(self.unimportant_recorder))
+        self.payload["messages"].extend(iter_recoder(self.recorder))
         if self.image_recorder:
             self.extend_tools((GET_IMAGE_BY_ID_INFO,))
-            return
         super().activate()
-
-    def __iter__(self):
-        for a, b, _ in self.recorder:
-            yield a
-            yield b
 
     def over(self, content: str | MultimodalContent, reply: AssistantMessage, timestamp: float):
         """处理完成"""

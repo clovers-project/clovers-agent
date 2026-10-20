@@ -22,13 +22,11 @@ class OpenAIAPI:
         self.headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
         self.extra_body = config.extra_body
 
-    def build_payload(self, context: Iterable[Message] | None = None, system_prompt: str | None = None) -> Payload:
-        payload: Payload = {"model": self.model, "messages": [], **self.extra_body}  # type: ignore 这里允许额外请求体
+    def build_payload(self, system_prompt: str | None = None) -> Payload:
+        messages = []
         if system_prompt:
-            payload["messages"].append({"role": "system", "content": system_prompt})
-        if context:
-            payload["messages"].extend(context)
-        return payload
+            messages.append({"role": "system", "content": system_prompt})
+        return {"model": self.model, "messages": messages, **self.extra_body}  # type: ignore 这里允许额外请求体
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
         for delay in RETRY_DELAYS:

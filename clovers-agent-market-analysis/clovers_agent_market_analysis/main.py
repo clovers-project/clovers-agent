@@ -1,7 +1,7 @@
 import time
 import pandas as pd
 from datetime import datetime
-from clovers_agent import CloversAgent, Event, SkillCore
+from clovers_agent import CloversAgent, Event, AgentTools
 from clovers.logger import logger
 from .utils import (
     WORKSPACE,
@@ -18,7 +18,7 @@ from .utils import (
     STOCK_ANALYSIS_PROMPT,
 )
 
-TOOLS = SkillCore()
+TOOLS = AgentTools()
 MARKET_ANALYSIS = "market_analysis"
 
 
