@@ -64,35 +64,43 @@ class TurnSession:
 
 
 class Session(TurnSession):
-    api: OpenAIAPI
-    payload: Payload
-    current_input: MultimodalContent
+    def __init__(
+        self,
+        session_id: str,
+        sentence_model: SentenceTransformer,
+        router_size: int = SESSION_CONFIG.router_size,
+        memory_size: int = SESSION_CONFIG.memory_size,
+        memory_timeout: int = SESSION_CONFIG.memory_timeout,
+        silence_size: int = SESSION_CONFIG.silence_size,
+        silence_timeout: int = SESSION_CONFIG.silence_timeout,
+        unimportant_size: int = SESSION_CONFIG.unimportant_size,
+        decoupler_alpha: float = SESSION_CONFIG.decoupler_alpha,
+    ) -> None:
 
-    def __init__(self, session_id: str, sentence_model: SentenceTransformer) -> None:
         super().__init__(session_id)
         # 标准记录
         self.recorder: list[Record] = []
-        self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=SESSION_CONFIG.silence_size)
+        self.router_recorder: deque[tuple[str, str]] = deque(maxlen=router_size)
+        self.memory_size = memory_size
+        self.memory_timeout = memory_timeout
         self.image_recorder: deque[tuple[int, str, float]] = deque()
         self.image_id = count()
-        self.router_recorder: deque[tuple[str, str]] = deque(maxlen=SESSION_CONFIG.router_size)
-        self.memory_timeout = SESSION_CONFIG.memory_timeout
-        self.memory_size = SESSION_CONFIG.memory_size
-        self.silence_timeout = SESSION_CONFIG.silence_timeout
+        self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
+        self.silence_timeout = silence_timeout
+        # 不重要信息
+        self.unimportant = False
+        self.unimportant_recorder: deque[Record] = deque(maxlen=unimportant_size)
+        # 主题分离
+        from .embedding import TopicDecoupler
+
+        self.decoupler = TopicDecoupler(sentence_model, decoupler_alpha)
+        self.decouple_length = SESSION_CONFIG.decouple_length
+        self.decouple_count = 0
         # 状态
         self.execute_lock = asyncio.Lock()
         self.wait_lock = asyncio.Lock()
         self.last_active_time = 0.0
         self.extra = {}
-        # 不重要信息
-        self.unimportant = False
-        self.unimportant_recorder: deque[Record] = deque(maxlen=SESSION_CONFIG.unimportant_size)
-        # 主题分离
-        from .embedding import TopicDecoupler
-
-        self.decoupler = TopicDecoupler(sentence_model, SESSION_CONFIG.decoupler_alpha)
-        self.decouple_length = SESSION_CONFIG.decouple_length
-        self.decouple_count = 0
 
     @override
     def activate(self):
