@@ -393,6 +393,18 @@ class AgentSkills(AgentTools):
             self.load_skill(path)
 
 
+def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
+    @wraps(func)
+    async def wrapper(agent: CloversAgent, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+        logger.info(f"[{agent.name}][CALL][{name}] called")
+        logger.debug(kwargs)
+        content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
+        logger.debug(f"[{name}][RETURNED] {content}")
+        return content
+
+    return wrapper
+
+
 def load_module_from_path(module_name: str, file: Path):
     spec = importlib.util.spec_from_file_location(module_name, file)
     if spec is None:
@@ -405,18 +417,6 @@ def load_module_from_path(module_name: str, file: Path):
     except:
         return
     return module
-
-
-def invoker_wrapper[**P](name: str, func: ToolFunction[P]) -> WrappedToolFunction[P]:
-    @wraps(func)
-    async def wrapper(agent: CloversAgent, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
-        logger.info(f"[{agent.name}][CALL][{name}] called")
-        logger.debug(kwargs)
-        content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
-        logger.debug(f"[{name}][RETURNED] {content}")
-        return content
-
-    return wrapper
 
 
 def skill_wrapper(content: str, func: ToolFunction | None = None) -> ToolFunction | None:
