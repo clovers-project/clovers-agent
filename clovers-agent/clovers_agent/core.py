@@ -51,6 +51,8 @@ class AgentTools:
         self.category_tools_map: dict[str, list[str]] = {}
         self.category_desc_map: dict[str, str] = {}
         self.category_hooks: dict[str, Counter[ToolFunction]] = {}
+        # inner
+        self._merged: set[int] = set()
 
     def select_tools(self, category: str) -> tuple[FunctionToolInfo, ...]:
         """选择指定工具组中的所有工具。
@@ -232,6 +234,9 @@ class AgentTools:
         Args:
             others (SkillCore): 加载的 SkillCore 实例。
         """
+        if id(others) in self._merged:
+            logger.warning(f"[{self.name}][MERGE]{repr(others)} already merged")
+            return
         others.validate_manifest()
         conflict_intros = others.intro_manifest.keys() & self.intro_manifest.keys()
         if conflict_intros:
@@ -267,6 +272,9 @@ class AgentTools:
             others (SkillCore): 被移除的 SkillCore 实例，`others` 必须是 `self.merge` 过的实例 。
             请勿在 `self.merge` 后修改 `others`，否则会导致 `self.detach` 失败或工具残留
         """
+        if id(others) not in self._merged:
+            logger.warning(f"[{self.name}][DETACH]{repr(others)} not merged")
+            return
         others.validate_manifest()
         # 验证
         for category, other_namelist in others.category_tools_map.items():
@@ -275,15 +283,15 @@ class AgentTools:
             self_namelist = self.category_tools_map[category]
             if set(other_namelist).difference(self_namelist):
                 raise ValueError(f"Cannot detach: category '{category}' from others are not present in the current instance.")
-        for category in others.category_desc_map:
-            if not category in self.category_desc_map:
-                raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
         for category, other_hooks in others.category_hooks.items():
             if not category in self.category_hooks:
                 raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
             self_hooks = self.category_hooks[category]
             if set(other_hooks.keys()).difference(self_hooks.keys()):
                 raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
+        for category in others.category_desc_map:
+            if not category in self.category_desc_map:
+                raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
         if missing_intros := others.intro_manifest.keys() - self.intro_manifest.keys():
             raise ValueError(f"Cannot detach: intro_manifest keys {missing_intros} are not present in the current instance.")
         if missing_tools := others.manifest.keys() - self.manifest.keys():
@@ -295,8 +303,6 @@ class AgentTools:
                 self_namelist.remove(other_name)
             if not self_namelist:
                 del self.category_tools_map[category]
-        for category in others.category_desc_map:
-            del self.category_desc_map[category]
         for category, other_hooks in others.category_hooks.items():
             self_hooks = self.category_hooks[category]
             hooks = self_hooks - other_hooks
@@ -305,6 +311,13 @@ class AgentTools:
             else:
                 self_hooks.clear()
                 self_hooks.update(hooks)
+        # others 注册的类别可能被其他工具添加新工具，所以当前还有工具的类别不丢失 Desc
+        for category in others.category_desc_map:
+            if category in self.category_tools_map:
+                continue
+            if category in self.category_hooks:
+                continue
+            del self.category_desc_map[category]
         for name in others.intro_manifest.keys():
             del self.intro_manifest[name]
             del self.intro_invoker[name]
@@ -344,8 +357,6 @@ class AgentTools:
 
 
 class AgentSkills(AgentTools):
-    name: str
-
     def __init__(self, skill_dirs: list[str]) -> None:
         super().__init__()
         self.scripts_map: dict[str, dict[str, str]] = {}

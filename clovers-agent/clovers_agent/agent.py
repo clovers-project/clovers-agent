@@ -34,16 +34,10 @@ from .constants import (
     READ_REFERENCE,
     READ_REFERENCE_DESC,
 )
-from typing import Protocol, TypedDict, override
+from typing import override
 from .typing import ToolMessage, ToolCallInfo, Payload
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
-
-
-class ToolCallError(TypedDict):
-    name: str
-    args: dict
-    traceback: list[str]
 
 
 class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
@@ -80,7 +74,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.wait_cooldown = CONFIG.wait_cooldown
         self.chime_in_cooldown = CONFIG.chime_in_cooldown
         # DEBUG
-        self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
+        self.tool_failures = deque(maxlen=5)
         self.extra = {}
         # 技能初始化
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
