@@ -245,12 +245,6 @@ class AgentTools:
         for category in others.category_desc_map:
             if not category in self.category_desc_map:
                 raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
-        for category, other_hooks in others.category_hooks.items():
-            if not category in self.category_hooks:
-                raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
-            self_hooks = self.category_hooks[category]
-            if other_hooks.difference(self_hooks):
-                raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
         if missing_intros := others.intro_manifest.keys() - self.intro_manifest.keys():
             raise ValueError(f"Cannot detach: intro_manifest keys {missing_intros} are not present in the current instance.")
         if missing_tools := others.manifest.keys() - self.manifest.keys():
@@ -265,6 +259,8 @@ class AgentTools:
         for category in others.category_desc_map:
             del self.category_desc_map[category]
         for category, other_hooks in others.category_hooks.items():
+            if not category in self.category_hooks:
+                continue
             self_hooks = self.category_hooks[category]
             self_hooks.difference_update(other_hooks)
             if not self_hooks:
