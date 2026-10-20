@@ -27,7 +27,7 @@ class AgentTools:
     def __init__(self) -> None:
         self.manifest: dict[str, FunctionToolInfo] = {}
         self.invoker: dict[str, WrappedToolFunction] = {}
-        self.intro_manifest: list[FunctionToolInfo] = []
+        self.intro_manifest: dict[str, FunctionToolInfo] = {}
         self.intro_invoker: dict[str, WrappedToolFunction] = {}
         # 工具组
         self.category_tools_map: dict[str, list[FunctionToolInfo]] = {}
@@ -93,7 +93,7 @@ class AgentTools:
 
         def decorator(func: ToolFunction):
             name = info["function"]["name"]
-            self.intro_manifest.append(info)
+            self.intro_manifest[name] = info
             self.intro_invoker[name] = invoker_wrapper(name, func)
             return func
 
@@ -158,16 +158,6 @@ class AgentTools:
         else:
             return self.category_decorator(info, category)
 
-    def remove_intro(self, name: str):
-        """移除初始化工具。
-
-        Args:
-            name (str): 工具名名称。
-        """
-
-        self.intro_manifest.remove(self.manifest[name])
-        del self.intro_invoker[name]
-
     def remove_category(self, category: str):
         """移除工具组。
 
@@ -190,12 +180,14 @@ class AgentTools:
         1. 可选的工具信息必须是清单中的对象。
         2. 清单中的对象必须拥有实现。
         """
-        unimplemented = self.manifest.keys() - self.invoker.keys()
-        if unimplemented:
-            raise ValueError(f"Unimplemented tools: {unimplemented}")
+        unimplemented_intros = self.intro_manifest.keys() - self.intro_invoker.keys()
+        if unimplemented_intros:
+            raise ValueError(f"Unimplemented intros: {unimplemented_intros}")
+        unimplemented_tools = self.manifest.keys() - self.invoker.keys()
+        if unimplemented_tools:
+            raise ValueError(f"Unimplemented tools: {unimplemented_tools}")
         manifest_co = {id(info) for info in self.manifest.values()}
         select_co = {id(info) for infos in self.category_tools_map.values() for info in infos}
-        select_co.update(id(info) for info in self.intro_manifest)
         if select_co.difference(manifest_co):
             raise ValueError("Manifest mismatch")
 
@@ -206,16 +198,20 @@ class AgentTools:
             others (SkillCore): 加载的 SkillCore 实例。
         """
         others.validate_manifest()
-        manifest_conflict = others.manifest.keys() & self.manifest.keys()
-        if manifest_conflict:
-            raise ValueError(f"Manifest conflict: {manifest_conflict}")
-        category_conflict = others.category_desc_map.keys() & self.category_desc_map.keys()
-        if category_conflict:
-            raise ValueError(f"Category conflict: {category_conflict}")
+        conflict_intros = self.intro_manifest.keys() - self.intro_invoker.keys()
+        if conflict_intros:
+            raise ValueError(f"Intro Manifest conflict: {conflict_intros}")
+        conflict_tools = others.manifest.keys() & self.manifest.keys()
+        if conflict_tools:
+            raise ValueError(f"Tool Manifest conflict: {conflict_tools}")
+        conflict_categories = others.category_desc_map.keys() & self.category_desc_map.keys()
+        if conflict_categories:
+            raise ValueError(f"Category conflict: {conflict_categories}")
         # 这些是没有冲突的，可以直接添加
-        self.intro_manifest.extend(others.intro_manifest)
-        self.manifest.update(others.manifest)  # 考虑到 others 的 invoker 可能动态添加工具，这里全部加载
-        self.invoker.update(others.invoker)
+        self.intro_manifest.update(others.intro_manifest)
+        self.intro_invoker.update((k, others.intro_invoker[k]) for k in others.intro_manifest)
+        self.manifest.update(others.manifest)
+        self.invoker.update((k, others.invoker[k]) for k in others.manifest)
         self.category_desc_map.update(others.category_desc_map)
         # others 不可以创建一个已有的类，但是可以向一个已有的类添加工具。
         for category, hook in others.category_hooks.items():
@@ -237,8 +233,6 @@ class AgentTools:
         """
         others.validate_manifest()
         # 验证
-        if any(info not in self.intro_manifest for info in others.intro_manifest):
-            raise ValueError(f"Cannot detach: intro_tools from others are not present in the current instance.")
         for category, other_tools in others.category_tools_map.items():
             if not category in self.category_tools_map:
                 raise ValueError(f"Cannot detach: category '{category}' does not exist in the current instance.")
@@ -254,11 +248,11 @@ class AgentTools:
             self_hooks = self.category_hooks[category]
             if any(hook not in self_hooks for hook in other_hooks):
                 raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
-        if missing := others.manifest.keys() - self.manifest.keys():
-            raise ValueError(f"Cannot detach: manifest keys {missing} are not present in the current instance.")
+        if intro_missing := others.intro_manifest.keys() - self.intro_manifest.keys():
+            raise ValueError(f"Cannot detach: intro_manifest keys {intro_missing} are not present in the current instance.")
+        if tool_missing := others.manifest.keys() - self.manifest.keys():
+            raise ValueError(f"Cannot detach: manifest keys {tool_missing} are not present in the current instance.")
         # 操作
-        for info in others.intro_manifest:
-            self.intro_manifest.remove(info)
         for category, other_tools in others.category_tools_map.items():
             self_tools = self.category_tools_map[category]
             for info in other_tools:
@@ -273,6 +267,9 @@ class AgentTools:
                 self_hooks.remove(hook)
             if not self_hooks:
                 del self.category_hooks[category]
+        for name in others.intro_manifest.keys():
+            del self.intro_manifest[name]
+            del self.intro_invoker[name]
         for name in others.manifest.keys():
             del self.manifest[name]
             del self.invoker[name]
@@ -384,7 +381,8 @@ class AgentSkills(AgentTools):
 
     def reload_skills(self):
         for name in self._loaded_intros:
-            self.remove_intro(name)
+            del self.intro_manifest[name]
+            del self.intro_invoker[name]
         self._loaded_intros.clear()
         for category in self._loaded_categories:
             self.remove_category(category)
