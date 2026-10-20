@@ -106,7 +106,8 @@ class HybridOpenAIAPI(OpenAIAPI):
 
     async def call_vision(self, content: MultimodalContent, usage_counter: dict):
         try:
-            payload = self.vision.build_payload(({"role": "user", "content": content},), VISION_PROMPT)
+            payload = self.vision.build_payload(VISION_PROMPT)
+            payload["messages"].append({"role": "user", "content": content})
             resp = await self.vision.call_api(payload, usage_counter)
             return resp["content"].strip()
         except Exception as e:
