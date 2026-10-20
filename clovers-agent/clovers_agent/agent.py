@@ -203,17 +203,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.decouple_count = sum(len(m["content"]) for m in session)
         return session
 
-    async def activate_category(self, name: str, event: Event) -> list[str] | None:
+    async def activate_category(self, name: str, session: TurnSession, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
-        if hooks:
-            prompts = []
-            for hook in hooks:
-                coro = hook(self, event)
-                if isinstance(coro, str):
-                    prompts.append(coro)
-                else:
-                    prompts.append(await coro)
-            return prompts
+        if not hooks:
+            return
+        return [coro if isinstance((coro := hook(self, session, event)), str) else await coro for hook in hooks]
 
     async def invoke_tool(self, event: Event, call_info: ToolCallInfo) -> ToolMessage:
         name = call_info["function"]["name"]

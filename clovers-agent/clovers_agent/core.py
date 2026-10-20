@@ -4,7 +4,7 @@ import frontmatter
 from pathlib import Path
 from functools import wraps
 from clovers.logger import logger
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import overload, Concatenate, TYPE_CHECKING
 from clovers.base import Coro
 from .typing import FunctionToolInfo
@@ -32,11 +32,11 @@ class AgentTools:
         self.intro_manifest: dict[str, FunctionToolInfo] = {}
         self.intro_invoker: dict[str, WrappedToolFunction] = {}
         # 工具组
-        self.category_tools_map: dict[str, set[str]] = {}
+        self.category_tools_map: dict[str, list[str]] = {}
         self.category_desc_map: dict[str, str] = {}
         self.category_hooks: dict[str, set[ToolFunction]] = {}
 
-    def select_tools(self, category: str) -> Iterable[FunctionToolInfo]:
+    def select_tools(self, category: str) -> tuple[FunctionToolInfo, ...]:
         """选择指定工具组中的所有工具。
         Args:
             category (str): 选择的工具组。
@@ -46,8 +46,8 @@ class AgentTools:
         """
         if category not in self.category_tools_map.keys():
             return EMPTY_ITER
-        name_set = self.category_tools_map[category]
-        return (self.manifest[name] for name in name_set)
+        namelist = self.category_tools_map[category]
+        return tuple(self.manifest[name] for name in namelist)
 
     def on_category(self, category: str):
         """添加工具组触发时钩子
@@ -92,11 +92,12 @@ class AgentTools:
         Returns:
             Callable: 用于注册工具函数的装饰器。
         """
-        name = info["function"]["name"]
-        if name in self.intro_invoker:
-            raise ValueError(f"Intro {name} already exists.")
 
         def decorator(func: ToolFunction):
+            name = info["function"]["name"]
+            if name in self.intro_invoker:
+                raise ValueError(f"Intro {name} already exists.")
+
             self.intro_manifest[name] = info
             self.intro_invoker[name] = invoker_wrapper(name, func)
             return func
@@ -113,14 +114,14 @@ class AgentTools:
         Returns:
             Callable: 用于注册工具函数的装饰器。
         """
-        name = info["function"]["name"]
-        if name in self.invoker:
-            raise ValueError(f"Tool {name} already exists.")
 
         def decorator(func: ToolFunction):
+            name = info["function"]["name"]
+            if name in self.invoker:
+                raise ValueError(f"Tool {name} already exists.")
             if category not in self.category_tools_map.keys():
-                self.category_tools_map[category] = set()
-            self.category_tools_map[category].add(name)
+                self.category_tools_map[category] = []
+            self.category_tools_map[category].append(name)
             self.manifest[name] = info
             self.invoker[name] = invoker_wrapper(name, func)
             return func
@@ -189,7 +190,7 @@ class AgentTools:
         if unimplemented_tools:
             raise ValueError(f"Unimplemented tools: {unimplemented_tools}")
         manifest_keys = set(self.manifest.keys())
-        if any(name_set.difference(manifest_keys) for name_set in self.category_tools_map.values()):
+        if any(set(namelist).difference(manifest_keys) for namelist in self.category_tools_map.values()):
             raise ValueError("Manifest mismatch")
 
     def merge(self, others: "AgentTools"):
@@ -220,11 +221,11 @@ class AgentTools:
                 self.category_hooks[category].update(hooks)
             else:
                 self.category_hooks[category] = hooks.copy()
-        for category, name_set in others.category_tools_map.items():
+        for category, namelist in others.category_tools_map.items():
             if category in self.category_tools_map:
-                self.category_tools_map[category].update(name_set)
+                self.category_tools_map[category].extend(namelist)
             else:
-                self.category_tools_map[category] = name_set.copy()
+                self.category_tools_map[category] = namelist.copy()
 
     def detach(self, others: "AgentTools"):
         """移除从其他 SkillCore 加载的内容。
@@ -235,11 +236,11 @@ class AgentTools:
         """
         others.validate_manifest()
         # 验证
-        for category, other_name_set in others.category_tools_map.items():
+        for category, other_namelist in others.category_tools_map.items():
             if not category in self.category_tools_map:
                 raise ValueError(f"Cannot detach: category '{category}' does not exist in the current instance.")
-            self_name_set = self.category_tools_map[category]
-            if other_name_set.difference(self_name_set):
+            self_namelist = self.category_tools_map[category]
+            if set(other_namelist).difference(self_namelist):
                 raise ValueError(f"Cannot detach: category '{category}' from others are not present in the current instance.")
         for category in others.category_desc_map:
             if not category in self.category_desc_map:
@@ -255,10 +256,11 @@ class AgentTools:
         if missing_tools := others.manifest.keys() - self.manifest.keys():
             raise ValueError(f"Cannot detach: manifest keys {missing_tools} are not present in the current instance.")
         # 操作
-        for category, other_name_set in others.category_tools_map.items():
-            self_name_set = self.category_tools_map[category]
-            self_name_set.difference_update(other_name_set)
-            if not self_name_set:
+        for category, other_namelist in others.category_tools_map.items():
+            self_namelist = self.category_tools_map[category]
+            for other_name in other_namelist:
+                self_namelist.remove(other_name)
+            if not self_namelist:
                 del self.category_tools_map[category]
         for category in others.category_desc_map:
             del self.category_desc_map[category]
