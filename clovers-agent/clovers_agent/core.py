@@ -52,7 +52,7 @@ class AgentTools:
         self.category_desc_map: dict[str, str] = {}
         self.category_hooks: dict[str, Counter[ToolFunction]] = {}
         # inner
-        self._merged: set[int] = set()
+        self._merged: set[AgentTools] = set()
 
     def select_tools(self, category: str) -> tuple[FunctionToolInfo, ...]:
         """选择指定工具组中的所有工具。
@@ -234,7 +234,7 @@ class AgentTools:
         Args:
             others (SkillCore): 加载的 SkillCore 实例。
         """
-        if id(others) in self._merged:
+        if others in self._merged:
             logger.warning(f"[{self.name}][MERGE]{repr(others)} already merged")
             return
         others.validate_manifest()
@@ -264,6 +264,7 @@ class AgentTools:
                 self.category_tools_map[category].extend(namelist)
             else:
                 self.category_tools_map[category] = namelist.copy()
+        self._merged.add(others)
 
     def detach(self, others: "AgentTools"):
         """移除从其他 SkillCore 加载的内容。
@@ -272,7 +273,7 @@ class AgentTools:
             others (SkillCore): 被移除的 SkillCore 实例，`others` 必须是 `self.merge` 过的实例 。
             请勿在 `self.merge` 后修改 `others`，否则会导致 `self.detach` 失败或工具残留
         """
-        if id(others) not in self._merged:
+        if others not in self._merged:
             logger.warning(f"[{self.name}][DETACH]{repr(others)} not merged")
             return
         others.validate_manifest()
@@ -312,7 +313,7 @@ class AgentTools:
                 self_hooks.clear()
                 self_hooks.update(hooks)
         # others 注册的类别可能被其他工具添加新工具，所以当前还有工具的类别不丢失 Desc
-        for category in others.category_desc_map:
+        for category in self.category_desc_map:
             if category in self.category_tools_map:
                 continue
             if category in self.category_hooks:
@@ -324,6 +325,7 @@ class AgentTools:
         for name in others.manifest.keys():
             del self.manifest[name]
             del self.invoker[name]
+        self._merged.remove(others)
 
     async def activate_category(self, name: str, session: TurnSession, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
