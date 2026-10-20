@@ -26,19 +26,32 @@ class SessionComplete(Exception):
 class TurnSession:
     api: OpenAIAPI
     payload: Payload
-    current_input: MultimodalContent
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(self, session_id: str, usage_counter: dict) -> None:
         self.session_id = session_id
-        self.usage_counter = {}
+        self.usage_counter = usage_counter
         self.unit_prompts: list[str] = []
+        self.current_input: MultimodalContent = []
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
+
+    @property
+    def args(self):
+        return (self.api, self.payload, self.usage_counter)
 
     def build_payload(self, system_prompt: str | None = None):
         if self.cursor is not None:
             raise RuntimeError("Cannot build payload when session is active")
         self.payload = self.api.build_payload(system_prompt)
+
+    def input_text(self, text: str):
+        self.current_input.append({"type": "text", "text": text})
+
+    def input_image(self, image: str):
+        self.current_input.append({"type": "image_url", "image_url": {"url": image}})
+
+    def input_images(self, images: Iterable[str]):
+        self.current_input.extend({"type": "image_url", "image_url": {"url": image}} for image in images)
 
     def activate(self):
         self.cursor = len(self.payload["messages"])
@@ -53,11 +66,10 @@ class TurnSession:
     def inactivate(self):
         # 按注入顺序删除
         self.unit_prompts.clear()
-        self.current_input = None  # type: ignore
+        self.current_input.clear()
         self.api = None  # type: ignore
         self.payload = None  # type: ignore
         self.cursor = None
-        del self.current_input
         del self.api
         del self.payload
         self.scripts_enum.clear()
@@ -87,10 +99,10 @@ class Session(TurnSession):
         decoupler_alpha: float = SESSION_CONFIG.decoupler_alpha,
     ) -> None:
 
-        super().__init__(session_id)
+        super().__init__(session_id, {})
         # 标准记录
         self.recorder: list[Record] = []
-        self.router_recorder: deque[tuple[str, str]] = deque(maxlen=router_size)
+        self.router_recorder: deque[Record] = deque(maxlen=router_size)
         self.memory_size = memory_size
         self.memory_timeout = memory_timeout
         self.image_recorder: deque[tuple[int, str, float]] = deque()
@@ -112,10 +124,33 @@ class Session(TurnSession):
         self.last_active_time = 0.0
         self.extra = {}
 
+    def snapshot(self):
+        if self.cursor is None:
+            return
+        s = TurnSession(self.session_id, self.usage_counter)
+        s.api = self.api
+        payload = self.api.build_payload()
+        payload["messages"] = self.payload["messages"][: self.cursor]
+        s.payload = payload
+        return s
+
+    async def snap_call(self, unit_prompt: str, content: str):
+        if (s := self.snapshot()) is None:
+            return
+        s.unit_prompts.append(unit_prompt)
+        s.input_text(content)
+        s.activate()
+        api, payload, usage_counter = s.args
+        resp = await api.call_api(payload, usage_counter)
+        return resp["content"].strip()
+
+    @property
+    def messages(self):
+        return *iter_recoder(self.unimportant_recorder), *iter_recoder(self.recorder)
+
     @override
     def activate(self):
-        self.payload["messages"].extend(iter_recoder(self.unimportant_recorder))
-        self.payload["messages"].extend(iter_recoder(self.recorder))
+        self.payload["messages"].extend(self.messages)
         if self.image_recorder:
             self.extend_tools((GET_IMAGE_BY_ID_INFO,))
         super().activate()
@@ -136,7 +171,7 @@ class Session(TurnSession):
             content = "".join(contents)
         record: Record = ({"role": "user", "content": content}, reply, timestamp)
         pending_records = list[Record]()
-        self.router_recorder.append((content, reply["content"]))
+        self.router_recorder.append(record)
         if self.unimportant:
             self.unimportant_recorder.append(record)
             self.unimportant = False

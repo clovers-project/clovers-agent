@@ -14,7 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import invoker_wrapper, AgentTools, AgentSkills, Event
 from .session import iter_recoder, Session, TurnSession, SessionComplete
-from .utils import deep_add, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
+from .utils import deep_add, read_file, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     SYSTEM_TAG,
@@ -35,7 +35,7 @@ from .constants import (
     READ_REFERENCE_DESC,
 )
 from typing import override, TypedDict
-from .typing import ToolMessage, ToolCallInfo, Payload
+from .typing import ToolMessage, ToolCallInfo
 from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
 
@@ -44,27 +44,6 @@ class ToolCallError(TypedDict):
     name: str
     args: dict
     traceback: list[str]
-
-
-@property
-def style_prompt(self) -> str:
-    """Agent 人物设定核心提示
-
-    需要角色连贯性的回复应含有此系统提示，并在此提示后接该调用系统提示的具体的要求。
-    """
-    return "\n".join(x for x in (self._style_prompt, self.base_prompt) if x)
-
-
-@property
-def chat_prompt(self) -> str:
-    """Agent 预设的聊天场景。"""
-    return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chat_prompt) if x)
-
-
-@property
-def chime_in_prompt(self) -> str:
-    """Agent 主动回复要求"""
-    return "\n".join(x for x in (self._style_prompt, self.base_prompt, self._chime_in_prompt) if x)
 
 
 class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
@@ -84,25 +63,16 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.usage_dir = path / "usages"
         self.session_dir = path / "sessions"
         self.prompts_dir = path / "prompts"
-        # Prompts
-        self.router_prompt = self.load_prompt(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
-        self._style_prompt = self.load_prompt(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
-        self.base_prompt = self.load_prompt(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
-        self._chat_prompt = self.load_prompt(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
-        self._chime_in_prompt = self.load_prompt(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
-        self.wait_prompt = self.load_prompt(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
-        self.summary_prompt = self.load_prompt(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
         # 状态
         self.today = datetime.now().strftime("%Y-%m-%d")
         self.sessions: dict[str, Session] = {}
         self.usage_counter = load_json(self.usage_file) or {}
+        self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
+        self.extra = {}
         # 聊天配置
         self.call_depth = CONFIG.call_depth
         self.wait_cooldown = CONFIG.wait_cooldown
         self.chime_in_cooldown = CONFIG.chime_in_cooldown
-        # DEBUG
-        self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
-        self.extra = {}
         # 技能初始化
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
@@ -112,10 +82,23 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
+    def reload_prompts(self):
+        # Prompts
+        self.base_prompt = read_file(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
+        style_prompt = read_file(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
+        self.style_prompt = "\n".join(x for x in (style_prompt, self.base_prompt) if x)
+        chat_prompt = read_file(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
+        self.chat_prompt = "\n".join(x for x in (style_prompt, self.base_prompt, chat_prompt) if x)
+        self.chime_in_prompt = read_file(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
+        self.router_prompt = read_file(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
+        self.wait_prompt = read_file(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
+        self.summary_prompt = read_file(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
+
     def startup(self):
         from .embedding import SentenceTransformer
 
         self.sentence_model = SentenceTransformer(CONFIG.sentence_model, cache_folder=CONFIG.sentence_model_cache)
+        self.reload_prompts()
         self.load_from_list(CONFIG.plugins)
         self.load_from_dirs(CONFIG.plugin_dirs)
         self.reload_skills()
@@ -153,16 +136,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             logger.error(f'[{self.name}][LOAD TOOLS] "{package}" load failed: {e}')
             return
         logger.info(f'[{self.name}][LOAD TOOLS] "{package}" loaded')
-
-    @staticmethod
-    def load_prompt(md: Path, default_prompt: str):
-        if md.exists():
-            prompt = md.read_text("utf-8")
-        else:
-            prompt = default_prompt
-            md.parent.mkdir(parents=True, exist_ok=True)
-            md.write_text(prompt, encoding="utf-8")
-        return prompt
 
     def daily_tasks(self):
         timestamp = time.time()
@@ -233,44 +206,37 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
             return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
 
-    async def call_turn(self, api: OpenAIAPI, payload: Payload, usage_counter: dict, event: Event):
+    async def call_turn(self, session: TurnSession, event: Event):
+        api, payload, usage_counter = session.args
         for _ in range(self.call_depth):
             message = await api.call_api(payload, usage_counter)
             if not (tool_calls := message.get("tool_calls")):
                 return message["content"].strip()
-            messages = await asyncio.gather(*(self.invoke_tool(event, x) for x in tool_calls))
+            messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
             payload["messages"].append(message)
             payload["messages"].extend(messages)
         raise RuntimeError(f"Maximum tool call chain length exceeded")
 
-    async def router(self, text_input: str, event: Event, usage_counter: dict):
+    async def router(self, content: str, session: Session, event: Event):
         if len(self.intro_manifest) < 2:
-            return await on_chat(self, event)
-        api = self.api("router")
-        payload = api.build_payload(({"role": "user", "content": text_input},), self.router_prompt)
-        payload["tools"] = self.intro_manifest
+            return await on_chat(self, session, event)
+        s = TurnSession(session.session_id, session.usage_counter)
+        s.api = self.api("router")
+        s.build_payload(self.base_prompt)
+        s.unit_prompts.append(self.router_prompt)
+        s.payload["messages"].extend(iter_recoder(session.router_recorder))
+        s.input_text(content)
+        s.payload["tools"] = list(self.intro_manifest.values())
+        s.activate()
+        api, payload, usage_counter = s.args
         message = await api.call_api(payload, usage_counter)
         if "tool_calls" not in message:
             raise ValueError(f"message must contain tool_calls, but got {message}")
         category = message["tool_calls"][0]["function"]["name"]
         logger.info(f"[{self.name}][ROUTER] {category}")
-        await self.invoker[category](self, event)
+        await self.invoker[category](self, session, event)
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return category
-
-    async def chime_in(self, session: Session, content: str):
-        api = self.api("chime_in")
-        payload = api.build_payload(({"role": "user", "content": content},), self.chime_in_prompt)
-        logger.info(f"[{self.name}][CHIME_IN]")
-        resp = await api.call_api(payload, session.usage_counter)
-        return resp["content"].strip()
-
-    async def wait_reply(self, session: Session, content: str):
-        api = self.api("wait")
-        wait_prompt = f"{content}\n{SYSTEM_TAG.format(self.wait_prompt)}"
-        payload = api.build_payload((*session, {"role": "user", "content": wait_prompt}), self.style_prompt)
-        resp = await api.call_api(payload, session.usage_counter)
-        return resp["content"].strip()
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -295,14 +261,16 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             async with session.execute_lock, session.wait_lock:
                 content = "\n".join(x for x, _ in session.silence_recorder)
                 try:
-                    result = await self.chime_in(session, content)
+                    result = await session.snap_call(self.chime_in_prompt, content)
                 except Exception as e:
                     logger.exception(e)
                     return
-                session.last_active_time = timestamp
-                pending_records = session.over(content, {"role": "assistant", "content": result}, timestamp)
-                if pending_records:
-                    extend_jsonl(self.recorder_file(session.session_id), pending_records)
+                if result:
+                    logger.info(f"[{self.name}][CHIME_IN]")
+                    session.last_active_time = timestamp
+                    pending_records = session.over(content, {"role": "assistant", "content": result}, timestamp)
+                    if pending_records:
+                        extend_jsonl(self.recorder_file(session.session_id), pending_records)
                 return result
         session.refresh(timestamp)
         session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
@@ -315,43 +283,41 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
             async with session.wait_lock:
                 try:
-                    result = await self.wait_reply(session, content)
+                    result = await session.snap_call(self.wait_prompt, content)
                 except Exception as e:
                     logger.exception(e)
                     return
-                session.last_active_time = timestamp
+                if result:
+                    logger.info(f"[{self.name}][WAIT REPLY]")
+                    session.last_active_time = timestamp
                 return result
         async with session.execute_lock:
             if session.step(body, timestamp) and (summary := await self.summary_context(session)):
                 session.clear()
-                content = summary + "\n" + content
-            quote_content: MultimodalContent = []
+                session.input_text(summary)
             if (call := event.call("flat_context")) and (flat_context := await call):
-                quote_content.append({"type": "text", "text": "<quote>\n"})
+                session.input_text("<quote>\n")
                 for unit in flat_context:
                     if unit["text"]:
-                        quote_content.append({"type": "text", "text": f'{unit["nickname"]}:{unit["text"]}'})
+                        session.input_text(f'{unit["nickname"]}:{unit["text"]}')
                     if unit["images"]:
-                        quote_content.extend({"type": "image_url", "image_url": {"url": x}} for x in unit["images"])
-                quote_content.append({"type": "text", "text": "\n</quote>"})
-            chat_content: MultimodalContent = [{"type": "text", "text": content}]
+                        session.input_images(unit["images"])
+                session.input_text("\n</quote>")
+            session.input_text(content)
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
-            chat_content.extend({"type": "image_url", "image_url": {"url": x}} for x in image_list if x)
-            session.current_input = [*quote_content, *chat_content]
+            session.input_images(x for x in image_list if x)
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            text_input = [f"{a}\n{ASSISTANT_TAG.format(b)}" for a, b in session.router_recorder]
-            text_input.append(content)
             try:
-                intro = await self.router("\n".join(text_input), event, session.usage_counter)
+                intro = await self.router(content, session, event)
                 session.api
                 session.payload
             except SessionComplete as e:
                 return e.data
             except Exception as e:
                 logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
-                intro = await on_chat(self, event)
+                intro = await on_chat(self, session, event)
             try:
-                if intro_prompts := await self.activate_category(intro, event):
+                if intro_prompts := await self.activate_category(intro, session, event):
                     session.unit_prompts.extend(intro_prompts)
             except SessionComplete as e:
                 return e.data
@@ -359,7 +325,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
             session.activate()
             try:
-                result = await self.call_turn(session.api, session.payload, session.usage_counter, event)
+                result = await self.call_turn(session, event)
             except SessionComplete as e:
                 return e.data
             except Exception as e:
@@ -368,12 +334,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 save_json(self.session_dir / session.session_id / file, session.payload)
                 logger.exception(e)
                 return
-            session.inactivate()
             if result:
                 session.last_active_time = timestamp
-                pending_records = session.over(chat_content, {"role": "assistant", "content": result}, timestamp)
+                pending_records = session.over(session.current_input, {"role": "assistant", "content": result}, timestamp)
                 if pending_records:
                     extend_jsonl(self.recorder_file(session.session_id), pending_records)
+            session.inactivate()
             return result
 
     def update_usage(self, usage_counter: dict):
@@ -401,7 +367,7 @@ async def on_chat(agent: CloversAgent, session: TurnSession, event: Event):
 
 async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, category: str):
     session = agent.current_session(event)
-    if prompts := await agent.activate_category(category, event):
+    if prompts := await agent.activate_category(category, session, event):
         prompt = "\n".join(x for x in prompts if x)
     else:
         prompt = ""

@@ -43,29 +43,38 @@ def deep_add(total: dict, detail: dict):
     return total
 
 
-def load_json(path: Path):
-    if not path.exists():
+def read_file(file: Path, default_text: str):
+    if file.exists():
+        return file.read_text(encoding="utf-8")
+    else:
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(default_text, encoding="utf-8")
+        return default_text
+
+
+def load_json(file: Path):
+    if not file.exists():
         return
-    with path.open("r", encoding="utf-8") as f:
+    with file.open("r", encoding="utf-8") as f:
         try:
             return json.load(f)
         except json.JSONDecodeError:
             return
 
 
-def save_json(path: Path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.parent / (path.name + ".tmp")
+def save_json(file: Path, data):
+    file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = file.parent / (file.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
-    tmp.replace(path)
+    tmp.replace(file)
 
 
-def load_jsonl(path: Path):
-    if not path.exists():
+def load_jsonl(file: Path):
+    if not file.exists():
         return
     arr = []
-    with path.open("r", encoding="utf-8") as f:
+    with file.open("r", encoding="utf-8") as f:
         try:
             arr.extend(json.loads(data) for line in f if (data := line.strip()))
         except json.JSONDecodeError:
@@ -73,9 +82,9 @@ def load_jsonl(path: Path):
     return arr
 
 
-def extend_jsonl(path: Path, arr: list):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
+def extend_jsonl(file: Path, arr: list):
+    file.parent.mkdir(parents=True, exist_ok=True)
+    with file.open("a", encoding="utf-8") as f:
         for data in arr:
             f.write(json.dumps(data, ensure_ascii=False) + "\n")
 
