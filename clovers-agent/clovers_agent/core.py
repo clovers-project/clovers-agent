@@ -153,10 +153,14 @@ class AgentTools:
                 "properties": parameters,
                 "required": required if required is not None else list(parameters.keys()),
             }
-        if not category:
-            return self.intro_decorator(info)
-        else:
+        if category:
+            if name in self.invoker:
+                raise ValueError(f"Tool {name} already exists.")
             return self.category_decorator(info, category)
+        else:
+            if name in self.invoker:
+                raise ValueError(f"Intro {name} already exists.")
+            return self.intro_decorator(info)
 
     def remove_category(self, category: str):
         """移除工具组。
@@ -198,7 +202,7 @@ class AgentTools:
             others (SkillCore): 加载的 SkillCore 实例。
         """
         others.validate_manifest()
-        conflict_intros = others.intro_manifest.keys() - self.intro_manifest.keys()
+        conflict_intros = others.intro_manifest.keys() & self.intro_manifest.keys()
         if conflict_intros:
             raise ValueError(f"Intro Manifest conflict: {conflict_intros}")
         conflict_tools = others.manifest.keys() & self.manifest.keys()
