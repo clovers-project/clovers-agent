@@ -336,7 +336,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 pending_records = session.over(current_input, {"role": "assistant", "content": result}, timestamp)
                 if pending_records:
                     extend_jsonl(self.recorder_file(session.session_id), pending_records)
-            session.inactivate()
             return result
 
     def update_usage(self, usage_counter: dict):

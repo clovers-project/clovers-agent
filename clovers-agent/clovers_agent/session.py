@@ -5,7 +5,7 @@ from collections import deque
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, override
+from typing import override, Never, TYPE_CHECKING
 from .typing import Payload, Message, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextUserMessage
 
@@ -57,7 +57,7 @@ class TurnSession:
         self.current_input.insert(0, {"type": "text", "text": unit_prompt})
         self.payload["messages"].append({"role": "user", "content": self.current_input})
 
-    def complete(self, message: str | None = None):
+    def complete(self, message: str | None = None) -> Never:
         self.inactivate()
         raise SessionComplete(message)
 
