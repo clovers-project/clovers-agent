@@ -339,9 +339,9 @@ class AgentSkills(AgentTools):
         self._loaded_categories: set[str] = set()
 
     @overload
-    def load_skill_md(self, skill: SkillMD, category: None, func: Invoker | None = None) -> IntroK: ...
+    def load_skill_md(self, skill: SkillMD, category: None = None, func: Invoker | None = None) -> IntroK | None: ...
     @overload
-    def load_skill_md(self, skill: SkillMD, category: str, func: Invoker | None = None) -> SingleK: ...
+    def load_skill_md(self, skill: SkillMD, category: str = ..., func: Invoker | None = None) -> SingleK | None: ...
 
     def load_skill_md(self, skill: SkillMD, category: str | None = None, func: Invoker | None = None):
         """从 Skill Markdown 数据中注册工具。
@@ -356,14 +356,18 @@ class AgentSkills(AgentTools):
         """
 
         name, desc, parameters, required, content = skill
-        register = self.register(name, desc, parameters, category, required)
-        if skill_func := skill_wrapper(content, func):
-            register(skill_func)
-            if category is None:
-                self._loaded_intros.add(name)
-            else:
-                self._loaded_categories.add(category)
-            return category, name
+
+        if content and not func:
+
+            @self.register(name, desc, parameters, category, required)
+            def _(agent: CloversAgent, session: TurnSession, event: Event):
+                session.create_payload(agent.api(name), f"{agent.style_prompt}\n{content}")
+                return name
+
+        elif (f := md_wrapper(content, func)) is None:
+            return
+        self.register(name, desc, parameters, category, required)(f)
+        return category, name
 
     def load_skill(self, skill_path: Path):
         """从指定路径加载 Skill。
@@ -406,8 +410,8 @@ class AgentSkills(AgentTools):
         category, desc, *_, content = skill_md
         # 加载的 skill 必须独占一个工具组
         register = self.create_category(category, desc)
-        if skill_func := skill_wrapper(content, getattr(module, category, None)):
-            register(skill_func)
+        if f := md_wrapper(content, getattr(module, category, None)):
+            register(f)
         try:
             for md in other_mds:
                 self.load_skill_md(md, category, getattr(module, md[0], None))
@@ -457,6 +461,14 @@ def invoker_wrapper[**P](name: str, func: Invoker[P, ...]) -> WrappedInvoker[P]:
     return wrapper
 
 
+def md_wrapper(content: str | None = None, func: Invoker | None = None) -> Invoker | None:
+    if not content:
+        return func
+    if not func:
+        return lambda *_: content
+    return wraps(func)(lambda agent, session, event, **kwargs: func(agent, session, event, content=content, **kwargs))
+
+
 def load_module_from_path(module_name: str, file: Path):
     spec = importlib.util.spec_from_file_location(module_name, file)
     if spec is None:
@@ -469,19 +481,6 @@ def load_module_from_path(module_name: str, file: Path):
     except:
         return
     return module
-
-
-def skill_wrapper(content: str, func: Invoker | None = None):
-    if not content:
-        return func
-    if func:
-
-        @wraps(func)
-        def wrapper(agent, session, event, **kwargs):
-            return func(agent, session, event, content=content, **kwargs)
-
-        return wrapper
-    return lambda *_: content
 
 
 def parse_skill(md: Path) -> SkillMD | None:
