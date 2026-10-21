@@ -149,11 +149,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.usage_counter.clear()
 
     async def summary_context(self, session: Session):
-        payload = self.sum.build_payload()
-        payload
-        payload = api.build_payload((*session, {"role": "user", "content": self.summary_prompt}))
+        s = TurnSession(session.session_id, session.usage_counter)
+        s.build_payload(self.api("summary"))
+        s.payload["messages"].extend(session.messages)
+        s.input_text(self.summary_prompt)
         try:
-            summary = (await api.call_api(payload, session.usage_counter))["content"].strip()
+            resp = await s.call_api()
+            summary = resp["content"].strip()
             logger.info(f"[{self.name}][SUMMARY]")
             logger.debug(summary)
             return summary
@@ -173,7 +175,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session = self.sessions[session_id] = Session(session_id, self.sentence_model)
             if records := load_jsonl(self.recorder_file(session_id)):
                 session.recorder.extend(records)
-                session.decouple_count = sum(len(m["content"]) for m in session)
+                session.decouple_count = sum(len(m["content"]) for m in session.messages)
         return session
 
     async def activate_category(self, name: str, session: TurnSession, event: Event) -> list[str] | None:
@@ -207,35 +209,41 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
 
     async def call_turn(self, session: TurnSession, event: Event):
-        api, payload, usage_counter = session.args
-        for _ in range(self.call_depth):
-            message = await api.call_api(payload, usage_counter)
-            if not (tool_calls := message.get("tool_calls")):
-                return message["content"].strip()
-            messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
-            payload["messages"].append(message)
-            payload["messages"].extend(messages)
-        raise RuntimeError(f"Maximum tool call chain length exceeded")
+        try:
+            for _ in range(self.call_depth):
+                message = await session.call_api()
+                if not (tool_calls := message.get("tool_calls")):
+                    return message["content"].strip()
+                messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
+                session.payload["messages"].append(message)
+                session.payload["messages"].extend(messages)
+            raise RuntimeError(f"Maximum tool call chain length exceeded")
+        except SessionComplete as e:
+            return e.data
+        except Exception as e:
+            logger.exception(e)
+            file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
+            save_json(self.session_dir / session.session_id / file, session.payload)
+            return
 
     async def router(self, content: str, session: Session, event: Event):
         if len(self.intro_manifest) < 2:
             return await on_chat(self, session, event)
         s = TurnSession(session.session_id, session.usage_counter)
-        s.api = self.api("router")
-        s.build_payload(self.base_prompt)
+        s.build_payload(self.api("router"), self.base_prompt)
         s.unit_prompts.append(self.router_prompt)
         s.payload["messages"].extend(iter_recoder(session.router_recorder))
         s.input_text(content)
         s.payload["tools"] = list(self.intro_manifest.values())
         s.activate()
-        api, payload, usage_counter = s.args
-        message = await api.call_api(payload, usage_counter)
+        message = await s.call_api()
         if "tool_calls" not in message:
             raise ValueError(f"message must contain tool_calls, but got {message}")
         category = message["tool_calls"][0]["function"]["name"]
-        logger.info(f"[{self.name}][ROUTER] {category}")
-        await self.invoker[category](self, session, event)
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
+        await self.invoker[category](self, session, event)
+        session.api
+        session.payload
         return category
 
     async def handle_chat(self, session: Session, event: Event):
@@ -309,13 +317,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             try:
                 intro = await self.router(content, session, event)
-                session.api
-                session.payload
+                logger.info(f"[{self.name}][ROUTER] {intro}")
             except SessionComplete as e:
                 return e.data
             except Exception as e:
-                logger.warning(f"[{self.name}][ROUTER] {ON_CHAT} {e}")
                 intro = await on_chat(self, session, event)
+                logger.warning(f"[{self.name}][ROUTER] {intro} {e}")
             try:
                 if intro_prompts := await self.activate_category(intro, session, event):
                     session.unit_prompts.extend(intro_prompts)
@@ -324,16 +331,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
             session.activate()
-            try:
-                result = await self.call_turn(session, event)
-            except SessionComplete as e:
-                return e.data
-            except Exception as e:
-                session.inactivate()
-                file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
-                save_json(self.session_dir / session.session_id / file, session.payload)
-                logger.exception(e)
-                return
+            result = await self.call_turn(session, event)
             if result:
                 session.last_active_time = timestamp
                 pending_records = session.over(session.current_input, {"role": "assistant", "content": result}, timestamp)
@@ -359,8 +357,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 
 
 async def on_chat(agent: CloversAgent, session: TurnSession, event: Event):
-    session.api = agent.api("chat")
-    session.build_payload(agent.style_prompt)
+    session.build_payload(agent.api("chat"), agent.style_prompt)
     session.payload["tools"] = [*agent.select_tools(ON_CHAT), agent.manifest[SKILL_MENU]]
     return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
 
@@ -416,7 +413,7 @@ async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, ca
     return prompt or f"Skills for '{category}' have been loaded."
 
 
-async def view_id_image(agent: CloversAgent, event: Event, image_id: int):
+async def view_id_image(agent: CloversAgent, session: TurnSession, event: Event, image_id: int):
     session = agent.current_session(event)
     url = session.image_url(image_id)
     if not url:
@@ -453,6 +450,7 @@ async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
 
 async def execute_script(
     agent: CloversAgent,
+    session: TurnSession,
     event: Event,
     interpreter: str = "",
     path: str = "",
@@ -498,7 +496,7 @@ async def execute_script(
         return f"ERROR: Unexpected error – {e}"
 
 
-async def read_reference(agent: CloversAgent, event: Event, path: str):
+async def read_reference(agent: CloversAgent, session: TurnSession, event: Event, path: str):
     file = Path(agent.references_map[path.split("/", 1)[0]][path])
     if not file.exists():
         return f"ERROR: File '{path}' does not exist."

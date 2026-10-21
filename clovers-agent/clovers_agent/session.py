@@ -35,13 +35,10 @@ class TurnSession:
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
 
-    @property
-    def args(self):
-        return (self.api, self.payload, self.usage_counter)
-
-    def build_payload(self, system_prompt: str | None = None):
+    def build_payload(self, api: OpenAIAPI, system_prompt: str | None = None):
         if self.cursor is not None:
             raise RuntimeError("Cannot build payload when session is active")
+        self.api = api
         self.payload = self.api.build_payload(system_prompt)
 
     def input_text(self, text: str):
@@ -77,6 +74,9 @@ class TurnSession:
 
     def extend_tools(self, extends: Iterable[FunctionToolInfo]):
         return extend_tools(self.payload, extends)
+
+    def call_api(self):
+        return self.api.call_api(self.payload, self.usage_counter)
 
 
 def iter_recoder(recorder: Iterable[Record]):
@@ -128,10 +128,8 @@ class Session(TurnSession):
         if self.cursor is None:
             return
         s = TurnSession(self.session_id, self.usage_counter)
-        s.api = self.api
-        payload = self.api.build_payload()
-        payload["messages"] = self.payload["messages"][: self.cursor]
-        s.payload = payload
+        s.build_payload(self.api)
+        s.payload["messages"].extend(self.payload["messages"][: self.cursor])
         return s
 
     async def snap_call(self, unit_prompt: str, content: str):
@@ -140,8 +138,7 @@ class Session(TurnSession):
         s.unit_prompts.append(unit_prompt)
         s.input_text(content)
         s.activate()
-        api, payload, usage_counter = s.args
-        resp = await api.call_api(payload, usage_counter)
+        resp = await s.call_api()
         return resp["content"].strip()
 
     @property
