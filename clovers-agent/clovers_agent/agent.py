@@ -34,7 +34,6 @@ from .constants import (
 )
 from typing import override, TypedDict
 from .typing import ToolMessage, ToolCallInfo
-from .typing.message import MultimodalContent
 from .typing.json_schema import BaseJSONSchemaType
 
 

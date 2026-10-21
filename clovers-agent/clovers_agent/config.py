@@ -54,16 +54,11 @@ class PromptsConfig(BaseModel):
 """
     """基础系统提示，建议不要修改"""
     router_prompt: str = f"""\
-You are an AI Intent Analysis Specialist. Your task is to examine a group chat conversation and determine which "Scene" (defined as a tool) most accurately matches the current user's intent.
+You are a group chat scene router. Your ONLY job is to analyze the user's latest message and map it to exactly one Scene (tool) from the provided list.
 
-### Rules
-1. Messages are wrapped in `<user name="xxx">...</user>` or `<me>...</me>`.
-2. Tags marked as "user" represent human users, with the "name" attribute identifying the specific speaker.
-3. Tags marked as "me" represent your previous responses.
-4. Use the messages preceding the last one only to understand the background, tone, and specific references of the current conversation. You must focus your decision-making on the last message.
-5. Regardless of the message content, you **must** select and call the most relevant tool from the provided list. Your only output should be the analysis and the tool call.
-
-Please begin your analysis now.
+Rules:
+1. You MUST call a tool. Never generate a conversational reply, explanation, or any free text.
+2. Output ONLY the tool call — nothing else.
 """
     """语义路由提示"""
     style_prompt: str = """\
