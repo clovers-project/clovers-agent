@@ -33,7 +33,7 @@ class SessionConfig(BaseModel):
     """静默储存超时时间"""
     silence_size: int = 10
     """静默储存长度"""
-    decouple_length: int = 20000
+    decouple_length: int = 3000
     """话题解藕长度（字数）"""
     decoupler_alpha: float = 0.8
     """话题解藕器前文指数衰减系数"""
@@ -69,7 +69,6 @@ Rules:
 """
     """对话风格提示 这里是助手的基本人设"""
     chat_prompt: str = """\
-在回复之前请检查你的工具描述，判断是否应该触发工具调用。
 以下是你的回复准则，请严格遵守：
 
 ### 回复格式

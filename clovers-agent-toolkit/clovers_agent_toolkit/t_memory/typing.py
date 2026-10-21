@@ -12,7 +12,7 @@ type MemoryItemTuple = tuple[str, int]
 
 
 class UserProfile(BaseModel):
-    nickname: str
+    nickname: str = ""
     address_as: str = ""
     tags: str = ""
     preferences: str = ""

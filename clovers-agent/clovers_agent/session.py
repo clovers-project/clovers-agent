@@ -100,6 +100,9 @@ class TurnSession:
         s.unit_prompts.append(unit_prompt)
         s.input_text(content)
         s.activate()
+        from .api import pretty_payload
+
+        print("\n".join(pretty_payload(s.payload)))
         resp = await s.call_api()
         return resp["content"].strip()
 

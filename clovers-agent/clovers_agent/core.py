@@ -357,17 +357,9 @@ class AgentSkills(AgentTools):
 
         name, desc, parameters, required, content = skill
 
-        if content and not func:
-
-            @self.register(name, desc, parameters, category, required)
-            def _(agent: CloversAgent, session: TurnSession, event: Event):
-                session.create_payload(agent.api(name), f"{agent.style_prompt}\n{content}")
-                return name
-
-        elif (f := md_wrapper(content, func)) is None:
-            return
-        self.register(name, desc, parameters, category, required)(f)
-        return category, name
+        if f := md_wrapper(content, func, None if category else name):
+            self.register(name, desc, parameters, category, required)(f)
+            return category, name
 
     def load_skill(self, skill_path: Path):
         """从指定路径加载 Skill。
@@ -461,12 +453,20 @@ def invoker_wrapper[**P](name: str, func: Invoker[P, ...]) -> WrappedInvoker[P]:
     return wrapper
 
 
-def md_wrapper(content: str | None = None, func: Invoker | None = None) -> Invoker | None:
+def md_wrapper(content: str | None = None, func: Invoker | None = None, intro: str | None = None) -> Invoker | None:
     if not content:
         return func
-    if not func:
+    if func:
+        return wraps(func)(lambda agent, session, event, **kwargs: func(agent, session, event, content=content, **kwargs))
+    if not intro:
         return lambda *_: content
-    return wraps(func)(lambda agent, session, event, **kwargs: func(agent, session, event, content=content, **kwargs))
+
+    def f(agent: CloversAgent, session: TurnSession, event: Event):
+        session.create_payload(agent.api(intro), agent.style_prompt)
+        session.unit_prompts.append(content)
+        return intro
+
+    return f
 
 
 def load_module_from_path(module_name: str, file: Path):

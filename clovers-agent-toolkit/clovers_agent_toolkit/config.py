@@ -20,11 +20,11 @@ class Config(BaseConfig):
     """最大子代理数量"""
     docker_image: str = "nikolaik/python-nodejs:python3.12-nodejs20"
     """docker镜像名称"""
-    reminder_threshold: int = 5
+    reminder_threshold: int = 8
     """提醒个人档案更新对话轮数"""
     profile_memory_size: int = 30
     """个人档案保留记忆条数"""
-    strong_reminder_threshold: int = 10
+    strong_reminder_threshold: int = 16
     """强提醒个人档案更新对话轮数"""
     use_categories: list[str] = [
         CATEGORIES.MEMORY,
