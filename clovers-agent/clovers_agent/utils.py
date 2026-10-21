@@ -1,10 +1,13 @@
 import re
 import json
 import base64
+import contextlib
 from pathlib import Path
 
+import httpx
 import chardet
 import puremagic
+from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_random_exponential
 
 B64_PATTERN = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
 
@@ -94,3 +97,25 @@ def decode_bytes(btext: bytes | bytearray):
         return btext.decode(encoding=encoding or "ascii")
     except (UnicodeDecodeError, LookupError):
         return ""
+
+
+def httpx_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code == 429 or exc.response.status_code >= 500
+    return isinstance(exc, httpx.RequestError)
+
+
+def retry_httpx(retries: int = 5, max_delay: float = 8.0):
+    backoff = wait_random_exponential(multiplier=1, max=max_delay)
+
+    def wait(state: RetryCallState) -> float:
+        outcome = state.outcome
+        if outcome is None:
+            return backoff(state)
+        exc = outcome.exception()
+        if isinstance(exc, httpx.HTTPStatusError) and (x := exc.response.headers.get("retry-after")):
+            with contextlib.suppress(ValueError):
+                return min(float(x), max_delay)
+        return backoff(state)
+
+    return retry(stop=stop_after_attempt(retries), wait=wait, retry=retry_if_exception(httpx_retryable), reraise=True)

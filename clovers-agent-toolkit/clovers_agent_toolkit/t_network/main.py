@@ -1,8 +1,7 @@
-import asyncio
-import httpx
+import json
 import trafilatura
-from clovers_agent import CloversAgent, Event
-from clovers_agent.utils import is_base64
+from clovers_agent import CloversAgent, TurnSession, Event
+from clovers_agent.utils import is_base64, retry_httpx
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG
 
@@ -19,36 +18,25 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
     {"query": {"type": "string", "description": "搜索关键词"}},
     "network",
 )
-async def _(agent: CloversAgent, event: Event, query: str):
+@retry_httpx(5)
+async def _(agent: CloversAgent, session: TurnSession, event: Event, query: str):
     headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
     params = {"q": query, "count": 8}
-    for delay in RETRY_DELAYS:
-        try:
-            resp = await agent.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
-            resp.raise_for_status()
-            try:
-                results = resp.json()["web"]["results"]
-            except KeyError:
-                return "服务器错误，请稍后再试。"
-            if not results:
-                return f"未找到关于 '{query}' 的相关搜索结果。"
-            md_output = [f"### 关于 '{query}' 的搜索结果：\n"]
-            for idx, item in enumerate(results, 1):
-                title = item.get("title", "无标题")
-                link = item.get("url", "#")
-                snippet = item.get("description", "无摘要")
-                md_output.append(f"{idx}. **[{title}]({link})**\n   摘要: {snippet}\n")
-            return "\n".join(md_output)
-        except httpx.RequestError as e:
-            logger.warning(f"搜索失败：{e}")
-        except httpx.HTTPStatusError as e:
-            status_code = e.response.status_code
-            logger.warning(f"搜索失败，状态码：{status_code}")
-            if status_code < 500 and status_code != 429:
-                return f"搜索失败，状态码：{status_code}"
-        if delay:
-            await asyncio.sleep(delay)
-    return "搜索失败，请稍后重试。"
+    resp = await agent.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
+    resp.raise_for_status()
+    try:
+        results = resp.json()["web"]["results"]
+    except (json.JSONDecodeError, KeyError):
+        return "服务器未返回合法数据"
+    if not results:
+        return f"未找到关于 '{query}' 的相关搜索结果。"
+    md_output = [f"### 关于 '{query}' 的搜索结果：\n"]
+    for idx, item in enumerate(results, 1):
+        title = item.get("title", "无标题")
+        link = item.get("url", "#")
+        snippet = item.get("description", "无摘要")
+        md_output.append(f"{idx}. **[{title}]({link})**\n   摘要: {snippet}\n")
+    return "\n".join(md_output)
 
 
 @TOOLS.register(
@@ -57,7 +45,7 @@ async def _(agent: CloversAgent, event: Event, query: str):
     {"webpage_url": {"type": "string", "description": "网页的完整 URL 地址"}},
     "network",
 )
-async def _(agent: CloversAgent, event: Event, webpage_url: str):
+async def _(agent: CloversAgent, session: TurnSession, event: Event, webpage_url: str):
     resp = await agent.async_client.get(webpage_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     if resp.status_code != 200:
         return f"获取网页失败，状态码：{resp.status_code}"
@@ -89,7 +77,15 @@ ALLOWED_TYPES = ("application/json", "text/", "application/xml")
     "network",
     required=["method", "url"],
 )
-async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: dict | None = None, data: dict | None = None):
+async def _(
+    agent: CloversAgent,
+    session: TurnSession,
+    event: Event,
+    method: str,
+    url: str,
+    headers: dict | None = None,
+    data: dict | None = None,
+):
     method = method.lower()
     if method == "get":
         resp = await agent.async_client.get(url, params=data, headers=headers)
@@ -115,12 +111,11 @@ async def _(agent: CloversAgent, event: Event, method: str, url: str, headers: d
     {"image_url": {"type": "string", "description": "图片的完整 URL 地址"}},
     "network",
 )
-async def _(agent: CloversAgent, event: Event, image_url: str):
+async def _(agent: CloversAgent, session: TurnSession, event: Event, image_url: str):
     if not image_url.startswith("http"):
         image_url = f"https://{image_url}"
-    session = agent.current_session(event)
     b64url = await session.api.download_url(image_url)
     if not b64url:
         return "资源不存在或非图片格式"
-    session.current_input.append({"type": "image_url", "image_url": {"url": b64url}})
-    return "OK"
+    session.input_image(b64url)
+    return "图片已注入当前用户输入"

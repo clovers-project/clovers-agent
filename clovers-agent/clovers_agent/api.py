@@ -1,16 +1,11 @@
-import random
-import contextlib
 import httpx
-import asyncio
 from clovers.logger import logger
-from .utils import data_url, deep_add
+from .utils import data_url, deep_add, retry_httpx
 from typing import override
 from .typing import AssistantMessage, Payload
 from .typing.message import MultimodalContent
 from .config import OpenAIConfig, HybridOpenAIConfig
 from .constants import VISION_TAG, VISION_PROMPT
-
-RETRY_DELAYS = (0.5, 1.0, None)
 
 
 class OpenAIAPI:
@@ -27,34 +22,16 @@ class OpenAIAPI:
             messages.append({"role": "system", "content": system_prompt})
         return {"model": self.model, "messages": messages, **self.extra_body}  # type: ignore 这里允许额外请求体
 
+    @retry_httpx(3)
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        for delay in RETRY_DELAYS:
-            retry_after = None
-            try:
-                resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
-                if x := resp.headers.get("retry-after"):
-                    with contextlib.suppress(ValueError):
-                        retry_after = min(float(x), 3)
-                resp.raise_for_status()
-                data = resp.json()
-                deep_add(usage_counter, {payload["model"]: data.get("usage")})
-                message = data["choices"][0]["message"]
-                if "content" not in message and "tool_calls" not in message:
-                    raise ValueError(f"API returned an invalid response: {resp.text}")
-                return message
-            except httpx.RequestError as e:
-                logger.exception(e)
-            except httpx.HTTPStatusError as e:
-                status_code = e.response.status_code
-                if status_code < 500 and status_code != 429:
-                    logger.error(f"Payload:\n{'\n'.join(pretty_payload(payload))}\nResponse:\n{e.response.text}")
-                    raise RuntimeError(f"API client error (HTTP {status_code})") from e
-                logger.exception(e)
-            except Exception as e:
-                raise RuntimeError(f"Response validation failed: {e}") from e
-            if delay:
-                await asyncio.sleep(retry_after or delay * random.uniform(0.75, 1.25))
-        raise RuntimeError("API retries exhausted")
+        resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        deep_add(usage_counter, {payload["model"]: data.get("usage")})
+        message = data["choices"][0]["message"]
+        if "content" not in message and "tool_calls" not in message:
+            raise ValueError(f"API returned an invalid response: {resp.text}")
+        return message
 
     async def download_url(
         self,
