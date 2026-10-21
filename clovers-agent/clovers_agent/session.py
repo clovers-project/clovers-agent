@@ -80,6 +80,35 @@ class TurnSession:
     def call_api(self):
         return self.api.call_api(self.payload, self.usage_counter)
 
+    def create_turn(self):
+        """创建一个子会话"""
+        return TurnSession(self.session_id, self.usage_counter, self.extra)
+
+    def create_fork(self):
+        """创建一个分支会话"""
+        if self.cursor is None:
+            return
+        s = self.create_turn()
+        s.create_payload(self.api)
+        s.payload["messages"].extend(self.payload["messages"][: self.cursor])
+        return s
+
+    async def fork_call(self, unit_prompt: str, content: str):
+        """创建一个分支会话并调用"""
+        if (s := self.create_fork()) is None:
+            return
+        s.unit_prompts.append(unit_prompt)
+        s.input_text(content)
+        s.activate()
+        resp = await s.call_api()
+        return resp["content"].strip()
+
+    @property
+    def system_message(self) -> SystemMessage | None:
+        message = self.payload["messages"][0]
+        if message["role"] == "system":
+            return message
+
 
 def iter_recoder(recorder: Iterable[Record]):
     for a, b, _ in recorder:
@@ -120,28 +149,6 @@ class Session(TurnSession):
         self.execute_lock = asyncio.Lock()
         self.wait_lock = asyncio.Lock()
         self.last_active_time = 0.0
-
-    def create_turn(self):
-        """创建一个子会话"""
-        return TurnSession(self.session_id, self.usage_counter, self.extra)
-
-    def create_fork(self):
-        """创建一个分支会话"""
-        if self.cursor is None:
-            return
-        s = self.create_turn()
-        s.create_payload(self.api)
-        s.payload["messages"].extend(self.payload["messages"][: self.cursor])
-        return s
-
-    async def fork_call(self, unit_prompt: str, content: str):
-        if (s := self.create_fork()) is None:
-            return
-        s.unit_prompts.append(unit_prompt)
-        s.input_text(content)
-        s.activate()
-        resp = await s.call_api()
-        return resp["content"].strip()
 
     @property
     def messages(self):
@@ -209,13 +216,6 @@ class Session(TurnSession):
         if self.decouple_count < self.decouple_length:
             return False
         return self.decoupler.step(message)
-
-    @property
-    def system_message(self) -> SystemMessage:
-        message = self.payload["messages"][0]
-        if message["role"] == "system":
-            return message
-        raise ValueError(f"The first message must have the role 'system', but found '{message}' instead.")
 
 
 def extend_tools(payload, extends: Iterable[FunctionToolInfo]) -> list[FunctionToolInfo]:
