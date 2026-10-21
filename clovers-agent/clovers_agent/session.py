@@ -34,6 +34,7 @@ class TurnSession:
         self.current_input: MultimodalContent = []
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
+        self.cursor: int | None = None
 
     def build_payload(self, api: OpenAIAPI, system_prompt: str | None = None):
         if self.cursor is not None:

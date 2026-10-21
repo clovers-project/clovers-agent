@@ -17,9 +17,7 @@ from .session import iter_recoder, Session, TurnSession, SessionComplete
 from .utils import deep_add, read_file, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
-    SYSTEM_TAG,
     USER_TAG,
-    ASSISTANT_TAG,
     ON_CHAT,
     ON_CHAT_DESC,
     SKILL_MENU,

@@ -13,7 +13,12 @@ parameters:
 
 ## {city}城市天气信息
 
-{weather}
+时间: {now}
+天气: {weather}
+温度: {temperature}
+湿度: {humidity}
+体感温度: {feels_like}
+风向: {wind}
 
 ## 分时预报
 

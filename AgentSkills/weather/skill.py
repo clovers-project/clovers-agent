@@ -1,21 +1,21 @@
-from clovers_agent import CloversAgent, Event
+from clovers_agent import as_invoker, CloversAgent, TurnSession, Event
 from datetime import datetime, timedelta
 
 
-async def weather_report(agent: CloversAgent, event: Event, content: str, city: str):
+@as_invoker
+async def weather_report(agent: CloversAgent, session: TurnSession, event: Event, content: str, city: str):
     now = datetime.now()
     kwargs = {}
     kwargs["city"] = city
     resp = await agent.async_client.get(f"https://wttr.in/{city}?format=j1")
     data = resp.json()
-    current_condition = data["current_condition"][0]
-    kwargs["weather"] = f"""\
-时间: {now.strftime("%Y-%m-%d %H:%M")}
-天气: {current_condition["weatherDesc"][0]["value"]}
-温度: {current_condition["temp_C"]}°C
-湿度: {current_condition["humidity"]}%
-体感温度: {current_condition["FeelsLikeC"]}°C
-风速: {current_condition["winddir16Point"]}（{current_condition["winddirDegree"]}°）{current_condition["windspeedKmph"]} km/h"""
+    current = data["current_condition"][0]
+    kwargs["now"] = now.strftime("%Y-%m-%d %H:%M")
+    kwargs["weather"] = current["weatherDesc"][0]["value"]
+    kwargs["temperature"] = f"{current['temp_C']}°C"
+    kwargs["humidity"] = f"{current['humidity']}%"
+    kwargs["feels_like"] = f"{current['FeelsLikeC']}°C"
+    kwargs["wind"] = f"{current['winddir16Point']}（{current['winddirDegree']}°）{current['windspeedKmph']} km/h"
     forecast = ["时间|天气|温度|降水", "-|-|-|-"]
     for day in data.get("weather", []):
         date = datetime.strptime(day["date"], "%Y-%m-%d")

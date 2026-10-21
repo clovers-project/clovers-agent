@@ -16,8 +16,8 @@ from clovers_client import Event as BaseEvent
 if TYPE_CHECKING:
     from .agent import CloversAgent
 
-type RawInvoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], ReturnT]
-type Invoker[**P] = RawInvoker[P, Coro[str]]
+type Invoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], ReturnT]
+type WrappedInvoker[**P] = Invoker[P, Coro[str]]
 
 
 type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
@@ -25,6 +25,10 @@ type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 type IntroK = tuple[None, str]
 type CategoryK = tuple[str, None]
 type SingleK = tuple[str, str]
+
+
+def as_invoker[F: Invoker](func: F) -> F:
+    return func
 
 
 class Event(BaseEvent, Protocol):
@@ -41,13 +45,13 @@ class AgentTools:
         self,
     ) -> None:
         self.manifest: dict[str, FunctionToolInfo] = {}
-        self.invoker: dict[str, Invoker] = {}
+        self.invoker: dict[str, WrappedInvoker] = {}
         self.intro_manifest: dict[str, FunctionToolInfo] = {}
-        self.intro_invoker: dict[str, Invoker] = {}
+        self.intro_invoker: dict[str, WrappedInvoker] = {}
         # 工具组
         self.category_tools_map: dict[str, list[str]] = {}
         self.category_desc_map: dict[str, str] = {}
-        self.category_hooks: dict[str, Counter[Invoker]] = {}
+        self.category_hooks: dict[str, Counter[WrappedInvoker]] = {}
         # inner
         self._merged: set[AgentTools] = set()
 
@@ -74,7 +78,7 @@ class AgentTools:
             Callable: 用于注册分类钩子的装饰器。
         """
 
-        def decorator(func: RawInvoker):
+        def decorator(func: Invoker):
             if category not in self.category_hooks:
                 self.category_hooks[category] = Counter()
             self.category_hooks[category][func] += 1
@@ -108,7 +112,7 @@ class AgentTools:
             Callable: 用于注册工具函数的装饰器。
         """
 
-        def decorator(func: RawInvoker):
+        def decorator(func: Invoker):
             name = info["function"]["name"]
             if name in self.intro_invoker:
                 raise ValueError(f"Intro {name} already exists.")
@@ -130,7 +134,7 @@ class AgentTools:
             Callable: 用于注册工具函数的装饰器。
         """
 
-        def decorator(func: RawInvoker):
+        def decorator(func: Invoker):
             name = info["function"]["name"]
             if name in self.invoker:
                 raise ValueError(f"Tool {name} already exists.")
@@ -335,11 +339,11 @@ class AgentSkills(AgentTools):
         self._loaded_categories: set[str] = set()
 
     @overload
-    def load_skill_md(self, skill: SkillMD, category: None, func: RawInvoker | None = None) -> IntroK: ...
+    def load_skill_md(self, skill: SkillMD, category: None, func: Invoker | None = None) -> IntroK: ...
     @overload
-    def load_skill_md(self, skill: SkillMD, category: str, func: RawInvoker | None = None) -> SingleK: ...
+    def load_skill_md(self, skill: SkillMD, category: str, func: Invoker | None = None) -> SingleK: ...
 
-    def load_skill_md(self, skill: SkillMD, category: str | None = None, func: RawInvoker | None = None):
+    def load_skill_md(self, skill: SkillMD, category: str | None = None, func: Invoker | None = None):
         """从 Skill Markdown 数据中注册工具。
 
         Args:
@@ -441,7 +445,7 @@ class AgentSkills(AgentTools):
             self.load_skill(path)
 
 
-def invoker_wrapper[**P](name: str, func: RawInvoker[P, ...]) -> Invoker[P]:
+def invoker_wrapper[**P](name: str, func: Invoker[P, ...]) -> WrappedInvoker[P]:
     @wraps(func)
     async def wrapper(agent: CloversAgent, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
         logger.info(f"[{agent.name}][CALL][{name}] called")
@@ -467,7 +471,7 @@ def load_module_from_path(module_name: str, file: Path):
     return module
 
 
-def skill_wrapper(content: str, func: RawInvoker | None = None):
+def skill_wrapper(content: str, func: Invoker | None = None):
     if not content:
         return func
     if func:

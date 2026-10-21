@@ -1,7 +1,6 @@
 __version__ = "0.2.18"
 __all__ = ["TOOLS"]
 from .base import TOOLS, CONFIG, CATEGORIES
-from . import t_builtins as _
 
 USE_CATEGORIES = CONFIG.use_categories
 

@@ -136,8 +136,6 @@ class ConstantConfig(BaseModel):
     SYSTEM_TAG: str = "<system-reminder>\n{}\n</system-reminder>"
     # 用户名标签
     USER_TAG: str = '<user name="{}">\n{}\n</user>'
-    # 模型回复标签
-    ASSISTANT_TAG: str = "<me>\n{}\n</me>"
     # 内置路由路由指令
     ON_CHAT: str = "on_chat"
     ON_CHAT_DESC: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
