@@ -12,7 +12,7 @@ from clovers.core import ModuleLoader
 from clovers.logger import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
-from .core import invoker_wrapper, AgentTools, AgentSkills, Event
+from .core import invoker_wrapper, as_invoker, AgentTools, AgentSkills, Event
 from .session import iter_recoder, Session, TurnSession, SessionComplete
 from .utils import deep_add, read_file, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
@@ -208,10 +208,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 
     async def call_turn(self, session: TurnSession, event: Event):
         try:
+            session.activate()
             for _ in range(self.call_depth):
                 message = await session.call_api()
                 if not (tool_calls := message.get("tool_calls")):
-                    return message["content"].strip()
+                    session.complete(message["content"].strip())
                 messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
                 session.payload["messages"].append(message)
                 session.payload["messages"].extend(messages)
@@ -222,7 +223,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             logger.exception(e)
             file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
             save_json(self.session_dir / session.session_id / file, session.payload)
-            return
+            session.inactivate()
 
     async def router(self, content: str, session: Session, event: Event):
         if len(self.intro_manifest) < 2:
@@ -328,11 +329,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return e.data
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
-            session.activate()
+            current_input = session.current_input.copy()
             result = await self.call_turn(session, event)
             if result:
                 session.last_active_time = timestamp
-                pending_records = session.over(session.current_input, {"role": "assistant", "content": result}, timestamp)
+                pending_records = session.over(current_input, {"role": "assistant", "content": result}, timestamp)
                 if pending_records:
                     extend_jsonl(self.recorder_file(session.session_id), pending_records)
             session.inactivate()
@@ -354,12 +355,14 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         return result
 
 
+@as_invoker
 async def on_chat(agent: CloversAgent, session: TurnSession, event: Event):
     session.build_payload(agent.api("chat"), agent.style_prompt)
     session.payload["tools"] = [*agent.select_tools(ON_CHAT), agent.manifest[SKILL_MENU]]
     return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
 
 
+@as_invoker
 async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, category: str):
     session = agent.current_session(event)
     if prompts := await agent.activate_category(category, session, event):
@@ -411,6 +414,7 @@ async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, ca
     return prompt or f"Skills for '{category}' have been loaded."
 
 
+@as_invoker
 async def view_id_image(agent: CloversAgent, session: TurnSession, event: Event, image_id: int):
     session = agent.current_session(event)
     url = session.image_url(image_id)
@@ -446,6 +450,7 @@ async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
     return "".join(buffer)
 
 
+@as_invoker
 async def execute_script(
     agent: CloversAgent,
     session: TurnSession,
@@ -494,6 +499,7 @@ async def execute_script(
         return f"ERROR: Unexpected error – {e}"
 
 
+@as_invoker
 async def read_reference(agent: CloversAgent, session: TurnSession, event: Event, path: str):
     file = Path(agent.references_map[path.split("/", 1)[0]][path])
     if not file.exists():

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 type Record = tuple[TextUserMessage, AssistantMessage, float]
 
 
-class SessionComplete(Exception):
+class SessionComplete(BaseException):
     def __init__(self, data: str | None) -> None:
         super().__init__()
         self.data = data
