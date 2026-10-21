@@ -25,20 +25,18 @@ class HybridOpenAIConfig(OpenAIConfig):
 
 
 class SessionConfig(BaseModel):
-    memory_timeout: int = 3600 * 12
+    memory_timeout: int = 3600 * 24
     """记忆超时时间（图片储存时间）"""
-    memory_size: int = 60
+    memory_size: int = 240
     """记忆储存长度"""
     silence_timeout: int = 3600
     """静默储存超时时间"""
     silence_size: int = 10
     """静默储存长度"""
-    decouple_length: int = 3000
+    decouple_length: int = 20000
     """话题解藕长度（字数）"""
     decoupler_alpha: float = 0.8
     """话题解藕器前文指数衰减系数"""
-    unimportant_size: int = 3
-    """不重要上下文记忆长度"""
     router_size: int = 3
     """语义路由上下文长度"""
 

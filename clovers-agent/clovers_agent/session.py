@@ -27,16 +27,17 @@ class TurnSession:
     api: OpenAIAPI
     payload: Payload
 
-    def __init__(self, session_id: str, usage_counter: dict) -> None:
+    def __init__(self, session_id: str, usage_counter: dict, extra: dict) -> None:
         self.session_id = session_id
         self.usage_counter = usage_counter
+        self.extra = extra
         self.unit_prompts: list[str] = []
         self.current_input: MultimodalContent = []
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
         self.cursor: int | None = None
 
-    def build_payload(self, api: OpenAIAPI, system_prompt: str | None = None):
+    def create_payload(self, api: OpenAIAPI, system_prompt: str | None = None):
         if self.cursor is not None:
             raise RuntimeError("Cannot build payload when session is active")
         self.api = api
@@ -96,11 +97,10 @@ class Session(TurnSession):
         memory_timeout: int = SESSION_CONFIG.memory_timeout,
         silence_size: int = SESSION_CONFIG.silence_size,
         silence_timeout: int = SESSION_CONFIG.silence_timeout,
-        unimportant_size: int = SESSION_CONFIG.unimportant_size,
         decoupler_alpha: float = SESSION_CONFIG.decoupler_alpha,
     ) -> None:
 
-        super().__init__(session_id, {})
+        super().__init__(session_id, {}, {})
         # 标准记录
         self.recorder: list[Record] = []
         self.router_recorder: deque[Record] = deque(maxlen=router_size)
@@ -110,9 +110,6 @@ class Session(TurnSession):
         self.image_id = count()
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.silence_timeout = silence_timeout
-        # 不重要信息
-        self.unimportant = False
-        self.unimportant_recorder: deque[Record] = deque(maxlen=unimportant_size)
         # 主题分离
         from .embedding import TopicDecoupler
 
@@ -123,18 +120,22 @@ class Session(TurnSession):
         self.execute_lock = asyncio.Lock()
         self.wait_lock = asyncio.Lock()
         self.last_active_time = 0.0
-        self.extra = {}
 
-    def snapshot(self):
+    def create_turn(self):
+        """创建一个子会话"""
+        return TurnSession(self.session_id, self.usage_counter, self.extra)
+
+    def create_fork(self):
+        """创建一个分支会话"""
         if self.cursor is None:
             return
-        s = TurnSession(self.session_id, self.usage_counter)
-        s.build_payload(self.api)
+        s = self.create_turn()
+        s.create_payload(self.api)
         s.payload["messages"].extend(self.payload["messages"][: self.cursor])
         return s
 
-    async def snap_call(self, unit_prompt: str, content: str):
-        if (s := self.snapshot()) is None:
+    async def fork_call(self, unit_prompt: str, content: str):
+        if (s := self.create_fork()) is None:
             return
         s.unit_prompts.append(unit_prompt)
         s.input_text(content)
@@ -144,7 +145,7 @@ class Session(TurnSession):
 
     @property
     def messages(self):
-        return *iter_recoder(self.unimportant_recorder), *iter_recoder(self.recorder)
+        return tuple(iter_recoder(self.recorder))
 
     @override
     def activate(self):
@@ -168,27 +169,17 @@ class Session(TurnSession):
                         self.image_recorder.append((image_id, url, timestamp))
             content = "".join(contents)
         record: Record = ({"role": "user", "content": content}, reply, timestamp)
-        pending_records = list[Record]()
         self.router_recorder.append(record)
-        if self.unimportant:
-            self.unimportant_recorder.append(record)
-            self.unimportant = False
-        else:
-            if self.unimportant_recorder:
-                pending_records.extend(self.unimportant_recorder)
-                self.unimportant_recorder.clear()
-            pending_records.append(record)
-            self.recorder.extend(pending_records)
-            self.decouple_count += sum(len(u["content"]) + len(a["content"]) for u, a, _ in pending_records)
+        self.recorder.append(record)
+        self.decouple_count += len(record[0]["content"]) + len(record[1]["content"])
         self.silence_recorder.clear()
-        return pending_records
+        return record
 
     def clear(self):
         """清理记录"""
         self.recorder.clear()
         self.image_recorder.clear()
         self.router_recorder.clear()
-        self.unimportant_recorder.clear()
         self.silence_recorder.clear()
         self.decouple_count = 0
 
@@ -225,18 +216,6 @@ class Session(TurnSession):
         if message["role"] == "system":
             return message
         raise ValueError(f"The first message must have the role 'system', but found '{message}' instead.")
-
-    @property
-    def unimportant_context(self):
-        if not self.unimportant_recorder and self.recorder:
-            yield from self.recorder[-1][:2]
-
-    def update_context(self, messages: Iterable[Message]):
-        _m = [self.system_message, *messages]
-        cursor = len(_m)
-        _m.extend(self.payload["messages"][self.cursor :])
-        self.cursor = cursor
-        self.payload["messages"] = _m
 
 
 def extend_tools(payload, extends: Iterable[FunctionToolInfo]) -> list[FunctionToolInfo]:

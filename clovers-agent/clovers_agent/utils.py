@@ -82,11 +82,10 @@ def load_jsonl(file: Path):
     return arr
 
 
-def extend_jsonl(file: Path, arr: list):
+def save_jsonl(file: Path, data):
     file.parent.mkdir(parents=True, exist_ok=True)
     with file.open("a", encoding="utf-8") as f:
-        for data in arr:
-            f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        f.write(json.dumps(data, ensure_ascii=False) + "\n")
 
 
 def decode_bytes(btext: bytes | bytearray):

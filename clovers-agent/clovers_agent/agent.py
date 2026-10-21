@@ -14,7 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import invoker_wrapper, as_invoker, AgentTools, AgentSkills, Event
 from .session import iter_recoder, Session, TurnSession, SessionComplete
-from .utils import deep_add, read_file, load_json, save_json, load_jsonl, extend_jsonl, decode_bytes
+from .utils import deep_add, read_file, load_json, save_json, load_jsonl, save_jsonl, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     USER_TAG,
@@ -139,15 +139,15 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
         for sessions_id in sessions_ids:
             del self.sessions[sessions_id]
-        logger.info(f"[{self.name}][SESSIONS_CLEAR]")
+        logger.info(f"[{self.name}][SESSIONS CLEAR]")
         usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
-        logger.info(f"[{self.name}][USAGE_TODAY] {usage}")
+        logger.info(f"[{self.name}][USAGE TODAY] {usage}")
         self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
         self.usage_counter.clear()
 
     async def summary_context(self, session: Session):
-        s = TurnSession(session.session_id, session.usage_counter)
-        s.build_payload(self.api("summary"))
+        s = session.create_turn()
+        s.create_payload(self.api("summary"))
         s.payload["messages"].extend(session.messages)
         s.input_text(self.summary_prompt)
         try:
@@ -227,8 +227,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
     async def router(self, content: str, session: Session, event: Event):
         if len(self.intro_manifest) < 2:
             return await on_chat(self, session, event)
-        s = TurnSession(session.session_id, session.usage_counter)
-        s.build_payload(self.api("router"), self.base_prompt)
+        s = session.create_turn()
+        s.create_payload(self.api("router"), self.base_prompt)
         s.unit_prompts.append(self.router_prompt)
         s.payload["messages"].extend(iter_recoder(session.router_recorder))
         s.input_text(content)
@@ -237,12 +237,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         message = await s.call_api()
         if "tool_calls" not in message:
             raise ValueError(f"message must contain tool_calls, but got {message}")
-        category = message["tool_calls"][0]["function"]["name"]
+        intro = message["tool_calls"][0]["function"]["name"]
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
-        await self.invoker[category](self, session, event)
-        session.api
-        session.payload
-        return category
+        return await self.intro_invoker[intro](self, session, event) or intro
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -267,16 +264,15 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             async with session.execute_lock, session.wait_lock:
                 content = "\n".join(x for x, _ in session.silence_recorder)
                 try:
-                    result = await session.snap_call(self.chime_in_prompt, content)
+                    result = await session.fork_call(self.chime_in_prompt, content)
                 except Exception as e:
                     logger.exception(e)
                     return
                 if result:
-                    logger.info(f"[{self.name}][CHIME_IN]")
+                    logger.info(f"[{self.name}][CHIME IN]")
                     session.last_active_time = timestamp
-                    pending_records = session.over(content, {"role": "assistant", "content": result}, timestamp)
-                    if pending_records:
-                        extend_jsonl(self.recorder_file(session.session_id), pending_records)
+                    record = session.over(content, {"role": "assistant", "content": result}, timestamp)
+                    save_jsonl(self.recorder_file(session.session_id), record)
                 return result
         session.refresh(timestamp)
         session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
@@ -289,7 +285,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
             async with session.wait_lock:
                 try:
-                    result = await session.snap_call(self.wait_prompt, content)
+                    result = await session.fork_call(self.wait_prompt, content)
                 except Exception as e:
                     logger.exception(e)
                     return
@@ -312,15 +308,17 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.input_text(content)
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             session.input_images(x for x in image_list if x)
-            session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             try:
                 intro = await self.router(content, session, event)
+                session.api
+                session.payload
                 logger.info(f"[{self.name}][ROUTER] {intro}")
             except SessionComplete as e:
                 return e.data
             except Exception as e:
                 intro = await on_chat(self, session, event)
                 logger.warning(f"[{self.name}][ROUTER] {intro} {e}")
+            session.extend_tools(self.select_tools(intro))
             try:
                 if intro_prompts := await self.activate_category(intro, session, event):
                     session.unit_prompts.extend(intro_prompts)
@@ -328,13 +326,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return e.data
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
+            session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             current_input = session.current_input.copy()
             result = await self.call_turn(session, event)
             if result:
                 session.last_active_time = timestamp
-                pending_records = session.over(current_input, {"role": "assistant", "content": result}, timestamp)
-                if pending_records:
-                    extend_jsonl(self.recorder_file(session.session_id), pending_records)
+                record = session.over(current_input, {"role": "assistant", "content": result}, timestamp)
+                save_jsonl(self.recorder_file(session.session_id), record)
             return result
 
     def update_usage(self, usage_counter: dict):
@@ -355,9 +353,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 
 @as_invoker
 async def on_chat(agent: CloversAgent, session: TurnSession, event: Event):
-    session.build_payload(agent.api("chat"), agent.style_prompt)
-    session.payload["tools"] = [*agent.select_tools(ON_CHAT), agent.manifest[SKILL_MENU]]
-    return ON_CHAT  # intro 不需要返回字符串，但是 on_chat 作为内置 intro 返回 ON_CHAT 比较方便
+    session.create_payload(agent._api, agent.chat_prompt)
+    session.payload["tools"] = [agent.manifest[SKILL_MENU]]
+    return ON_CHAT
 
 
 @as_invoker
