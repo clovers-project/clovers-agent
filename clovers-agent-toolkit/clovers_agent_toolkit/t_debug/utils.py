@@ -2,15 +2,15 @@ import inspect
 from collections import deque
 from clovers_agent import CloversAgent
 from clovers_agent.agent import ToolCallError
+from .constants import KEY_FAILURE_LOG
 
 type FailureRecord = tuple[int, str, ToolCallError]
 
-FAILURE_LOG_KEY = "failure_log"
 MAX_FAILURES = 10
 
 
 def f_log(agent: CloversAgent) -> deque[FailureRecord] | None:
-    return agent.extra.get(FAILURE_LOG_KEY)
+    return agent.extra.get(KEY_FAILURE_LOG)
 
 
 def f_summarize(failure: ToolCallError) -> str:
@@ -52,7 +52,7 @@ def f_list(agent: CloversAgent):
     agent.tool_failures.clear()
     if log:
         return
-    agent.extra[FAILURE_LOG_KEY] = log
+    agent.extra[KEY_FAILURE_LOG] = log
     lines = ["历史报错信息（新旧排序）："]
     lines.extend(f"{i}. {summary}" for i, summary, _ in log)
     return "\n".join(lines)

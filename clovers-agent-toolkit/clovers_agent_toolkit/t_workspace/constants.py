@@ -1,0 +1,5 @@
+WORKSPACE = "workspace"
+KEY_SUBAGENTS = f"{WORKSPACE}.subagent_list"
+KEY_AGENT_WAKEUP = f"{WORKSPACE}.subagent_wakeup"
+SUBAGENT_PROMPT = """
+"""

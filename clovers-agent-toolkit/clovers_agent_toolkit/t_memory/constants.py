@@ -1,8 +1,6 @@
 UPDATE_USER_PROFILE = "update_user_profile"
 EDIT_USER_PROFILE = "edit_user_profile"
 UPDATE_USER_PROFILE_PROMPT = f"""\
-**请调用 {EDIT_USER_PROFILE} 工具** 维护一份简洁、准确、可持续更新的用户档案。
-
 用户档案是对用户的总体判断，维度只记录抽象、稳定的信息。
 
 # 维护准则
@@ -35,6 +33,8 @@ UPDATE_USER_PROFILE_PROMPT = f"""\
 ## 记忆碎片
 
 用于保存具有一定长期价值的具体事件案例。
+
+**请调用 {EDIT_USER_PROFILE} 工具** 维护一份简洁、准确、可持续更新的用户档案。
 """
 
 

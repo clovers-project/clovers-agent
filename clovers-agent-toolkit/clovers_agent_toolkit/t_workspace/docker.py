@@ -5,11 +5,10 @@ from docker.models.containers import Container
 from docker.errors import NotFound
 from pathlib import Path
 
-client: docker.DockerClient | None = None
+DOCKER_CLIENT: docker.DockerClient = docker.from_env()
 
 
 class Shell:
-
     def __init__(self, session_id: str, workspace: Path, docker_image: str):
         self.lock = asyncio.Lock()
         self.session_id = session_id
@@ -17,10 +16,7 @@ class Shell:
         self.workdir = "/workspace"
         self.container: Container | None = None
         self.docker_image = docker_image
-        global client
-        if client is None:
-            client = docker.from_env()
-        self.client = client
+        self.client = DOCKER_CLIENT
         self.stdout_log = self.workspace / "stdout.log"
 
     async def activate(self):

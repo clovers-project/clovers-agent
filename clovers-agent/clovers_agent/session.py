@@ -164,7 +164,7 @@ class Session(TurnSession):
             self.extend_tools((GET_IMAGE_BY_ID_INFO,))
         super().activate()
 
-    def over(self, content: str | MultimodalContent, reply: AssistantMessage, timestamp: float):
+    def record_turn(self, content: str | MultimodalContent, reply: str, timestamp: float):
         """处理完成"""
         if isinstance(content, list):
             contents: list[str] = []
@@ -178,7 +178,7 @@ class Session(TurnSession):
                         contents.append(f" [image:{image_id}] ")
                         self.image_recorder.append((image_id, url, timestamp))
             content = "".join(contents)
-        record: Record = ({"role": "user", "content": content}, reply, timestamp)
+        record: Record = ({"role": "user", "content": content}, {"role": "assistant", "content": reply}, timestamp)
         self.router_recorder.append(record)
         self.recorder.append(record)
         self.decouple_count += len(record[0]["content"]) + len(record[1]["content"])

@@ -6,22 +6,15 @@ from clovers_agent import CloversAgent, TurnSession, Event
 
 from ..base import TOOLS
 from .utils import f_list, f_log, get_tool_source
+from .constants import DEBUG_UTILS, KEY_DEBUG_TARGET, DEBUG_PROMPT
 
 logger.warning("Debug 模式已启用，请勿将此模式用于生产环境。")
-
-DEBUG_UTILS = "debug_utils"
-DEBUG_PROMPT = """\
-1. 如工具未正常工作，必须明确告知用户未正常工作工具的完整名称。
-2. 不要在工具报错后立即调用 `reload_module`，只有在开发者确认已修复并明确要求重试时才调用。
-   - 一旦决定调用 `reload_module`，它必须是本轮唯一的工具调用，不能与其他工具并行。
-3. 用户可在终端查看完整错误日志，除非用户主动要求分析失败信息，否则不要主动展开异常细节。
-"""
 
 
 @TOOLS.create_category(DEBUG_UTILS, "调试工具：重新加载模块、查看工具源码、查看工具失败详情")
 async def _(agent: CloversAgent, session: TurnSession, event: Event):
     sections = ["### Debug 模式"]
-    if module_name := agent.extra.get("debug_module_name"):
+    if module_name := agent.extra.get(KEY_DEBUG_TARGET):
         sections.append(f"当前 Debug 目标: {module_name}")
     else:
         sections.append("当前未指定 Debug 目标，请向用户获取。")
@@ -95,9 +88,9 @@ Traceback:
 )
 async def _(agent: CloversAgent, session: TurnSession, event: Event, module_name: str | None = None) -> str:
     if module_name is not None:
-        agent.extra["debug_module_name"] = module_name
+        agent.extra[KEY_DEBUG_TARGET] = module_name
         logger.info("调试目标模块已切换为 %s", module_name)
-    target = agent.extra.get("debug_module_name")
+    target = agent.extra.get(KEY_DEBUG_TARGET)
     if not target:
         return "目标模块名未设置，请先向开发者获取。"
     if target not in sys.modules:

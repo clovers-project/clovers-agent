@@ -7,7 +7,7 @@ from clovers.logger import logger
 from collections import Counter
 
 from typing import TYPE_CHECKING, overload, Concatenate, Protocol
-from collections.abc import Callable
+from collections.abc import Iterable, Callable
 from clovers.base import Coro
 from clovers_client import Event as BaseEvent
 from .typing import FunctionToolInfo
@@ -124,7 +124,7 @@ class AgentTools:
 
         return decorator
 
-    def category_decorator(self, info: FunctionToolInfo, category: str):
+    def category_decorator(self, info: FunctionToolInfo, category: str | Iterable[str]):
         """注册可分类工具装饰器
 
         Args:
@@ -139,9 +139,16 @@ class AgentTools:
             name = info["function"]["name"]
             if name in self.invoker:
                 raise ValueError(f"Tool {name} already exists.")
-            if category not in self.category_tools_map.keys():
-                self.category_tools_map[category] = []
-            self.category_tools_map[category].append(name)
+            if isinstance(category, str):
+                categories = (category,)
+            else:
+                categories = category
+            for c in categories:
+                if not isinstance(c, str):
+                    continue
+                if c not in self.category_tools_map:
+                    self.category_tools_map[c] = []
+                self.category_tools_map[c].append(name)
             self.manifest[name] = info
             self.invoker[name] = invoker_wrapper(name, func)
             return func
@@ -153,7 +160,7 @@ class AgentTools:
         name: str,
         description: str,
         parameters: Parameters | None = None,
-        category: str | None = None,
+        category: str | Iterable[str] | None = None,
         required: list[str] | None = None,
     ):
         """注册一个工具。

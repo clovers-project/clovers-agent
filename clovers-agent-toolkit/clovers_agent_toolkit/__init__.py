@@ -10,5 +10,5 @@ if CATEGORIES.NETWORK in USE_CATEGORIES:
     from . import t_network as _
 if CATEGORIES.WORKSPACE in USE_CATEGORIES:
     from . import t_workspace as _
-if CATEGORIES.DEBUD in USE_CATEGORIES:
+if CATEGORIES.DEBUG_UTILS in USE_CATEGORIES:
     from . import t_debug as _

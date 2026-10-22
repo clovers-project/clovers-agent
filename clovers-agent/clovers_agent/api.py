@@ -41,7 +41,7 @@ class OpenAIAPI:
         max_size: int = 1024 * 1024 * 10,
     ):
         if not url.startswith("http"):
-            return url
+            return
         try:
             resp = await retry_request(self.async_client.get, url, timeout=60)
         except Exception as e:

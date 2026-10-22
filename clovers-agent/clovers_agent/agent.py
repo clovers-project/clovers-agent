@@ -34,7 +34,7 @@ from .constants import (
 )
 
 from typing import override, TypedDict
-from .typing import ToolMessage, ToolCallInfo
+from .typing import Payload, ToolMessage, ToolCallInfo
 from .typing.json_schema import BaseJSONSchemaType
 
 
@@ -165,8 +165,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
     def session_id(event: Event) -> str:
         return event.group_id or f"private-{event.user_id}"
 
-    def current_session(self, event: Event):
-        session_id = self.session_id(event)
+    def current_session(self, session_id: str):
         if session_id in self.sessions:
             session = self.sessions[session_id]
         else:
@@ -211,10 +210,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.activate()
             for _ in range(self.call_depth):
                 message = await session.call_api()
+                session.payload["messages"].append(message)
                 if not (tool_calls := message.get("tool_calls")):
                     session.complete(message["content"].strip())
                 messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
-                session.payload["messages"].append(message)
                 session.payload["messages"].extend(messages)
             raise RuntimeError(f"Maximum tool call chain length exceeded")
         except SessionComplete as e:
@@ -241,6 +240,39 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         intro = message["tool_calls"][0]["function"]["name"]
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return await self.intro_invoker[intro](self, session, event) or intro
+
+    async def wakeup(self, session: TurnSession, event: Event):
+        main_session = self.current_session(session.session_id)
+        message = session.payload["messages"][-1]
+        role = message["role"]
+        if role not in ("assistant", "user"):
+            logger.error(f"[{self.name}][WAKEUP] the last message must be from user or assistant, but got {role}")
+            return
+        content = message["content"]
+        async with main_session.execute_lock, main_session.wait_lock:
+            recorder = reversed(main_session.recorder)
+            pending = []
+            if role == "assistant":
+                for um, am, _ in recorder:
+                    if am["content"] == content:
+                        break
+                    pending.append(am)
+                    pending.append(um)
+            else:
+                for um, am, _ in recorder:
+                    pending.append(am)
+                    if um["content"] == content:
+                        break
+                    pending.append(um)
+            current_input = session.current_input.copy()
+            result = await self.call_turn(session, event)
+            self.update_usage(session.usage_counter)
+            if result:
+                timestamp = time.time()
+                main_session.last_active_time = timestamp
+                record = main_session.record_turn(current_input, result, timestamp)
+                save_jsonl(self.recorder_file(session.session_id), record)
+            return result
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -272,7 +304,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 if result:
                     logger.info(f"[{self.name}][CHIME IN]")
                     session.last_active_time = timestamp
-                    record = session.over(content, {"role": "assistant", "content": result}, timestamp)
+                    record = session.record_turn(content, result, timestamp)
                     save_jsonl(self.recorder_file(session.session_id), record)
                 return result
         session.refresh(timestamp)
@@ -332,7 +364,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             result = await self.call_turn(session, event)
             if result:
                 session.last_active_time = timestamp
-                record = session.over(current_input, {"role": "assistant", "content": result}, timestamp)
+                record = session.record_turn(current_input, result, timestamp)
                 save_jsonl(self.recorder_file(session.session_id), record)
             return result
 
@@ -346,7 +378,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         save_json(self.usage_file, self.usage_counter)
 
     async def chat(self, event: Event):
-        session = self.current_session(event)
+        session = self.current_session(self.session_id(event))
         result = await self.handle_chat(session, event)
         self.update_usage(session.usage_counter)
         return result
@@ -361,7 +393,6 @@ async def on_chat(agent: CloversAgent, session: TurnSession, event: Event):
 
 @as_invoker
 async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, category: str):
-    session = agent.current_session(event)
     if prompts := await agent.activate_category(category, session, event):
         prompt = "\n".join(x for x in prompts if x)
     else:
@@ -413,8 +444,7 @@ async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, ca
 
 @as_invoker
 async def view_id_image(agent: CloversAgent, session: TurnSession, event: Event, image_id: int):
-    session = agent.current_session(event)
-    url = session.image_url(image_id)
+    url = agent.current_session(session.session_id).image_url(image_id)
     if not url:
         return f"Error: [image:{image_id}] is missing."
     session.current_input.append({"type": "image_url", "image_url": {"url": url}})
