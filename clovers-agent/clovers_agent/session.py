@@ -4,15 +4,15 @@ from itertools import count
 from collections import deque
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
+
+from typing import TYPE_CHECKING, override, Never
 from collections.abc import Iterable
-from typing import override, Never, TYPE_CHECKING
-from .typing import Payload, Message, AssistantMessage, SystemMessage, FunctionToolInfo
+from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextUserMessage
 
 if TYPE_CHECKING:
     from .api import OpenAIAPI
     from .embedding import SentenceTransformer
-
 
 type Record = tuple[TextUserMessage, AssistantMessage, float]
 

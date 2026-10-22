@@ -5,15 +5,16 @@ from pathlib import Path
 from functools import wraps
 from clovers.logger import logger
 from collections import Counter
+
+from typing import TYPE_CHECKING, overload, Concatenate, Protocol
 from collections.abc import Callable
-from typing import overload, Concatenate, Protocol, TYPE_CHECKING
 from clovers.base import Coro
+from clovers_client import Event as BaseEvent
 from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
-from .session import TurnSession
-from clovers_client import Event as BaseEvent
 
 if TYPE_CHECKING:
+    from .session import TurnSession
     from .agent import CloversAgent
 
 type Invoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], ReturnT]

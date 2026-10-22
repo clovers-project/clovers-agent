@@ -1,8 +1,8 @@
 import json
+import httpx
 import trafilatura
 from clovers_agent import CloversAgent, TurnSession, Event
-from clovers_agent.utils import is_base64, retry_httpx
-from clovers.logger import logger
+from clovers_agent.utils import is_base64, retry_httpx, httpx_request
 from ..base import TOOLS, CONFIG
 
 BRAVE_API_KEY = CONFIG.BRAVE_API_KEY
@@ -11,6 +11,8 @@ RETRY_DELAYS = (0.5, 1.0, 1.5, 2.0, None)
 
 TOOLS.create_category("network", "包含各种联网功能，用于从互联网获取信息和资源。")
 
+retry_request = retry_httpx(5)(httpx_request)
+
 
 @TOOLS.register(
     "web_search",
@@ -18,12 +20,10 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
     {"query": {"type": "string", "description": "搜索关键词"}},
     "network",
 )
-@retry_httpx(5)
 async def _(agent: CloversAgent, session: TurnSession, event: Event, query: str):
     headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
     params = {"q": query, "count": 8}
-    resp = await agent.async_client.get(BRAVE_URL, headers=headers, params=params, timeout=30.0)
-    resp.raise_for_status()
+    resp = await retry_request(agent.async_client.get, BRAVE_URL, headers=headers, params=params, timeout=30.0)
     try:
         results = resp.json()["web"]["results"]
     except (json.JSONDecodeError, KeyError):
@@ -42,16 +42,15 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, query: str)
 @TOOLS.register(
     "web_extractor",
     "获取指定网页 url 的纯文本内容。",
-    {"webpage_url": {"type": "string", "description": "网页的完整 URL 地址"}},
+    {"url": {"type": "string", "description": "网页的完整 URL 地址"}},
     "network",
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, webpage_url: str):
-    resp = await agent.async_client.get(webpage_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-    if resp.status_code != 200:
-        return f"获取网页失败，状态码：{resp.status_code}"
+async def _(agent: CloversAgent, session: TurnSession, event: Event, url: str):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    resp = await retry_request(agent.async_client.get, url, headers=headers)
     text = trafilatura.extract(
         resp.content,
-        url=webpage_url,
+        url=url,
         include_comments=True,
         include_images=True,
         include_links=True,
@@ -59,7 +58,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, webpage_url
         favor_precision=True,
         output_format="markdown",
     )
-    return text or "未能提取内容。"
+    return text or "none"
 
 
 ALLOWED_TYPES = ("application/json", "text/", "application/xml")
@@ -88,9 +87,9 @@ async def _(
 ):
     method = method.lower()
     if method == "get":
-        resp = await agent.async_client.get(url, params=data, headers=headers)
+        resp = await retry_request(agent.async_client.get, url, params=data, headers=headers)
     elif method == "post":
-        resp = await agent.async_client.post(url, json=data, headers=headers)
+        resp = await retry_request(agent.async_client.get, url, json=data, headers=headers)
     else:
         return f"Invalid method: {method}"
     content = resp.text

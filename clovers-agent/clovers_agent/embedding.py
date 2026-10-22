@@ -3,8 +3,8 @@
 # os.environ["HF_HUB_OFFLINE"] = os.environ.get("HF_HUB_OFFLINE", "1")
 import numpy as np
 import torch
-from sentence_transformers import SentenceTransformer, util
 import transformers
+from sentence_transformers import SentenceTransformer, util
 
 transformers.logging.set_verbosity_error()
 

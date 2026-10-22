@@ -6,8 +6,9 @@ from clovers_agent import CloversAgent, TurnSession, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import ON_CHAT, HIDDEN_CATEGORY
 from .constants import UPDATE_USER_PROFILE, UPDATE_USER_PROFILE_PROMPT, EDIT_USER_PROFILE, EDIT_USER_PROFILE_DESC
-from .typing import UserProfile, MemoryItem, MemoryItemTuple
 from ..base import TOOLS, CONFIG
+
+from .typing import UserProfile, MemoryItem, MemoryItemTuple
 
 REMINDER_THRESHOLD = CONFIG.reminder_threshold
 STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold

@@ -1,11 +1,14 @@
 import httpx
 from clovers.logger import logger
-from .utils import data_url, deep_add, retry_httpx
+from .utils import data_url, deep_add, retry_httpx, httpx_request
+from .config import OpenAIConfig, HybridOpenAIConfig
+from .constants import VISION_TAG, VISION_PROMPT
+
 from typing import override
 from .typing import AssistantMessage, Payload
 from .typing.message import MultimodalContent
-from .config import OpenAIConfig, HybridOpenAIConfig
-from .constants import VISION_TAG, VISION_PROMPT
+
+retry_request = retry_httpx(3)(httpx_request)
 
 
 class OpenAIAPI:
@@ -22,10 +25,8 @@ class OpenAIAPI:
             messages.append({"role": "system", "content": system_prompt})
         return {"model": self.model, "messages": messages, **self.extra_body}  # type: ignore 这里允许额外请求体
 
-    @retry_httpx(3)
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        resp = await self.async_client.post(self.url, headers=self.headers, json=payload)
-        resp.raise_for_status()
+        resp = await retry_request(self.async_client.post, self.url, headers=self.headers, json=payload)
         data = resp.json()
         deep_add(usage_counter, {payload["model"]: data.get("usage")})
         message = data["choices"][0]["message"]
@@ -42,8 +43,7 @@ class OpenAIAPI:
         if not url.startswith("http"):
             return url
         try:
-            resp = await self.async_client.get(url, timeout=60)
-            resp.raise_for_status()
+            resp = await retry_request(self.async_client.get, url, timeout=60)
         except Exception as e:
             logger.exception(e)
             return None
