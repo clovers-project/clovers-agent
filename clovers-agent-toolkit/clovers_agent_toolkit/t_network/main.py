@@ -1,5 +1,4 @@
 import json
-import httpx
 import trafilatura
 from clovers_agent import CloversAgent, TurnSession, Event
 from clovers_agent.utils import is_base64, retry_httpx, httpx_request
