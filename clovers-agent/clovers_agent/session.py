@@ -1,11 +1,13 @@
 from __future__ import annotations
 import asyncio
+from pathlib import Path
 from itertools import count
 from collections import deque
+from .utils import load_jsonl, save_jsonl
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 
-from typing import TYPE_CHECKING, override, Never
+from typing import TYPE_CHECKING, cast, override, Never
 from collections.abc import Iterable
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextUserMessage
@@ -123,6 +125,7 @@ class Session(TurnSession):
     def __init__(
         self,
         session_id: str,
+        recorder_file: Path,
         sentence_model: SentenceTransformer,
         router_size: int = SESSION_CONFIG.router_size,
         memory_size: int = SESSION_CONFIG.memory_size,
@@ -133,7 +136,20 @@ class Session(TurnSession):
     ) -> None:
 
         super().__init__(session_id, {}, {})
+        self.recorder_file = recorder_file
+        # 主题分离
+        from .embedding import TopicDecoupler
+
+        self.decoupler = TopicDecoupler(sentence_model, decoupler_alpha)
+        self.decouple_length = SESSION_CONFIG.decouple_length
+
         # 标准记录
+        if recorder := load_jsonl(self.recorder_file):
+            self.recorder = cast(list[Record], recorder)
+            self.decouple_count = sum(len(m["content"]) for m in iter_recoder(self.recorder))
+        else:
+            self.recorder = cast(list[Record], [])
+            self.decouple_count = 0
         self.recorder: list[Record] = []
         self.router_recorder: deque[Record] = deque(maxlen=router_size)
         self.memory_size = memory_size
@@ -142,12 +158,6 @@ class Session(TurnSession):
         self.image_id = count()
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.silence_timeout = silence_timeout
-        # 主题分离
-        from .embedding import TopicDecoupler
-
-        self.decoupler = TopicDecoupler(sentence_model, decoupler_alpha)
-        self.decouple_length = SESSION_CONFIG.decouple_length
-        self.decouple_count = 0
         # 状态
         self.execute_lock = asyncio.Lock()
         self.wait_lock = asyncio.Lock()
@@ -183,7 +193,8 @@ class Session(TurnSession):
         self.recorder.append(record)
         self.decouple_count += len(record[0]["content"]) + len(record[1]["content"])
         self.silence_recorder.clear()
-        return record
+        self.last_active_time = timestamp
+        save_jsonl(self.recorder_file, record)
 
     def clear(self):
         """清理记录"""
@@ -192,6 +203,7 @@ class Session(TurnSession):
         self.router_recorder.clear()
         self.silence_recorder.clear()
         self.decouple_count = 0
+        self.recorder_file.unlink(missing_ok=True)
 
     def image_url(self, image_id: int) -> str | None:
         return next((url for i, url, _ in self.image_recorder if i == image_id), None)

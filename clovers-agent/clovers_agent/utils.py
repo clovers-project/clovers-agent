@@ -71,7 +71,9 @@ def load_json(file: Path):
 
 
 def save_json(file: Path, data):
-    file.parent.mkdir(parents=True, exist_ok=True)
+    parent = file.parent
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
     tmp = file.parent / (file.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
@@ -91,9 +93,12 @@ def load_jsonl(file: Path):
 
 
 def save_jsonl(file: Path, data):
-    file.parent.mkdir(parents=True, exist_ok=True)
+    parent = file.parent
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+    s = json.dumps(data, ensure_ascii=False)
     with file.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        f.write(s + "\n")
 
 
 def decode_bytes(btext: bytes | bytearray):

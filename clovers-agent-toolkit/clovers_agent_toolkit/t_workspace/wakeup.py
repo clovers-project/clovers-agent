@@ -10,6 +10,7 @@ class Wakeup:
         self.event = event
         session = agent.current_session(agent.session_id(event))
         s = session.create_turn()
+        s.api = session.api
         s.payload = session.payload
         self.session = s
         self.tasks: list[asyncio.Task[str | None]] = []

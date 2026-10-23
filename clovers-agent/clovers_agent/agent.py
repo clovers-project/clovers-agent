@@ -14,7 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import invoker_wrapper, as_invoker, AgentTools, AgentSkills, Event
 from .session import iter_recoder, Session, TurnSession, SessionComplete
-from .utils import deep_add, read_file, load_json, save_json, load_jsonl, save_jsonl, decode_bytes
+from .utils import deep_add, read_file, load_json, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     USER_TAG,
@@ -34,7 +34,7 @@ from .constants import (
 )
 
 from typing import override, TypedDict
-from .typing import Payload, ToolMessage, ToolCallInfo
+from .typing import ToolMessage, ToolCallInfo
 from .typing.json_schema import BaseJSONSchemaType
 
 
@@ -150,7 +150,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         s = session.create_turn()
         s.create_payload(self.api("summary"))
         s.payload["messages"].extend(session.messages)
-        s.input_text(self.summary_prompt)
+        s.unit_prompts.append(self.summary_prompt)
+        s.activate()
+        from .api import pretty_payload
+
+        print("\n".join(pretty_payload(s.payload)))
         try:
             resp = await s.call_api()
             summary = resp["content"].strip()
@@ -169,10 +173,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if session_id in self.sessions:
             session = self.sessions[session_id]
         else:
-            session = self.sessions[session_id] = Session(session_id, self.sentence_model)
-            if records := load_jsonl(self.recorder_file(session_id)):
-                session.recorder.extend(records)
-                session.decouple_count = sum(len(m["content"]) for m in session.messages)
+            session = Session(session_id, self.recorder_file(session_id), self.sentence_model)
+            self.sessions[session_id] = session
         return session
 
     async def activate_category(self, name: str, session: TurnSession, event: Event) -> list[str] | None:
@@ -265,13 +267,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                         break
                     pending.append(um)
             current_input = session.current_input.copy()
+            from .api import pretty_payload
+
+            print("\n".join(pretty_payload(session.payload)))
             result = await self.call_turn(session, event)
             self.update_usage(session.usage_counter)
             if result:
-                timestamp = time.time()
-                main_session.last_active_time = timestamp
-                record = main_session.record_turn(current_input, result, timestamp)
-                save_jsonl(self.recorder_file(session.session_id), record)
+                main_session.record_turn(current_input, result, time.time())
             return result
 
     async def handle_chat(self, session: Session, event: Event):
@@ -303,9 +305,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     return
                 if result:
                     logger.info(f"[{self.name}][CHIME IN]")
-                    session.last_active_time = timestamp
-                    record = session.record_turn(content, result, timestamp)
-                    save_jsonl(self.recorder_file(session.session_id), record)
+                    session.record_turn(content, result, timestamp)
                 return result
         session.refresh(timestamp)
         session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
@@ -363,9 +363,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             current_input = session.current_input.copy()
             result = await self.call_turn(session, event)
             if result:
-                session.last_active_time = timestamp
-                record = session.record_turn(current_input, result, timestamp)
-                save_jsonl(self.recorder_file(session.session_id), record)
+                session.record_turn(current_input, result, timestamp)
             return result
 
     def update_usage(self, usage_counter: dict):
