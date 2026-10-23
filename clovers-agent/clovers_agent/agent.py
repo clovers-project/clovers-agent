@@ -13,7 +13,7 @@ from clovers.logger import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import invoker_wrapper, as_invoker, AgentTools, AgentSkills, Event
-from .session import iter_recoder, Session, TurnSession, SessionComplete
+from .session import iter_recoder, Session, Turn, SessionComplete
 from .utils import deep_add, read_file, load_json, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
@@ -177,13 +177,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             self.sessions[session_id] = session
         return session
 
-    async def activate_category(self, name: str, session: TurnSession, event: Event) -> list[str] | None:
+    async def activate_category(self, name: str, session: Turn, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
         if not hooks:
             return
         return [coro if isinstance((coro := hook(self, session, event)), str) else await coro for hook in hooks]
 
-    async def invoke_tool(self, call_info: ToolCallInfo, session: TurnSession, event: Event) -> ToolMessage:
+    async def invoke_tool(self, call_info: ToolCallInfo, session: Turn, event: Event) -> ToolMessage:
         name = call_info["function"]["name"]
         tc_id = call_info["id"]
         raw_args = call_info["function"]["arguments"]
@@ -207,19 +207,25 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
             return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
 
-    async def call_turn(self, session: TurnSession, event: Event):
+    async def call_turn(self, session: Turn, event: Event):
         try:
             session.activate()
             for _ in range(self.call_depth):
                 message = await session.call_api()
                 session.payload["messages"].append(message)
+                content = message["content"].strip()
                 if not (tool_calls := message.get("tool_calls")):
-                    session.complete(message["content"].strip())
+                    from .api import pretty_payload
+
+                    print("=" * 10, "complete".upper(), "=" * 10)
+                    print("\n".join(pretty_payload(session.payload)))
+                    yield content
+                    return
+                if content:
+                    yield content
                 messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
                 session.payload["messages"].extend(messages)
             raise RuntimeError(f"Maximum tool call chain length exceeded")
-        except SessionComplete as e:
-            return e.data
         except Exception as e:
             logger.exception(e)
             file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
@@ -243,16 +249,25 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return await self.intro_invoker[intro](self, session, event) or intro
 
-    async def wakeup(self, session: TurnSession, event: Event):
-        main_session = self.current_session(session.session_id)
+    async def run_session(self, session: Session, event: Event, timestamp: float):
+        current_input = session.current_input.copy()
+        last_result = None
+        async for result in self.call_turn(session, event):
+            last_result = result
+            self.send(result, event)
+        if last_result:
+            session.record_turn(current_input, last_result, timestamp)
+
+    async def handle_wakeup(self, session: Turn, event: Event):
+        current_session = self.current_session(session.session_id)
         message = session.payload["messages"][-1]
         role = message["role"]
         if role not in ("assistant", "user"):
             logger.error(f"[{self.name}][WAKEUP] the last message must be from user or assistant, but got {role}")
             return
         content = message["content"]
-        async with main_session.execute_lock, main_session.wait_lock:
-            recorder = reversed(main_session.recorder)
+        async with current_session.execute_lock, current_session.wait_lock:
+            recorder = reversed(current_session.recorder)
             pending = []
             if role == "assistant":
                 for um, am, _ in recorder:
@@ -266,15 +281,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     if um["content"] == content:
                         break
                     pending.append(um)
-            current_input = session.current_input.copy()
-            from .api import pretty_payload
-
-            print("\n".join(pretty_payload(session.payload)))
-            result = await self.call_turn(session, event)
-            self.update_usage(session.usage_counter)
-            if result:
-                main_session.record_turn(current_input, result, time.time())
-            return result
+            await self.run_session(current_session, event, time.time())
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -306,7 +313,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 if result:
                     logger.info(f"[{self.name}][CHIME IN]")
                     session.record_turn(content, result, timestamp)
-                return result
+                    self.send(result, event)
+                return
         session.refresh(timestamp)
         session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
         content = "\n".join(x for x, _ in session.silence_recorder)
@@ -325,7 +333,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 if result:
                     logger.info(f"[{self.name}][WAIT REPLY]")
                     session.last_active_time = timestamp
-                return result
+                    self.send(result, event)
+                return
         async with session.execute_lock:
             if session.step(body, timestamp) and (summary := await self.summary_context(session)):
                 session.clear()
@@ -346,8 +355,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.api
                 session.payload
                 logger.info(f"[{self.name}][ROUTER] {intro}")
-            except SessionComplete as e:
-                return e.data
             except Exception as e:
                 intro = await on_chat(self, session, event)
                 logger.warning(f"[{self.name}][ROUTER] {intro} {e}")
@@ -355,16 +362,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             try:
                 if intro_prompts := await self.activate_category(intro, session, event):
                     session.unit_prompts.extend(intro_prompts)
-            except SessionComplete as e:
-                return e.data
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            current_input = session.current_input.copy()
-            result = await self.call_turn(session, event)
-            if result:
-                session.record_turn(current_input, result, timestamp)
-            return result
+            await self.run_session(session, event, timestamp)
 
     def update_usage(self, usage_counter: dict):
         if not usage_counter:
@@ -375,22 +376,36 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         logger.info(f"[{self.name}][USAGE] {usage}")
         save_json(self.usage_file, self.usage_counter)
 
+    def send(self, text: str, event: Event):
+        asyncio.create_task(event.send("text", text))
+
+    async def wakeup(self, session: Turn, event: Event):
+        try:
+            await self.handle_wakeup(session, event)
+        except SessionComplete as e:
+            if result := e.data:
+                self.send(result, event)
+        self.update_usage(session.usage_counter)
+
     async def chat(self, event: Event):
         session = self.current_session(self.session_id(event))
-        result = await self.handle_chat(session, event)
+        try:
+            await self.handle_chat(session, event)
+        except SessionComplete as e:
+            if result := e.data:
+                self.send(result, event)
         self.update_usage(session.usage_counter)
-        return result
 
 
 @as_invoker
-async def on_chat(agent: CloversAgent, session: TurnSession, event: Event):
+async def on_chat(agent: CloversAgent, session: Turn, event: Event):
     session.create_payload(agent._api, agent.chat_prompt)
     session.payload["tools"] = [agent.manifest[SKILL_MENU]]
     return ON_CHAT
 
 
 @as_invoker
-async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, category: str):
+async def skill_menu(agent: CloversAgent, session: Turn, event: Event, category: str):
     if prompts := await agent.activate_category(category, session, event):
         prompt = "\n".join(x for x in prompts if x)
     else:
@@ -441,7 +456,7 @@ async def skill_menu(agent: CloversAgent, session: TurnSession, event: Event, ca
 
 
 @as_invoker
-async def view_id_image(agent: CloversAgent, session: TurnSession, event: Event, image_id: int):
+async def view_id_image(agent: CloversAgent, session: Turn, event: Event, image_id: int):
     url = agent.current_session(session.session_id).image_url(image_id)
     if not url:
         return f"Error: [image:{image_id}] is missing."
@@ -478,7 +493,7 @@ async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
 @as_invoker
 async def execute_script(
     agent: CloversAgent,
-    session: TurnSession,
+    session: Turn,
     event: Event,
     interpreter: str = "",
     path: str = "",
@@ -525,7 +540,7 @@ async def execute_script(
 
 
 @as_invoker
-async def read_reference(agent: CloversAgent, session: TurnSession, event: Event, path: str):
+async def read_reference(agent: CloversAgent, session: Turn, event: Event, path: str):
     file = Path(agent.references_map[path.split("/", 1)[0]][path])
     if not file.exists():
         return f"ERROR: File '{path}' does not exist."

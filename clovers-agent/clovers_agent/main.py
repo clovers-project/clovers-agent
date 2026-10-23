@@ -5,44 +5,37 @@ from clovers.logger import logger
 from clovers_client import Event as EventProtocol
 from clovers_apscheduler import scheduler
 from .agent import Event, CloversAgent
-from .session import TurnSession
 from .config import CHECK
 
 from typing import override
 
+KEY_SENDING_LOCK = "sending_lock"
 
-class ChatAI(CloversAgent):
-    def __init__(self) -> None:
-        super().__init__("ChatAI", httpx.AsyncClient(timeout=300), scheduler)
 
-    async def send(self, result: str, event: Event):
-        lines = tuple(x for line in result.split("\n") if (x := line.strip()))
+class ChatAgent(CloversAgent):
+    @override
+    def send(self, result: str, event: Event):
+        session = self.current_session(self.session_id(event))
+        if KEY_SENDING_LOCK not in session.extra:
+            lock = session.extra[KEY_SENDING_LOCK] = asyncio.Lock()
+        else:
+            lock = session.extra[KEY_SENDING_LOCK]
+        asyncio.create_task(chat_send(lock, result, event))
+
+
+async def chat_send(lock: asyncio.Lock, result: str, event: Event):
+    lines = tuple(x for line in result.split("\n") if (x := line.strip()))
+    async with lock:
         if len(lines) > 4:
             await event.send("text", result)
+            await asyncio.sleep(min(0.12 * len(result), 8))
             return
-        session = self.current_session(self.session_id(event))
-        if "sending_lock" not in session.extra:
-            session.extra["sending_lock"] = asyncio.Lock()
-        sending_lock = session.extra["sending_lock"]
-        async with sending_lock:
-            for text in lines:
-                await event.send("text", text)
-                await asyncio.sleep(min(0.12 * len(text), 8))
-
-    @override
-    async def chat(self, event: Event):
-        result = await super().chat(event)
-        if result:
-            await self.send(result, event)
-
-    @override
-    async def wakeup(self, session: TurnSession, event: Event):
-        result = await super().wakeup(session, event)
-        if result:
-            await self.send(result, event)
+        for text in lines:
+            await event.send("text", text)
+            await asyncio.sleep(min(0.12 * len(text), 8))
 
 
-AGENT = ChatAI()
+AGENT = ChatAgent("CLOVERS_AGENT", httpx.AsyncClient(timeout=300), scheduler)
 PLUGIN = Plugin[Event](priority=100)
 PLUGIN.protocol = EventProtocol
 

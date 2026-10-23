@@ -1,6 +1,6 @@
 import json
 import trafilatura
-from clovers_agent import CloversAgent, TurnSession, Event
+from clovers_agent import CloversAgent, Turn, Event
 from ..base import TOOLS, CONFIG, retry_request
 from ..config import CATEGORIES
 
@@ -18,7 +18,7 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
     {"query": {"type": "string", "description": "搜索关键词"}},
     NETWORK,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, query: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, query: str):
     headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
     params = {"q": query, "count": 8}
     resp = await retry_request(agent.async_client.get, BRAVE_URL, headers=headers, params=params, timeout=30.0)
@@ -43,7 +43,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, query: str)
     {"url": {"type": "string", "description": "网页的完整 URL 地址"}},
     NETWORK,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, url: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, url: str):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     resp = await retry_request(agent.async_client.get, url, headers=headers)
     text = trafilatura.extract(
@@ -65,7 +65,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, url: str):
     {"url": {"type": "string", "description": "图片的完整 URL 地址"}},
     NETWORK,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, image_url: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, image_url: str):
     if not image_url.startswith("http"):
         image_url = f"https://{image_url}"
     b64url = await session.api.download_url(image_url)

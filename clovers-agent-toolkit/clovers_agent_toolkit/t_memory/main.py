@@ -2,7 +2,7 @@ import time
 import json
 import pydantic
 from pathlib import Path
-from clovers_agent import CloversAgent, TurnSession, Event
+from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import ON_CHAT, HIDDEN_CATEGORY
 from .constants import UPDATE_USER_PROFILE, UPDATE_USER_PROFILE_PROMPT, EDIT_USER_PROFILE, EDIT_USER_PROFILE_DESC
@@ -17,7 +17,7 @@ USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 
 
 @TOOLS.on_category(ON_CHAT)
-async def _(agent: CloversAgent, session: TurnSession, event: Event):
+async def _(agent: CloversAgent, session: Turn, event: Event):
     extra = session.extra
     if UPDATE_USER_PROFILE not in extra:
         extra[UPDATE_USER_PROFILE] = {}
@@ -50,7 +50,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event):
     {"block_days": {"type": "number", "description": "拉黑天数，默认 7 天"}},
     category=ON_CHAT,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, block_days: int = 7):
+async def _(agent: CloversAgent, session: Turn, event: Event, block_days: int = 7):
     user_id = event.user_id
     user_profile_json = USER_PROFILE / f"{user_id}.json"
     block_t = min(max(block_days, 1), 30) * 86400 + time.time()
@@ -68,7 +68,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, block_days:
     "用于更新助手对用户的印象档案。当用户约定称呼、展现偏好、或你对该用户的印象需要修正时，应主动调用此工具",
     category=ON_CHAT,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, **kwargs):
+async def _(agent: CloversAgent, session: Turn, event: Event, **kwargs):
     session.extend_tools((agent.manifest[EDIT_USER_PROFILE],))
     return UPDATE_USER_PROFILE_PROMPT
 
@@ -99,7 +99,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, **kwargs):
 )
 async def _(
     agent: CloversAgent,
-    session: TurnSession,
+    session: Turn,
     event: Event,
     address_as: str = "",
     tags: str = "",

@@ -1,7 +1,6 @@
-import asyncio
 from pathlib import Path
 from datetime import datetime
-from clovers_agent import CloversAgent, TurnSession, Event
+from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.utils import decode_bytes
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, SKILL_MENU
@@ -9,7 +8,7 @@ from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES, retry_request
 from .wakeup import Wakeup
 from .utils import format_path, format_size, md5
-from .constants import WORKSPACE, KEY_SUBAGENTS, KEY_AGENT_WAKEUP, SUBAGENT_PROMPT
+from .constants import WORKSPACE, KEY_SUBAGENTS, KEY_SUBAGENTS, SUBAGENT_PROMPT
 
 from typing import cast
 
@@ -21,7 +20,7 @@ SUCCESS_TOOLIST = ("execute_command", "run_subagent")
 FALLBACK_TOOLIST = ("ls", "read_files", "write_file")
 
 
-async def enter_workspace(agent: CloversAgent, session: TurnSession):
+async def enter_workspace(agent: CloversAgent, session: Turn):
     prompts = ["# workspace 已初始化\n"]
     if CONFIG.use_shell:
         try:
@@ -45,7 +44,7 @@ async def enter_workspace(agent: CloversAgent, session: TurnSession):
 
 
 @TOOLS.register("on_task", "当前用户指令为一个需要调用工具的任务时，调用此工具")
-async def on_task(agent: CloversAgent, session: TurnSession, event: Event):
+async def on_task(agent: CloversAgent, session: Turn, event: Event):
     session.create_payload(agent.api("on_task"), agent.style_prompt)
     workspace = WORKSPACE_PATH / session.session_id
     if not workspace.exists():
@@ -63,7 +62,7 @@ async def on_task(agent: CloversAgent, session: TurnSession, event: Event):
 
 
 @TOOLS.create_category(WORKSPACE, "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
-async def workspace_category(agent: CloversAgent, session: TurnSession, event: Event):
+async def workspace_category(agent: CloversAgent, session: Turn, event: Event):
     return await enter_workspace(agent, session)
 
 
@@ -73,7 +72,7 @@ async def workspace_category(agent: CloversAgent, session: TurnSession, event: E
     {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
     WORKSPACE,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, file_path: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     workspace = WORKSPACE_PATH / session.session_id
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
@@ -120,7 +119,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, file_path: 
 )
 async def _(
     agent: CloversAgent,
-    session: TurnSession,
+    session: Turn,
     event: Event,
     method: str,
     url: str,
@@ -159,7 +158,7 @@ async def _(
     {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, command: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     from .docker import Shell
 
     extra = session.extra
@@ -171,20 +170,29 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, command: st
 
 @TOOLS.register(
     "run_subagent",
-    "创建一个子代理执行你的指令" "子代理的返回结果需要在本轮对话结束后",
+    "创建一个子代理执行你的指令\n子代理会在本次调用链结束后返回结果并唤醒你",
     {"command": {"type": "string", "description": "指令"}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, command: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     extra = session.extra
     if not KEY_SUBAGENTS in extra:
-        extra[KEY_SUBAGENTS] = []
-    sub_agents = extra[KEY_SUBAGENTS]
-    if len(sub_agents) >= MAX_SUBAGENT_COUNT:
-        return f"子代理数量已达到上限，请等待其他子代理完成。"
-    if not KEY_AGENT_WAKEUP in extra:
-        extra[KEY_AGENT_WAKEUP] = {}
-    wakeups = cast(dict[str, Wakeup], extra[KEY_AGENT_WAKEUP])
+        extra[KEY_SUBAGENTS] = {}
+    wakeups = cast(dict[str, Wakeup], extra[KEY_SUBAGENTS])
+    session_id = session.session_id
+    if session_id in wakeups:
+        w = wakeups[session_id]
+        if len(w._turn_tasks) > MAX_SUBAGENT_COUNT:
+            return f"子代理数量已达到上限，请等待其他子代理完成。"
+    else:
+        w = wakeups[session_id] = Wakeup(agent, event)
+
+        def del_wakeup(_):
+            del wakeups[session_id]
+
+        w = Wakeup(agent, event)
+        w.start().add_done_callback(del_wakeup)
+
     s = session.create_turn()
     s.create_payload(session.api, SUBAGENT_PROMPT)
     s.payload["tools"] = [
@@ -193,19 +201,8 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, command: st
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
     s.unit_prompts.append(await enter_workspace(agent, s))
-    session_id = session.session_id
-    if not session_id in wakeups:
-        w = Wakeup(agent, event)
-        w.append_task(agent.call_turn(s, event))
-        if on_done := w.wait_all():
-
-            def del_wakeup(_):
-                del wakeups[session_id]
-
-            on_done.add_done_callback(del_wakeup)
-        wakeups[session_id] = w
-    else:
-        wakeups[session_id].append_task(agent.call_turn(s, event))
+    s.input_text(command)
+    w.submit(s, event)
     return "OK"
 
 
@@ -216,7 +213,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, command: st
     HIDDEN_CATEGORY,
     [],
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, path: str = "./"):
+async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./"):
     folder = WORKSPACE_PATH / session.session_id / format_path(path)
     if not folder.exists():
         return f"路径 '{path}' 不存在。"
@@ -248,7 +245,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, path: str =
     {"file_paths": {"type": "array", "description": "包含一个或多个文件路径的数组", "items": {"type": "string"}}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, file_paths: list[str]):
+async def _(agent: CloversAgent, session: Turn, event: Event, file_paths: list[str]):
     workspace = WORKSPACE_PATH / session.session_id
     md = []
     for file_path in file_paths:
@@ -271,7 +268,7 @@ async def _(agent: CloversAgent, session: TurnSession, event: Event, file_paths:
     },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: TurnSession, event: Event, file_path: str, file_content: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str, file_content: str):
     file = WORKSPACE_PATH / agent.session_id(event) / format_path(file_path)
     file.parent.mkdir(parents=True, exist_ok=True)
     try:

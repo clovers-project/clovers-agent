@@ -109,3 +109,5 @@ def pretty_payload(payload: Payload):
                 if "tool_calls" in message:
                     content += "".join(f"\n[CALL][{x["function"]["name"]}]{x["function"]["arguments"]}" for x in message["tool_calls"])
                 yield content
+            case "tool":
+                yield prefix + message.get("content") or ""

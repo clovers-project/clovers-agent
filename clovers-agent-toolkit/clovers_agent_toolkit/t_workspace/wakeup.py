@@ -1,50 +1,51 @@
 import asyncio
-from clovers_agent import CloversAgent, Event
-from clovers.base import Coro
+from clovers_agent import CloversAgent, Turn, Event
 
 
 class Wakeup:
-
     def __init__(self, agent: CloversAgent, event: Event) -> None:
-        self.agent = agent
-        self.event = event
-        session = agent.current_session(agent.session_id(event))
-        s = session.create_turn()
-        s.api = session.api
-        s.payload = session.payload
-        self.session = s
-        self.tasks: list[asyncio.Task[str | None]] = []
-        self.watcher: asyncio.Task | None = None
+        self._turn_tasks: list[asyncio.Task[str | None]] = []
+        self._wakeup_task = None
+        self._task_added_event = asyncio.Event()
+        self._agent = agent
+        self._event = event
+        main_session = agent.current_session(agent.session_id(event))
+        self._idle_event = main_session.idle_event
+        s = main_session.create_turn()
+        s.usage_counter = {}
+        s.api = main_session.api
+        s.payload = main_session.payload
+        self._session = s
 
-    def append_task(self, coro: Coro[str | None]) -> asyncio.Task:
-        task = asyncio.create_task(coro)
-        self.tasks.append(task)
+    def submit(self, session: Turn, event: Event):
+        session.usage_counter = self._session.usage_counter
+        self._turn_tasks.append(asyncio.create_task(self._run_turn(session, event)))
+        self._task_added_event.set()
+
+    def start(self):
+        if self._wakeup_task is not None or self._task_added_event.is_set():
+            raise RuntimeError("Wakeup is single-use; create a new instance per batch.")
+        task = asyncio.create_task(self._wakeup())
+        self._wakeup_task = task
         return task
 
-    def wait_all(self):
-        if self.watcher is None:
-            watcher = asyncio.create_task(self._wait_all())
-            self.watcher = watcher
-            return watcher
+    async def _run_turn(self, session: Turn, event: Event):
+        last = None
+        async for result in self._agent.call_turn(session, event):
+            last = result
+        return last
 
-    async def _wait_all(self) -> None:
-        try:
-            seen: set[asyncio.Task] = set()
-            while True:
-                pending = [t for t in self.tasks if t not in seen]
-                if not pending:
-                    break
-                seen.update(pending)
-                await asyncio.gather(*pending, return_exceptions=True)
-            self.session.input_text("本条信息为子代理唤醒")
-            self.session.input_text("---\n".join(task.result() or "None" for task in self.tasks))
-            asyncio.create_task(self.agent.wakeup(self.session, self.event))
-        finally:
-            self.running = False
-            self._watcher = None
+    async def _wakeup(self) -> None:
+        await self._task_added_event.wait()
+        await self._idle_event.wait()
+        await asyncio.gather(*self._turn_tasks, return_exceptions=True)
+        self._session.unit_prompts.append("本条信息为子代理唤醒")
+        print("唤醒时任务长度为：", len(self._turn_tasks))
+        self._session.input_text("---\n".join(task.result() or "None" for task in self._turn_tasks))
+        await self._agent.wakeup(self._session, self._event)
 
     def cancel(self) -> None:
-        for t in self.tasks:
+        for t in self._turn_tasks:
             t.cancel()
-        if self.watcher:
-            self.watcher.cancel()
+        if self._wakeup_task:
+            self._wakeup_task.cancel()

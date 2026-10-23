@@ -14,10 +14,10 @@ from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
 
 if TYPE_CHECKING:
-    from .session import TurnSession
+    from .session import Turn
     from .agent import CloversAgent
 
-type Invoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent, TurnSession, Event, P], ReturnT]
+type Invoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent, Turn, Event, P], ReturnT]
 type WrappedInvoker[**P] = Invoker[P, Coro[str]]
 
 
@@ -451,7 +451,7 @@ class AgentSkills(AgentTools):
 
 def invoker_wrapper[**P](name: str, func: Invoker[P, ...]) -> WrappedInvoker[P]:
     @wraps(func)
-    async def wrapper(agent: CloversAgent, session: TurnSession, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
+    async def wrapper(agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
         logger.info(f"[{agent.name}][CALL][{name}] called")
         logger.debug(kwargs)
         content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
@@ -469,7 +469,7 @@ def md_wrapper(content: str | None = None, func: Invoker | None = None, intro: s
     if not intro:
         return lambda *_: content
 
-    def f(agent: CloversAgent, session: TurnSession, event: Event):
+    def f(agent: CloversAgent, session: Turn, event: Event):
         session.create_payload(agent.api(intro), agent.style_prompt)
         session.unit_prompts.append(content)
         return intro

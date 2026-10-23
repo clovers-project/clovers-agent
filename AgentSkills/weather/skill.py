@@ -1,9 +1,9 @@
-from clovers_agent import as_invoker, CloversAgent, TurnSession, Event
+from clovers_agent import as_invoker, CloversAgent, Turn, Event
 from datetime import datetime, timedelta
 
 
 @as_invoker
-async def weather_report(agent: CloversAgent, session: TurnSession, event: Event, content: str, city: str):
+async def weather_report(agent: CloversAgent, session: Turn, event: Event, content: str, city: str):
     now = datetime.now()
     kwargs = {}
     kwargs["city"] = city

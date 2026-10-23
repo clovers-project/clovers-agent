@@ -25,7 +25,7 @@ class SessionComplete(BaseException):
         self.data = data
 
 
-class TurnSession:
+class Turn:
     api: OpenAIAPI
     payload: Payload
 
@@ -84,7 +84,7 @@ class TurnSession:
 
     def create_turn(self):
         """创建一个子会话"""
-        return TurnSession(self.session_id, self.usage_counter, self.extra)
+        return Turn(self.session_id, self.usage_counter, self.extra)
 
     def create_fork(self):
         """创建一个分支会话"""
@@ -121,7 +121,7 @@ def iter_recoder(recorder: Iterable[Record]):
         yield b
 
 
-class Session(TurnSession):
+class Session(Turn):
     def __init__(
         self,
         session_id: str,
@@ -159,20 +159,28 @@ class Session(TurnSession):
         self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.silence_timeout = silence_timeout
         # 状态
+        self.last_active_time = 0.0
         self.execute_lock = asyncio.Lock()
         self.wait_lock = asyncio.Lock()
-        self.last_active_time = 0.0
-
-    @property
-    def messages(self):
-        return tuple(iter_recoder(self.recorder))
+        self.idle_event = asyncio.Event()
+        self.idle_event.set()
 
     @override
     def activate(self):
+        self.idle_event.clear()
         self.payload["messages"].extend(self.messages)
         if self.image_recorder:
             self.extend_tools((GET_IMAGE_BY_ID_INFO,))
         super().activate()
+
+    @override
+    def inactivate(self):
+        self.idle_event.set()
+        super().inactivate()
+
+    @property
+    def messages(self):
+        return tuple(iter_recoder(self.recorder))
 
     def record_turn(self, content: str | MultimodalContent, reply: str, timestamp: float):
         """处理完成"""
