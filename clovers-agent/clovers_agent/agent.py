@@ -248,20 +248,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         current_session = self.current_session(session.session_id)
         recorder = current_session.recorder
         async with current_session.execute_lock, current_session.wait_lock:
-            from .api import pretty_payload
-
-            print("=" * 10, "wakeup".upper(), "=" * 10)
-            print("\n".join(pretty_payload(session.payload)))
-
             if len(recorder) <= r_idx:
                 session.payload["messages"].extend(iter_recoder(recorder))
             else:
                 session.payload["messages"][m_idx] = recorder[r_idx][0].copy()
                 session.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
-            from .api import pretty_payload
-
-            print("=" * 10, "pending wakeup".upper(), "=" * 10)
-            print("\n".join(pretty_payload(session.payload)))
             current_input = session.current_input.copy()
             _last = None
             async for result in self.call_turn(session, event):
