@@ -182,11 +182,10 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     session_id = session.session_id
     if session_id in batchs:
         batch = batchs[session_id]
-        if len(batch._turn_tasks) > MAX_SUBAGENT_COUNT:
+        if len(batch.tasklist) > MAX_SUBAGENT_COUNT:
             return f"子代理数量已达到上限，请等待其他子代理完成。"
     else:
         batch = batchs[session_id] = TurnBatch(agent, event)
-        batch = TurnBatch(agent, event)
         batch.start().add_done_callback(lambda _: batchs.pop(session_id, None))
 
     s = session.create_turn()
