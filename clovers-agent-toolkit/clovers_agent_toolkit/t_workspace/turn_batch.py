@@ -1,20 +1,24 @@
 import asyncio
 import contextlib
 from clovers_agent import CloversAgent, Turn, Event
+from clovers_agent.session import Session
 
 
 class TurnBatch:
-    def __init__(self, agent: CloversAgent, event: Event) -> None:
+    def __init__(self, agent: CloversAgent, session: Session, event: Event) -> None:
+        if (cursor := session.cursor) is None:
+            raise RuntimeError("Cannot create turn_batch when session is not active")
         self.tasklist: list[asyncio.Task[str | None]] = []
         self.wakeup_task = None
         self._agent = agent
         self._event = event
-        main_session = agent.current_session(agent.session_id(event))
-        self._idle_event = main_session.idle_event
-        s = main_session.create_turn()
+        self._idle_event = session.idle_event
+        self._m_idx = cursor
+        self._r_idx = len(session.recorder)
+        s = session.create_turn()
         s.usage_counter = {}
-        s.api = main_session.api
-        s.payload = main_session.payload
+        s.api = session.api
+        s.payload = session.payload
         self._session = s
 
     def submit(self, session: Turn, event: Event):
@@ -46,8 +50,8 @@ class TurnBatch:
                 break
             await asyncio.gather(*pending)
         self._session.unit_prompts.append("本条信息为子代理唤醒")
-        self._session.input_text("---\n".join(task.result() or "None" for task in self.tasklist))
-        asyncio.create_task(self._agent.wakeup(self._session, self._event))
+        self._session.input_text("\n---\n".join(task.result() or "None" for task in self.tasklist))
+        asyncio.create_task(self._agent.wakeup(self._session, self._event, self._m_idx, self._r_idx))
 
     def cancel(self) -> None:
         for t in self.tasklist:

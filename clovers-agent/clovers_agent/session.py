@@ -67,7 +67,7 @@ class Turn:
     def inactivate(self):
         # 按注入顺序删除
         self.unit_prompts.clear()
-        self.current_input.clear()
+        self.current_input = []
         self.api = None  # type: ignore
         self.payload = None  # type: ignore
         self.cursor = None
@@ -117,8 +117,8 @@ class Turn:
 
 def iter_recoder(recorder: Iterable[Record]):
     for a, b, _ in recorder:
-        yield a
-        yield b
+        yield a.copy()
+        yield b.copy()
 
 
 class Session(Turn):
@@ -150,7 +150,6 @@ class Session(Turn):
         else:
             self.recorder = cast(list[Record], [])
             self.decouple_count = 0
-        self.recorder: list[Record] = []
         self.router_recorder: deque[Record] = deque(maxlen=router_size)
         self.memory_size = memory_size
         self.memory_timeout = memory_timeout

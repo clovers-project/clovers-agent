@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 from clovers_agent import CloversAgent, Turn, Event
+from clovers_agent.session import Session
 from clovers_agent.utils import decode_bytes
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, SKILL_MENU
@@ -185,7 +186,9 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
         if len(batch.tasklist) > MAX_SUBAGENT_COUNT:
             return f"子代理数量已达到上限，请等待其他子代理完成。"
     else:
-        batch = batchs[session_id] = TurnBatch(agent, event)
+        if not isinstance(session, Session):
+            return f"只有主会话才能初始化子代理"
+        batch = batchs[session_id] = TurnBatch(agent, session, event)
         batch.start().add_done_callback(lambda _: batchs.pop(session_id, None))
 
     s = session.create_turn()
@@ -235,23 +238,19 @@ async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./"):
 
 
 @TOOLS.register(
-    "read_files",
-    "读取并查看指定文件的内容。支持同时传入多个路径以一次性查看多个文件。",
-    {"file_paths": {"type": "array", "description": "包含一个或多个文件路径的数组", "items": {"type": "string"}}},
+    "read_file",
+    "读取并查看指定文件的内容",
+    {"file_path": {"type": "string", "description": "文件路径"}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, file_paths: list[str]):
+async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     workspace = WORKSPACE_PATH / session.session_id
-    md = []
-    for file_path in file_paths:
-        file = workspace / format_path(file_path)
-        if not file.is_relative_to(workspace):
-            md.append(f"{file_path} 非工作区文件")
-        if not file.exists():
-            md.append(f"{file_path} 文件不存在")
-            continue
-        md.append(f"```{file_path}\n{decode_bytes(file.read_bytes())}\n```")
-    return "\n\n".join(md)
+    file = workspace / format_path(file_path)
+    if not file.is_relative_to(workspace):
+        return f"{file_path} 非工作区文件"
+    if not file.exists():
+        return f"{file_path} 文件不存在"
+    return decode_bytes(file.read_bytes())
 
 
 @TOOLS.register(

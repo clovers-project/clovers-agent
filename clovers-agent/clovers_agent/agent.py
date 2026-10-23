@@ -213,17 +213,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             for _ in range(self.call_depth):
                 message = await session.call_api()
                 session.payload["messages"].append(message)
-                content = message["content"].strip()
-                if not (tool_calls := message.get("tool_calls")):
-                    from .api import pretty_payload
-
-                    print("=" * 10, "complete".upper(), "=" * 10)
-                    print("\n".join(pretty_payload(session.payload)))
+                if content := message["content"].strip():
                     yield content
+                if not (tool_calls := message.get("tool_calls")):
                     session.inactivate()
                     return
-                if content:
-                    yield content
                 messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
                 session.payload["messages"].extend(messages)
             raise TimeoutError(f"Maximum tool call chain length exceeded")
@@ -250,29 +244,24 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return await self.intro_invoker[intro](self, session, event) or intro
 
-    async def handle_wakeup(self, session: Turn, event: Event):
+    async def handle_wakeup(self, session: Turn, event: Event, m_idx: int, r_idx: int):
         current_session = self.current_session(session.session_id)
-        message = session.payload["messages"][-1]
-        role = message["role"]
-        if role not in ("assistant", "user"):
-            logger.error(f"[{self.name}][WAKEUP] the last message must be from user or assistant, but got {role}")
-            return
-        content = message["content"]
+        recorder = current_session.recorder
         async with current_session.execute_lock, current_session.wait_lock:
-            recorder = reversed(current_session.recorder)
-            pending = []
-            if role == "assistant":
-                for um, am, _ in recorder:
-                    if am["content"] == content:
-                        break
-                    pending.append(am)
-                    pending.append(um)
+            from .api import pretty_payload
+
+            print("=" * 10, "wakeup".upper(), "=" * 10)
+            print("\n".join(pretty_payload(session.payload)))
+
+            if len(recorder) <= r_idx:
+                session.payload["messages"].extend(iter_recoder(recorder))
             else:
-                for um, am, _ in recorder:
-                    pending.append(am)
-                    if um["content"] == content:
-                        break
-                    pending.append(um)
+                session.payload["messages"][m_idx] = recorder[r_idx][0].copy()
+                session.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
+            from .api import pretty_payload
+
+            print("=" * 10, "pending wakeup".upper(), "=" * 10)
+            print("\n".join(pretty_payload(session.payload)))
             current_input = session.current_input.copy()
             _last = None
             async for result in self.call_turn(session, event):
@@ -383,9 +372,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
     def send(self, text: str, event: Event):
         asyncio.create_task(event.send("text", text))
 
-    async def wakeup(self, session: Turn, event: Event):
+    async def wakeup(self, session: Turn, event: Event, m_idx: int, ridx: int):
         try:
-            await self.handle_wakeup(session, event)
+            await self.handle_wakeup(session, event, m_idx, ridx)
         except SessionComplete as e:
             if result := e.data:
                 self.send(result, event)
