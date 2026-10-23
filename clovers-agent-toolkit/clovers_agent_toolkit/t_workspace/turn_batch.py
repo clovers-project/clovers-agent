@@ -39,6 +39,7 @@ class TurnBatch:
         await self._idle_event.wait()
         seen = set()
         while True:
+            # 保证主调用链返回但子代理还在时还能继续添加子代理
             pending = tuple(t for t in self.tasklist if t not in seen)
             seen.update(pending)
             if not pending:
