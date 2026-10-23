@@ -220,12 +220,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     print("=" * 10, "complete".upper(), "=" * 10)
                     print("\n".join(pretty_payload(session.payload)))
                     yield content
+                    session.inactivate()
                     return
                 if content:
                     yield content
                 messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
                 session.payload["messages"].extend(messages)
-            raise RuntimeError(f"Maximum tool call chain length exceeded")
+            raise TimeoutError(f"Maximum tool call chain length exceeded")
         except Exception as e:
             logger.exception(e)
             file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"

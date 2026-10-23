@@ -6,7 +6,7 @@ from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, SKILL_MENU
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES, retry_request
-from .wakeup import Wakeup
+from .turn_batch import TurnBatch
 from .utils import format_path, format_size, md5
 from .constants import WORKSPACE, KEY_SUBAGENTS, KEY_SUBAGENTS, SUBAGENT_PROMPT
 
@@ -178,20 +178,16 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     extra = session.extra
     if not KEY_SUBAGENTS in extra:
         extra[KEY_SUBAGENTS] = {}
-    wakeups = cast(dict[str, Wakeup], extra[KEY_SUBAGENTS])
+    batchs = cast(dict[str, TurnBatch], extra[KEY_SUBAGENTS])
     session_id = session.session_id
-    if session_id in wakeups:
-        w = wakeups[session_id]
-        if len(w._turn_tasks) > MAX_SUBAGENT_COUNT:
+    if session_id in batchs:
+        batch = batchs[session_id]
+        if len(batch._turn_tasks) > MAX_SUBAGENT_COUNT:
             return f"子代理数量已达到上限，请等待其他子代理完成。"
     else:
-        w = wakeups[session_id] = Wakeup(agent, event)
-
-        def del_wakeup(_):
-            del wakeups[session_id]
-
-        w = Wakeup(agent, event)
-        w.start().add_done_callback(del_wakeup)
+        batch = batchs[session_id] = TurnBatch(agent, event)
+        batch = TurnBatch(agent, event)
+        batch.start().add_done_callback(lambda _: batchs.pop(session_id, None))
 
     s = session.create_turn()
     s.create_payload(session.api, SUBAGENT_PROMPT)
@@ -202,7 +198,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     ]
     s.unit_prompts.append(await enter_workspace(agent, s))
     s.input_text(command)
-    w.submit(s, event)
+    batch.submit(s, event)
     return "OK"
 
 

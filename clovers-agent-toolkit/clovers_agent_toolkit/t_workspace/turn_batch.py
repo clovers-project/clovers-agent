@@ -2,7 +2,7 @@ import asyncio
 from clovers_agent import CloversAgent, Turn, Event
 
 
-class Wakeup:
+class TurnBatch:
     def __init__(self, agent: CloversAgent, event: Event) -> None:
         self._turn_tasks: list[asyncio.Task[str | None]] = []
         self._wakeup_task = None
@@ -40,7 +40,7 @@ class Wakeup:
         await self._idle_event.wait()
         await asyncio.gather(*self._turn_tasks, return_exceptions=True)
         self._session.unit_prompts.append("本条信息为子代理唤醒")
-        print("唤醒时任务长度为：", len(self._turn_tasks))
+        print("wakeup 唤醒时任务长度为：", len(self._turn_tasks))
         self._session.input_text("---\n".join(task.result() or "None" for task in self._turn_tasks))
         await self._agent.wakeup(self._session, self._event)
 
