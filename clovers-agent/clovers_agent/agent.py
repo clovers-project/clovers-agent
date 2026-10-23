@@ -250,15 +250,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return await self.intro_invoker[intro](self, session, event) or intro
 
-    async def run_session(self, session: Session, event: Event, timestamp: float):
-        current_input = session.current_input.copy()
-        last_result = None
-        async for result in self.call_turn(session, event):
-            last_result = result
-            self.send(result, event)
-        if last_result:
-            session.record_turn(current_input, last_result, timestamp)
-
     async def handle_wakeup(self, session: Turn, event: Event):
         current_session = self.current_session(session.session_id)
         message = session.payload["messages"][-1]
@@ -282,7 +273,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     if um["content"] == content:
                         break
                     pending.append(um)
-            await self.run_session(current_session, event, time.time())
+            current_input = session.current_input.copy()
+            _last = None
+            async for result in self.call_turn(session, event):
+                _last = result
+                self.send(result, event)
+            if _last:
+                current_session.record_turn(current_input, _last, time.time())
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -366,7 +363,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            await self.run_session(session, event, timestamp)
+            current_input = session.current_input.copy()
+            _last = None
+            async for result in self.call_turn(session, event):
+                _last = result
+                self.send(result, event)
+            if _last:
+                session.record_turn(current_input, _last, timestamp)
 
     def update_usage(self, usage_counter: dict):
         if not usage_counter:
