@@ -221,27 +221,43 @@ async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
     return "OK"
 
 
+MAX_LS_ENTRIES = 200
+
+
 @TOOLS.register(
     "ls",
-    "List the files and directories directly under a workspace path. Not recursive.",
-    {"path": {"type": "string", "description": 'Directory path relative to the workspace root. Defaults to "./".'}},
+    "List files and directories under a workspace path. Lists direct children by default; set depth to recurse.",
+    {
+        "path": {"type": "string", "description": 'Defaults to "./".'},
+        "depth": {"type": "integer", "description": "Levels to list: 1 lists direct children only. Defaults to 1."},
+    },
     HIDDEN_CATEGORY,
     [],
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./"):
-    folder = WORKSPACE_PATH / session.session_id / format_path(path)
+async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./", depth: int = 1):
+    workspace = WORKSPACE_PATH / session.session_id
+    folder = workspace / format_path(path)
+    if not folder.is_relative_to(workspace):
+        return f'Not a workspace folder: "{path}"'
     if not folder.exists():
         return f'Path not found: "{path}"'
     if not folder.is_dir():
         return f'Not a directory: "{path}"'
+    depth = max(1, depth)
+    pattern = "/".join(["*"] * depth)
+    entries = sorted(
+        folder.glob(pattern),
+        key=lambda f: (not f.is_dir(), str(f.relative_to(folder))),
+    )
+    truncated = len(entries) > MAX_LS_ENTRIES
+    entries = entries[:MAX_LS_ENTRIES]
     lines = [
-        f"Contents of `{path}`:\n",
+        f"Contents of `{path}` (depth {depth}):\n",
         "kind|size|mtime|name",
         "---|---|---|---",
     ]
-    entries = sorted(folder.glob("*"), key=lambda f: (f.is_file(), f.name))
     for file in entries:
-        name = file.name
+        name = str(file.relative_to(folder))
         try:
             mtime = datetime.fromtimestamp(file.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             if file.is_file():
@@ -249,8 +265,10 @@ async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./"):
             else:
                 ks = "d|-"
             lines.append(f"{ks}|{mtime}|{name}")
-        except OSError as e:
+        except OSError:
             lines.append(f"?|?|?|{name}")
+    if truncated:
+        lines.append(f"\n(truncated at {MAX_LS_ENTRIES} entries)")
     return "\n".join(lines)
 
 
@@ -281,25 +299,24 @@ async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     "Write text to a file",
     {
         "file_path": {"type": "string"},
-        "file_content": {"type": "string", "description": "Full content to write"},
+        "content": {"type": "string", "description": "Full content to write"},
     },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str, file_content: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str, content: str):
     workspace = WORKSPACE_PATH / session.session_id
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
         file_name = f"{file.name}.{uuid4().hex}"
         file = workspace / file_name
-        if file.exists():
-            return f'Not a workspace file: "{file_path}"'
         workspace.mkdir(parents=True, exist_ok=True)
-        tip = f"目标非工作区目录，文件已保存至 {file_name}"
+        tip = f'File written to the workspace as "{file_name}" — the requested path is outside the workspace.'
     else:
-        tip = "已保存至工作区"
+        file.parent.mkdir(parents=True, exist_ok=True)
+        tip = "File written."
     try:
-        file.write_text(file_content, encoding="utf-8")
+        file.write_text(content, encoding="utf-8")
         return tip
     except Exception as e:
         logger.error(e)
-        return f"文件写入失败：{e}"
+        return f"Failed to write file: {e}"
