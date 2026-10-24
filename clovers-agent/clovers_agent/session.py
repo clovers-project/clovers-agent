@@ -38,6 +38,7 @@ class Turn:
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
         self.cursor: int | None = None
+        self.outbox: list[str]
 
     def create_payload(self, api: OpenAIAPI, system_prompt: str | None = None):
         if self.cursor is not None:
@@ -160,12 +161,20 @@ class Session(Turn):
         self.payload["messages"].extend(self.messages)
         if self.image_recorder:
             self.extend_tools((GET_IMAGE_BY_ID_INFO,))
+        self.outbox = []
         super().activate()
 
     @override
     def inactivate(self):
         self.idle_event.set()
         super().inactivate()
+        self.outbox = None  # type: ignore
+        del self.outbox
+
+    def flush_outbox(self):
+        if self.outbox:
+            self.payload["messages"].append({"role": "user", "content": "\n".join(self.outbox)})
+            self.outbox.clear()
 
     @property
     def messages(self):

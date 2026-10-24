@@ -33,11 +33,10 @@ class TurnBatch:
         return task
 
     async def _run_turn(self, session: Turn, event: Event):
-        with contextlib.suppress(Exception):
-            last = None
-            async for result in self._agent.call_turn(session, event):
-                last = result
-            return last
+        last = None
+        async for result in self._agent.call_turn(session, event):
+            last = result
+        return last
 
     async def _wakeup(self) -> None:
         await self._idle_event.wait()

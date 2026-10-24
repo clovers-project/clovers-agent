@@ -25,6 +25,7 @@ from .constants import (
     SKILL_MENU_DESC,
     BUILTIN_CATEGORY,
     GET_IMAGE_BY_ID_INFO,
+    INJECT_PROMPT_INFO,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
     EXECUTE_SCRIPT_MAX_TIMEOUT,
@@ -79,6 +80,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
         self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(view_id_image)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
     def reload_prompts(self):
@@ -211,19 +213,28 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             for _ in range(self.call_depth):
                 message = await session.call_api()
                 session.payload["messages"].append(message)
-                if content := message["content"].strip():
+                content = (message["content"] or "").strip()
+                if tool_calls := message.get("tool_calls"):
+                    messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
+                    session.payload["messages"].extend(messages)
                     yield content
-                if not (tool_calls := message.get("tool_calls")):
+                    continue
+                else:
                     session.inactivate()
+                    yield content
                     return
-                messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
-                session.payload["messages"].extend(messages)
             raise TimeoutError(f"Maximum tool call chain length exceeded")
         except Exception as e:
             logger.exception(e)
             file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
             save_json(self.session_dir / session.session_id / file, session.payload)
             session.inactivate()
+
+    async def run_turn(self, session: Turn, event: Event):
+        last_reply = None
+        async for reply in self.call_turn(session, event):
+            last_reply = reply
+        return last_reply
 
     async def router(self, content: str, session: Session, event: Event):
         if len(self.intro_manifest) < 2:
@@ -257,7 +268,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning(f"[{self.name}][CHIME IN] {e}")
 
-    async def handle_wait_replay(self, session: Session, content: str):
+    async def handle_wait_replay(self, session: Session, event: Event, content: str):
         if session.cursor is None:
             return
         s = session.create_turn()
@@ -280,13 +291,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             s.input_text(ask)
         s.input_text(content)
         s.unit_prompts.append(self.wait_prompt)
-        try:
-            message = await s.call_api()
-            content = message["content"].strip()
-            logger.info(f"[{self.name}][WAIT REPLY]")
-            return content
-        except Exception as e:
-            logger.warning(f"[{self.name}][WAIT REPLY] {e}")
+        s.activate()
+        from .api import pretty_payload
+
+        print("=" * 10, "wait_replay".upper(), "=" * 10)
+        print("\n".join(pretty_payload(s.payload)))
+        return await self.run_turn(s, event)
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -328,7 +338,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             if silence_duration < self.wait_cooldown:
                 return
             async with session.wait_lock:
-                if reply := await self.handle_wait_replay(session, content):
+                if reply := await self.handle_wait_replay(session, event, content):
                     self.send(reply, event)
                 return
         session.executing_ask = content
@@ -365,8 +375,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             session.executing_ask = session.current_input.copy()
             async for reply in self.call_turn(session, event):
-                session.executing_reply = reply
-                self.send(reply, event)
+                session.flush_outbox()
+                if reply:
+                    session.executing_reply = reply
+                    self.send(reply, event)
             session.record_turn(timestamp)
 
     async def handle_wakeup(self, session: Turn, event: Event, m_idx: int, r_idx: int):
@@ -381,8 +393,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.payload["messages"][m_idx] = recorder[r_idx][0].copy()
                 session.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
             async for reply in self.call_turn(session, event):
-                current_session.executing_reply = reply
-                self.send(reply, event)
+                if reply:
+                    current_session.executing_reply = reply
+                    self.send(reply, event)
             current_session.record_turn(time.time())
 
     def update_usage(self, usage_counter: dict):
@@ -479,6 +492,13 @@ async def view_id_image(agent: CloversAgent, session: Turn, event: Event, image_
     if not url:
         return f"Error: [image:{image_id}] is missing."
     session.current_input.append({"type": "image_url", "image_url": {"url": url}})
+    return "OK"
+
+
+@as_invoker
+async def inject_prompt(agent: CloversAgent, session: Turn, event: Event, prompt: str):
+    assert isinstance(session, Session)
+    session.outbox.append(prompt)
     return "OK"
 
 

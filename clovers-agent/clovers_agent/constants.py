@@ -23,6 +23,19 @@ GET_IMAGE_BY_ID_INFO: FunctionToolInfo = {
         },
     },
 }
+INJECT_PROMPT = CONSTANT.INJECT_PROMPT
+INJECT_PROMPT_INFO: FunctionToolInfo = {
+    "type": "function",
+    "function": {
+        "name": INJECT_PROMPT,
+        "description": CONSTANT.INJECT_PROMPT_DESC,
+        "parameters": {
+            "type": "object",
+            "properties": {"prompt": {"type": "string", "description": CONSTANT.INJECT_PROMPT_PROMPT_DESC}},
+            "required": ["prompt"],
+        },
+    },
+}
 VISION_TAG = CONSTANT.VISION_TAG
 VISION_PROMPT = CONSTANT.VISION_PROMPT
 EXECUTE_SCRIPT = CONSTANT.EXECUTE_SCRIPT
