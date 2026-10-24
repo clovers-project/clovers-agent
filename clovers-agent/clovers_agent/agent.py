@@ -81,7 +81,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
         self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
-        self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(inject_prompt)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
     def reload_prompts(self):
@@ -274,14 +274,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             return
         s = session.create_turn()
         s.create_payload(session.api)
-        keys = set(session.payload.keys())
-        keys.remove("messages")
-        for k, v in session.payload.items():
-            if k == "messages":
-                continue
-            s.payload[k] = deepcopy(v)
         if session.cursor > 0:
             s.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
+        s.payload["tools"] = [INJECT_PROMPT_INFO]
         s.input_text(content)
         s.unit_prompts.append(self.wait_prompt.format(session.turn_output))
         s.activate()

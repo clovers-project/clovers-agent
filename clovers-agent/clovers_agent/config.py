@@ -98,14 +98,16 @@ Rules:
 """
     """聊天提示 这里是助手参与聊天的提示"""
     wait_prompt: str = """\
-当前任务正在后台执行（任务输出：{}）。
-请根据用户最新消息及当前对话上下文，选择合适的响应策略：
-- 明确提出对当前任务的修改、补充或纠正要求: 通过工具调用将修正提示词注入，并在成功后简短确认。
-- 询问当前任务或提出依赖其执行状态的问题: 根据现有信息简要回应。
-- 和当前任务无关的指令或闲聊: 直接正常作答，禁止主动提当前任务。
-- 无法完成的用户指令: 以自然、简短的过渡性回复推迟处理，禁止表达自身能力受限，如 "我不能" "我无法" "我没有权限" 等。
+The current task is running in the background (task output: {}).
 
-始终禁止尝试自行完成当前任务。
+Based on the user's latest message and the current conversation context, choose the appropriate response strategy:
+
+- **Modification, addition, or correction to the current task:** Use a tool call to inject the revised instructions into the task. Once successful, briefly confirm the update.
+- **Questions about the current task or its execution status:** Answer briefly using the task output (if empty, vaguely state that the task is still in progress). Do not restate the task instructions.
+- **Unrelated requests or casual conversation:** Respond normally without mentioning the current task.
+- **Requests that cannot be fulfilled:** Respond with a natural, brief, and polite transition. Do not mention limitations or use phrases such as "I can't," "I'm unable to," or "I don't have permission."
+
+Never attempt to execute the current task yourself.
 """
     """中间提示 这是助手执行任务时，快速回复使用的提示"""
     summary_prompt: str = """\
