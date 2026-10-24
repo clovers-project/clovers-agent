@@ -5,6 +5,7 @@ import time
 import json
 import asyncio
 import httpx
+from copy import deepcopy
 from pathlib import Path
 from datetime import datetime
 from collections import deque
@@ -148,13 +149,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 
     async def summary_context(self, session: Session):
         s = session.create_turn()
-        s.create_payload(self.api("summary"))
+        s.create_payload(self.api("summary"), self.base_prompt)
         s.payload["messages"].extend(session.messages)
         s.unit_prompts.append(self.summary_prompt)
         s.activate()
-        from .api import pretty_payload
-
-        print("\n".join(pretty_payload(s.payload)))
         try:
             resp = await s.call_api()
             summary = resp["content"].strip()
@@ -162,7 +160,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             logger.debug(summary)
             return summary
         except Exception as e:
-            logger.error(f"[{self.name}][SUMMARY] {e}")
+            logger.warning(f"[{self.name}][SUMMARY] {e}")
             return
 
     @staticmethod
@@ -244,22 +242,51 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return await self.intro_invoker[intro](self, session, event) or intro
 
-    async def handle_wakeup(self, session: Turn, event: Event, m_idx: int, r_idx: int):
-        current_session = self.current_session(session.session_id)
-        recorder = current_session.recorder
-        async with current_session.execute_lock, current_session.wait_lock:
-            if len(recorder) <= r_idx:
-                session.payload["messages"].extend(iter_recoder(recorder))
-            else:
-                session.payload["messages"][m_idx] = recorder[r_idx][0].copy()
-                session.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
-            current_input = session.current_input.copy()
-            _last = None
-            async for result in self.call_turn(session, event):
-                _last = result
-                self.send(result, event)
-            if _last:
-                current_session.record_turn(current_input, _last, time.time())
+    async def handle_chime_in(self, session: Session, content: str):
+        s = session.create_turn()
+        s.create_payload(self.api("chime_in"), self.chat_prompt)
+        s.payload["messages"].extend(session.messages)
+        s.unit_prompts.append(self.chime_in_prompt)
+        s.input_text(content)
+        s.activate()
+        try:
+            message = await s.call_api()
+            content = message["content"].strip()
+            logger.info(f"[{self.name}][CHIME IN]")
+            return content
+        except Exception as e:
+            logger.warning(f"[{self.name}][CHIME IN] {e}")
+
+    async def handle_wait_replay(self, session: Session, content: str):
+        if session.cursor is None:
+            return
+        s = session.create_turn()
+        s.create_payload(session.api)
+        keys = set(session.payload.keys())
+        keys.remove("messages")
+        for k, v in session.payload.items():
+            if k == "messages":
+                continue
+            s.payload[k] = deepcopy(v)
+        if session.cursor > 0:
+            s.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
+        ask = session.executing_ask
+        if isinstance(ask, list):
+            ask = "".join(x["text"] for x in ask if x["type"] == "text")
+        if session.executing_reply:
+            s.payload["messages"].append({"role": "user", "content": ask})
+            s.payload["messages"].append({"role": "assistant", "content": session.executing_reply})
+        else:
+            s.input_text(ask)
+        s.input_text(content)
+        s.unit_prompts.append(self.wait_prompt)
+        try:
+            message = await s.call_api()
+            content = message["content"].strip()
+            logger.info(f"[{self.name}][WAIT REPLY]")
+            return content
+        except Exception as e:
+            logger.warning(f"[{self.name}][WAIT REPLY] {e}")
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -281,17 +308,15 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
             if session.execute_lock.locked() or session.wait_lock.locked():
                 return
+            content = "\n".join(x for x, _ in session.silence_recorder)
+            session.executing_ask = content
+            session.executing_reply = None
             async with session.execute_lock, session.wait_lock:
                 content = "\n".join(x for x, _ in session.silence_recorder)
-                try:
-                    result = await session.fork_call(self.chime_in_prompt, content)
-                except Exception as e:
-                    logger.exception(e)
-                    return
-                if result:
-                    logger.info(f"[{self.name}][CHIME IN]")
-                    session.record_turn(content, result, timestamp)
-                    self.send(result, event)
+                if reply := await self.handle_chime_in(session, content):
+                    self.send(reply, event)
+                    session.executing_reply = reply
+                    session.record_turn(timestamp)
                 return
         session.refresh(timestamp)
         session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
@@ -303,16 +328,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             if silence_duration < self.wait_cooldown:
                 return
             async with session.wait_lock:
-                try:
-                    result = await session.fork_call(self.wait_prompt, content)
-                except Exception as e:
-                    logger.exception(e)
-                    return
-                if result:
-                    logger.info(f"[{self.name}][WAIT REPLY]")
-                    session.last_active_time = timestamp
-                    self.send(result, event)
+                if reply := await self.handle_wait_replay(session, content):
+                    self.send(reply, event)
                 return
+        session.executing_ask = content
+        session.executing_reply = None
         async with session.execute_lock:
             if session.step(body, timestamp) and (summary := await self.summary_context(session)):
                 session.clear()
@@ -343,13 +363,27 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            current_input = session.current_input.copy()
-            _last = None
-            async for result in self.call_turn(session, event):
-                _last = result
-                self.send(result, event)
-            if _last:
-                session.record_turn(current_input, _last, timestamp)
+            session.executing_ask = session.current_input.copy()
+            async for reply in self.call_turn(session, event):
+                session.executing_reply = reply
+                self.send(reply, event)
+            session.record_turn(timestamp)
+
+    async def handle_wakeup(self, session: Turn, event: Event, m_idx: int, r_idx: int):
+        current_session = self.current_session(session.session_id)
+        recorder = current_session.recorder
+        current_session.executing_ask = session.current_input.copy()
+        current_session.executing_reply = None
+        async with current_session.execute_lock, current_session.wait_lock:
+            if len(recorder) <= r_idx:
+                session.payload["messages"].extend(iter_recoder(recorder))
+            else:
+                session.payload["messages"][m_idx] = recorder[r_idx][0].copy()
+                session.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
+            async for reply in self.call_turn(session, event):
+                current_session.executing_reply = reply
+                self.send(reply, event)
+            current_session.record_turn(time.time())
 
     def update_usage(self, usage_counter: dict):
         if not usage_counter:
@@ -363,27 +397,27 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
     def send(self, text: str, event: Event):
         asyncio.create_task(event.send("text", text))
 
-    async def wakeup(self, session: Turn, event: Event, m_idx: int, ridx: int):
-        try:
-            await self.handle_wakeup(session, event, m_idx, ridx)
-        except SessionComplete as e:
-            if result := e.data:
-                self.send(result, event)
-        self.update_usage(session.usage_counter)
-
     async def chat(self, event: Event):
         session = self.current_session(self.session_id(event))
         try:
             await self.handle_chat(session, event)
         except SessionComplete as e:
-            if result := e.data:
-                self.send(result, event)
+            if reply := e.data:
+                self.send(reply, event)
+        self.update_usage(session.usage_counter)
+
+    async def wakeup(self, session: Turn, event: Event, m_idx: int, ridx: int):
+        try:
+            await self.handle_wakeup(session, event, m_idx, ridx)
+        except SessionComplete as e:
+            if reply := e.data:
+                self.send(reply, event)
         self.update_usage(session.usage_counter)
 
 
 @as_invoker
 async def on_chat(agent: CloversAgent, session: Turn, event: Event):
-    session.create_payload(agent._api, agent.chat_prompt)
+    session.create_payload(agent.api(ON_CHAT), agent.chat_prompt)
     session.payload["tools"] = [agent.manifest[SKILL_MENU]]
     return ON_CHAT
 

@@ -96,16 +96,6 @@ class Turn:
         """创建一个子会话"""
         return Turn(self.session_id, self.usage_counter, self.extra)
 
-    def create_fork(self):
-        """创建一个分支会话"""
-        if self.cursor is None:
-            return
-        s = self.create_turn()
-        s.create_payload(self.api)
-        if self.cursor > 0:
-            s.payload["messages"].extend(self.payload["messages"][: self.cursor - 1])
-        return s
-
     @property
     def system_message(self) -> SystemMessage | None:
         message = self.payload["messages"][0]
@@ -161,6 +151,8 @@ class Session(Turn):
         self.wait_lock = asyncio.Lock()
         self.idle_event = asyncio.Event()
         self.idle_event.set()
+        self.executing_ask: str | MultimodalContent
+        self.executing_reply: str | None
 
     @override
     def activate(self):
@@ -179,11 +171,15 @@ class Session(Turn):
     def messages(self):
         return tuple(iter_recoder(self.recorder))
 
-    def record_turn(self, content: str | MultimodalContent, reply: str, timestamp: float):
+    def record_turn(self, timestamp: float):
         """处理完成"""
-        if isinstance(content, list):
+        ask = self.executing_ask
+        reply = self.executing_reply
+        if not reply:
+            return
+        if isinstance(ask, list):
             contents: list[str] = []
-            for seg in content:
+            for seg in ask:
                 match seg["type"]:
                     case "text":
                         contents.append(seg["text"])
@@ -192,8 +188,8 @@ class Session(Turn):
                         image_id = next(self.image_id)
                         contents.append(f" [image:{image_id}] ")
                         self.image_recorder.append((image_id, url, timestamp))
-            content = "".join(contents)
-        record: Record = ({"role": "user", "content": content}, {"role": "assistant", "content": reply}, timestamp)
+            ask = "".join(contents)
+        record: Record = ({"role": "user", "content": ask}, {"role": "assistant", "content": reply}, timestamp)
         self.router_recorder.append(record)
         self.recorder.append(record)
         self.decouple_count += len(record[0]["content"]) + len(record[1]["content"])
