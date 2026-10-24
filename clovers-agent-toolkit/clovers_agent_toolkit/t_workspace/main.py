@@ -59,6 +59,8 @@ async def on_task(agent: CloversAgent, session: Turn, event: Event):
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
     await enter_workspace(agent, session)
+    tools = session.payload["tools"]
+    session.payload["tools"] = [x for x in tools if x["function"]["name"] != "subagent"]
     return ""
 
 
