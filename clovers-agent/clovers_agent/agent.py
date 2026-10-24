@@ -283,7 +283,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if session.cursor > 0:
             s.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
         s.input_text(content)
-        s.unit_prompts.append(self.wait_prompt)
+        s.unit_prompts.append(self.wait_prompt.format(session.turn_output))
         s.activate()
         return await self.run_turn(s, event)
 
