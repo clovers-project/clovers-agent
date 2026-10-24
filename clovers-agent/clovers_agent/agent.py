@@ -280,6 +280,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         s.input_text(content)
         s.unit_prompts.append(self.wait_prompt.format(session.turn_output))
         s.activate()
+        logger.info(f"[{self.name}][WAIT REPLY]")
         return await self.run_turn(s, event)
 
     async def handle_chat(self, session: Session, event: Event):
