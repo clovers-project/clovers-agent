@@ -60,7 +60,7 @@ class Turn:
             x = cast(ImageSegment, {"type": "image_url", "image_url": {"url": image}})
             self.current_input.append(x)
         else:
-            x = cast(tuple[ImageSegment], tuple({"type": "image_url", "image_url": {"url": x}} for x in image))
+            x = cast(tuple[ImageSegment], tuple({"type": "image_url", "image_url": {"url": img}} for img in image))
             self.current_input.extend(x)
         return x
 

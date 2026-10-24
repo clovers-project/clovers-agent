@@ -42,6 +42,8 @@ class OpenAIAPI:
         max_size: int = 1024 * 1024 * 10,
     ):
         if not url.startswith("http"):
+            if any(url.startswith(f"data:image/{x}") for x in allowed_subtype):
+                return url
             return
         try:
             resp = await retry_request(self.async_client.get, url, timeout=60)
