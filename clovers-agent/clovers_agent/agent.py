@@ -353,9 +353,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     if unit["images"]:
                         session.input_image(unit["images"])
                 session.input_text("\n</quote>")
+            text = session.input_text(turn_input)
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             session.input_image(x for x in image_list if x)
-            text = session.input_text(turn_input)
             try:
                 intro = await self.router(turn_input, session, event)
                 session.api
