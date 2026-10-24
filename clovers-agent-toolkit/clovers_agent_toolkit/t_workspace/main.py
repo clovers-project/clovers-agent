@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+from uuid import uuid4
 from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.api import ALLOWED_IMAGE_SUBTYPES
 from clovers_agent.session import Session
@@ -18,12 +19,12 @@ WORKSPACE_PATH = Path(AGENT_CONFIG.path) / "workspace"
 DOCKER_IMAGE = CONFIG.docker_image
 MAX_SUBAGENT_COUNT = CONFIG.max_subagent_count
 MAX_DOWNLOAD_RETURN_SIZE = CONFIG.max_download_return_size
-SUCCESS_TOOLIST = ("execute_command", "run_subagent")
+SUCCESS_TOOLIST = ("execute_command", "subagent")
 FALLBACK_TOOLIST = ("ls", "read_files", "write_file")
 
 
 async def enter_workspace(agent: CloversAgent, session: Turn):
-    prompts = ["# workspace 已初始化\n"]
+    prompts = ["# Workspace initialized"]
     if CONFIG.use_shell:
         try:
             if "shell" in session.extra:
@@ -36,16 +37,16 @@ async def enter_workspace(agent: CloversAgent, session: Turn):
             await shell.activate()
             session.extra["shell"].workdir = "/workspace"
             session.extend_tools(agent.manifest[x] for x in SUCCESS_TOOLIST)
-            prompts.append(f"当前系统：Debian\n当前工作目录: /workspace")
-            return "\n".join(prompts)
+            prompts.append("Current system: Debian\nCurrent working directory: /workspace")
+            return "\n\n".join(prompts)
         except Exception as e:
             logger.error(e)
     session.extend_tools(agent.manifest[x] for x in FALLBACK_TOOLIST)
-    prompts.append(f"当前工作目录: /workspace")
-    return "\n".join(prompts)
+    prompts.append("Current working directory: /workspace")
+    return "\n\n".join(prompts)
 
 
-@TOOLS.register("on_task", "当前用户指令为一个需要调用工具的任务时，调用此工具")
+@TOOLS.register("on_task", "Call this when the current user request is a task that requires tools.")
 async def on_task(agent: CloversAgent, session: Turn, event: Event):
     session.create_payload(agent.api("on_task"), agent.style_prompt)
     workspace = WORKSPACE_PATH / session.session_id
@@ -62,88 +63,73 @@ async def on_task(agent: CloversAgent, session: Turn, event: Event):
     return ""
 
 
-@TOOLS.create_category(WORKSPACE, "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
+@TOOLS.create_category(WORKSPACE, "Tools for workspace file and command operations.")
 async def workspace_category(agent: CloversAgent, session: Turn, event: Event):
     return await enter_workspace(agent, session)
 
 
 @TOOLS.register(
     "read_image",
-    "当助手需要查看图片时调用此工具。支持网络图片 URL（http/https）和工作区内的本地图片文件路径。",
-    {"path": {"type": "string", "description": '图片来源：网络 URL（如 "https://example.com/a.png"）或本地路径（如 "logo.png"）'}},
+    "Load an image for visual inspection. Accepts an HTTP(S) URL or a local path.",
+    {"path": {"type": "string", "description": 'Image URL (e.g. "https://example.com/a.png") or local path (e.g. "logo.png").'}},
     INTRINSIC_CATEGORY,
-    required=["path"],
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, path: str):
     path = path.strip()
     if not path:
-        return "参数 path 不能为空。"
+        return "path must not be empty."
     if path.lower().startswith("http"):
         b64url = await session.api.download_url(path)
         if not b64url:
-            return "资源不存在或非图片格式"
+            return "Resource not found or unsupported format."
     else:
         file = WORKSPACE_PATH / session.session_id / format_path(path)
         if not file.exists() or not file.is_file():
-            return f'本地文件 "{path}" 不存在。'
+            return f'File not found: "{path}"'
         b64url = data_url(file.read_bytes(), ALLOWED_IMAGE_SUBTYPES)
         if not b64url:
-            return f'本地文件 "{path}" 不是可识别的图片格式。'
+            return f'Not a recognized image format: "{path}"'
     session.input_image(b64url)
-    return "已将图片注入到当前用户输入"
+    return "Image attached to the current user input."
 
 
 @TOOLS.register(
     "upload_file",
-    "把文件上传给用户。工作区可能对用户不可见，如你想让用户收到文件则必须使用此工具。",
-    {"file_path": {"type": "string", "description": "需要上传的的文件路径"}},
+    "Send a file to the user. The user may not be able to see the workspace, so a path in your reply is not enough — call this to hand over the file itself.",
+    {"file_path": {"type": "string", "description": "Path to the file to send."}},
     WORKSPACE,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     workspace = WORKSPACE_PATH / session.session_id
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
-        return f"{file_path} 非工作区文件"
+        return f'Not a workspace file: "{file_path}"'
     if not file.exists():
-        return f"{file_path} 文件不存在"
+        return f'File not found: "{file_path}"'
     if (coro := event.send("file", file)) is None:
-        return "未实现上传文件接口"
+        return "File upload is not available in this environment."
     try:
         await coro
     except Exception as e:
-        return f"上传失败：{e}"
-    return "上传成功！"
+        return f"Upload failed: {e}"
+    return "File sent to the user."
 
 
-@TOOLS.register(
+TOOLS.register(
     "download_file",
-    "通过 HTTP GET/POST 请求下载 URL 资源。",
+    "Fetch a URL with an HTTP GET or POST request. Set file_path to save the response to the workspace; otherwise the response body is returned as the tool output.",
     {
-        "method": {
-            "type": "string",
-            "description": "HTTP 请求方法：get 用于获取资源，post 用于提交数据",
-            "enum": ["get", "post"],
-        },
-        "url": {
-            "type": "string",
-            "description": "要请求的完整 URL，需包含协议（http:// 或 https://）",
-        },
-        "headers": {
-            "type": "object",
-            "description": '自定义请求头，如 {"Authorization": "Bearer xxx", "User-Agent": "..."}；一般可不填',
-        },
-        "data": {
-            "type": "object",
-            "description": "请求参数。method=get 时作为 URL 查询参数；method=post 时作为 JSON 请求体发送",
-        },
-        "file_path": {
-            "type": "string",
-            "description": '保存文件到工作区的文件名，如 "logo.png"。不填则把响应内容直接作为工具输出返回。',
-        },
+        "method": {"type": "string", "description": "HTTP method: get to fetch a resource, post to submit data.", "enum": ["get", "post"]},
+        "url": {"type": "string", "description": "Full URL including scheme (http:// or https://)."},
+        "headers": {"type": "object", "description": 'Custom request headers, e.g. {"Authorization": "Bearer xxx"}. Usually omitted.'},
+        "data": {"type": "object", "description": "Request payload: query parameters for get, JSON body for post."},
+        "file_path": {"type": "string", "description": 'Path to save the response to, e.g. "logo.png".'},
     },
     WORKSPACE,
     required=["method", "url"],
 )
+
+
 async def _(
     agent: CloversAgent,
     session: Turn,
@@ -160,7 +146,7 @@ async def _(
         resp = await retry_request(agent.async_client.get, url, params=data, headers=headers)
     content = resp.content
     if not content:
-        return f"请求成功（HTTP {resp.status_code}），但响应内容为空。"
+        return f"Request succeeded (HTTP {resp.status_code}), but the response body was empty."
     r_size = len(content)
     s_size = format_size(r_size)
     # 指定了保存路径：写入工作区
@@ -168,21 +154,21 @@ async def _(
         file = WORKSPACE_PATH / session.session_id / format_path(file_path)
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_bytes(content)
-        return f'文件 "{file_path}" 保存成功（大小：{s_size}，HTTP {resp.status_code}）。'
+        return f'Saved to "{file_path}" ({s_size}, HTTP {resp.status_code}).'
     # 未指定保存路径，但内容过大：拦截并落盘
     if r_size > MAX_DOWNLOAD_RETURN_SIZE:
         saved_name = f"{md5(content)}.bin"
         file = WORKSPACE_PATH / session.session_id / saved_name
         file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_bytes(content)  # 原代码遗漏，修复
-        return f"响应内容过大（{s_size}），未直接返回。内容已保存至工作区文件 {saved_name}。"
+        file.write_bytes(content)
+        return f'Response too large to return ({s_size}); saved to the workspace as "{saved_name}".'
     return decode_bytes(content)
 
 
 @TOOLS.register(
     "execute_command",
-    "在工作区环境下执行命令",
-    {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
+    "Run a shell command in the workspace. The shell persists between calls, so the working directory carries over — each result ends with the current working directory.",
+    {"command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."}},
     HIDDEN_CATEGORY,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
@@ -190,18 +176,23 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
 
     extra = session.extra
     if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
-        return f"Error: shell 初始化失败，请返回故障原因。在故障排除前不要重复调用此方法。"
+        return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
     output = await shell.execute(command)
-    return f"{output}\n当前工作目录: {shell.workdir}"
+    return f"{output}\nCurrent working directory: {shell.workdir}"
 
 
 @TOOLS.register(
-    "run_subagent",
-    "创建一个子代理执行你的指令\n子代理会在本次调用链结束后返回结果并唤醒你",
-    {"command": {"type": "string", "description": "指令"}},
+    "subagent",
+    f"Delegate a self-contained task to a subagent (a separate agent that executes in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. The result is delivered after the current call chain ends, waking you to continue. You can run up to {MAX_SUBAGENT_COUNT} subagents per call chain.",
+    {
+        "prompt": {
+            "type": "string",
+            "description": "The complete, self-contained task for the subagent: the goal, the relevant files or paths, any constraints, and the expected output format. The subagent does not share this conversation's context, so include everything it needs to finish unaided",
+        }
+    },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
+async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
     extra = session.extra
     if not KEY_SUBAGENTS in extra:
         extra[KEY_SUBAGENTS] = {}
@@ -210,10 +201,10 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     if session_id in batchs:
         batch = batchs[session_id]
         if len(batch.tasklist) > MAX_SUBAGENT_COUNT:
-            return f"子代理数量已达到上限，请等待其他子代理完成。"
+            return f"Subagent limit reached. Slots are released only when the current call chain ends — do not create more subagents in this chain."
     else:
         if not isinstance(session, Session):
-            return f"只有主会话才能初始化子代理"
+            return "Subagents can only be created from the main session."
         batch = batchs[session_id] = TurnBatch(agent, session, event)
         batch.start().add_done_callback(lambda _: batchs.pop(session_id, None))
 
@@ -225,27 +216,27 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
     s.unit_prompts.append(await enter_workspace(agent, s))
-    s.input_text(command)
+    s.input_text(prompt)
     batch.submit(s, event)
     return "OK"
 
 
 @TOOLS.register(
     "ls",
-    "查看工作区文件",
-    {"path": {"type": "string", "description": "需要查看的目录路径"}},
+    "List the files and directories directly under a workspace path. Not recursive.",
+    {"path": {"type": "string", "description": 'Directory path relative to the workspace root. Defaults to "./".'}},
     HIDDEN_CATEGORY,
     [],
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./"):
     folder = WORKSPACE_PATH / session.session_id / format_path(path)
     if not folder.exists():
-        return f"路径 '{path}' 不存在。"
+        return f'Path not found: "{path}"'
     if not folder.is_dir():
-        return f"'{path}' 不是目录。"
+        return f'Not a directory: "{path}"'
     lines = [
-        f"`{path}` 下的文件列表：\n",
-        "kind|size|mtime|name| ",
+        f"Contents of `{path}`:\n",
+        "kind|size|mtime|name",
         "---|---|---|---",
     ]
     entries = sorted(folder.glob("*"), key=lambda f: (f.is_file(), f.name))
@@ -265,35 +256,50 @@ async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./"):
 
 @TOOLS.register(
     "read_file",
-    "读取并查看指定文件的内容",
-    {"file_path": {"type": "string", "description": "文件路径"}},
+    "Read a text file from the workspace.",
+    {"file_path": {"type": "string"}},
     HIDDEN_CATEGORY,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     workspace = WORKSPACE_PATH / session.session_id
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
-        return f"{file_path} 非工作区文件"
+        return f'Not a workspace file: "{file_path}"'
     if not file.exists():
-        return f"{file_path} 文件不存在"
-    return decode_bytes(file.read_bytes())
+        return f'File not found: "{file_path}"'
+    content = file.read_bytes()
+    if b64url := data_url(content, ALLOWED_IMAGE_SUBTYPES):
+        session.input_image(b64url)
+        return "Image attached to the current user input."
+    if b"\x00" in content or not (text := decode_bytes(content)):
+        return f'Unsupported file type: "{file_path}"'
+    return text
 
 
 @TOOLS.register(
     "write_file",
-    "写入文件",
+    "Write text to a file",
     {
-        "file_path": {"type": "string", "description": "需要写入的文件路径"},
-        "file_content": {"type": "string", "description": "需要写入到文件的内容"},
+        "file_path": {"type": "string"},
+        "file_content": {"type": "string", "description": "Full content to write"},
     },
     HIDDEN_CATEGORY,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str, file_content: str):
-    file = WORKSPACE_PATH / agent.session_id(event) / format_path(file_path)
-    file.parent.mkdir(parents=True, exist_ok=True)
+    workspace = WORKSPACE_PATH / session.session_id
+    file = workspace / format_path(file_path)
+    if not file.is_relative_to(workspace):
+        file_name = f"{file.name}.{uuid4().hex}"
+        file = workspace / file_name
+        if file.exists():
+            return f'Not a workspace file: "{file_path}"'
+        workspace.mkdir(parents=True, exist_ok=True)
+        tip = f"目标非工作区目录，文件已保存至 {file_name}"
+    else:
+        tip = "已保存至工作区"
     try:
         file.write_text(file_content, encoding="utf-8")
-        return f"文件写入成功。"
+        return tip
     except Exception as e:
         logger.error(e)
         return f"文件写入失败：{e}"
