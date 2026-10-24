@@ -48,16 +48,17 @@ class Turn:
     def input_text(self, text: str):
         self.current_input.append({"type": "text", "text": text})
 
-    def input_image(self, image: str):
-        self.current_input.append({"type": "image_url", "image_url": {"url": image}})
-
-    def input_images(self, images: Iterable[str]):
-        self.current_input.extend({"type": "image_url", "image_url": {"url": image}} for image in images)
+    def input_image(self, image: str | Iterable[str]):
+        if isinstance(image, str):
+            self.current_input.append({"type": "image_url", "image_url": {"url": image}})
+        else:
+            self.current_input.extend({"type": "image_url", "image_url": {"url": x}} for x in image)
 
     def activate(self):
         self.cursor = len(self.payload["messages"])
-        unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
-        self.current_input.insert(0, {"type": "text", "text": unit_prompt})
+        if self.unit_prompts:
+            unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
+            self.current_input.insert(0, {"type": "text", "text": unit_prompt})
         self.payload["messages"].append({"role": "user", "content": self.current_input})
 
     def complete(self, message: str | None = None) -> Never:
@@ -66,18 +67,27 @@ class Turn:
 
     def inactivate(self):
         # 按注入顺序删除
-        self.unit_prompts.clear()
+        if self.unit_prompts:
+            self.unit_prompts.clear()
+            del self.current_input[0]
         self.current_input = []
         self.api = None  # type: ignore
         self.payload = None  # type: ignore
-        self.cursor = None
         del self.api
         del self.payload
+        self.cursor = None
         self.scripts_enum.clear()
         self.references_enum.clear()
 
     def extend_tools(self, extends: Iterable[FunctionToolInfo]):
-        return extend_tools(self.payload, extends)
+        payload = self.payload
+        if "tools" not in payload:
+            payload["tools"] = []
+            payload["tools"].extend(extends)
+        else:
+            used = {tool["function"]["name"] for tool in payload["tools"]}
+            payload["tools"].extend(x for x in extends if x["function"]["name"] not in used)
+        return payload["tools"]
 
     def call_api(self):
         return self.api.call_api(self.payload, self.usage_counter)
@@ -92,21 +102,9 @@ class Turn:
             return
         s = self.create_turn()
         s.create_payload(self.api)
-        s.payload["messages"].extend(self.payload["messages"][: self.cursor])
+        if self.cursor > 0:
+            s.payload["messages"].extend(self.payload["messages"][: self.cursor - 1])
         return s
-
-    async def fork_call(self, unit_prompt: str, content: str):
-        """创建一个分支会话并调用"""
-        if (s := self.create_fork()) is None:
-            return
-        s.unit_prompts.append(unit_prompt)
-        s.input_text(content)
-        s.activate()
-        from .api import pretty_payload
-
-        print("\n".join(pretty_payload(s.payload)))
-        resp = await s.call_api()
-        return resp["content"].strip()
 
     @property
     def system_message(self) -> SystemMessage | None:
@@ -217,9 +215,6 @@ class Session(Turn):
 
     def refresh(self, timestamp: float):
         """刷新记忆"""
-        # timeout = timestamp - self.memory_timeout
-        # while self.recorder and (self.recorder[0][2] <= timeout):
-        #     self.recorder.popleft()
         timeout = timestamp - self.memory_timeout
         while self.image_recorder and (self.image_recorder[0][2] <= timeout):
             self.image_recorder.popleft()
@@ -238,13 +233,3 @@ class Session(Turn):
         if self.decouple_count < self.decouple_length:
             return False
         return self.decoupler.step(message)
-
-
-def extend_tools(payload, extends: Iterable[FunctionToolInfo]) -> list[FunctionToolInfo]:
-    if "tools" not in payload:
-        payload["tools"] = []
-        payload["tools"].extend(extends)
-    else:
-        used = {tool["function"]["name"] for tool in payload["tools"]}
-        payload["tools"].extend(x for x in extends if x["function"]["name"] not in used)
-    return payload["tools"]
