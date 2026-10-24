@@ -38,7 +38,6 @@ class Turn:
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
         self.cursor: int | None = None
-        self.outbox: list[str]
 
     def create_payload(self, api: OpenAIAPI, system_prompt: str | None = None):
         if self.cursor is not None:
@@ -144,7 +143,7 @@ class Session(Turn):
         self.memory_timeout = memory_timeout
         self.image_recorder: deque[tuple[int, str, float]] = deque()
         self.image_id = count()
-        self.silence_recorder: deque[tuple[str, float]] = deque(maxlen=silence_size)
+        self.message_history: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.silence_timeout = silence_timeout
         # 状态
         self.last_active_time = 0.0
@@ -152,8 +151,8 @@ class Session(Turn):
         self.wait_lock = asyncio.Lock()
         self.idle_event = asyncio.Event()
         self.idle_event.set()
-        self.executing_ask: str | MultimodalContent
-        self.executing_reply: str | None
+        self.turn_output: str | None
+        self.outbox: list[str]
 
     @override
     def activate(self):
@@ -169,7 +168,6 @@ class Session(Turn):
         self.idle_event.set()
         super().inactivate()
         self.outbox = None  # type: ignore
-        del self.outbox
 
     def flush_outbox(self):
         if self.outbox:
@@ -180,15 +178,23 @@ class Session(Turn):
     def messages(self):
         return tuple(iter_recoder(self.recorder))
 
-    def record_turn(self, timestamp: float):
-        """处理完成"""
-        ask = self.executing_ask
-        reply = self.executing_reply
-        if not reply:
-            return
-        if isinstance(ask, list):
+    def record_history(self, content: str, timestamp: float):
+        timeout = timestamp - self.memory_timeout
+        while self.image_recorder and (self.image_recorder[0][2] <= timeout):
+            self.image_recorder.popleft()
+        timeout = timestamp - self.silence_timeout
+        while self.message_history and (self.message_history[0][1] <= timeout):
+            self.message_history.popleft()
+        self.message_history.append((content, timestamp))
+
+    @property
+    def turn_input(self):
+        return "\n".join(x for x, _ in self.message_history)
+
+    def record_turn(self, turn_input: str | MultimodalContent, turn_output: str, timestamp: float):
+        if isinstance(turn_input, list):
             contents: list[str] = []
-            for seg in ask:
+            for seg in turn_input:
                 match seg["type"]:
                     case "text":
                         contents.append(seg["text"])
@@ -197,12 +203,12 @@ class Session(Turn):
                         image_id = next(self.image_id)
                         contents.append(f" [image:{image_id}] ")
                         self.image_recorder.append((image_id, url, timestamp))
-            ask = "".join(contents)
-        record: Record = ({"role": "user", "content": ask}, {"role": "assistant", "content": reply}, timestamp)
+            turn_input = "".join(contents)
+        record: Record = ({"role": "user", "content": turn_input}, {"role": "assistant", "content": turn_output}, timestamp)
         self.router_recorder.append(record)
         self.recorder.append(record)
         self.decouple_count += len(record[0]["content"]) + len(record[1]["content"])
-        self.silence_recorder.clear()
+        self.message_history.clear()
         self.last_active_time = timestamp
         save_jsonl(self.recorder_file, record)
 
@@ -211,21 +217,12 @@ class Session(Turn):
         self.recorder.clear()
         self.image_recorder.clear()
         self.router_recorder.clear()
-        self.silence_recorder.clear()
+        self.message_history.clear()
         self.decouple_count = 0
         self.recorder_file.unlink(missing_ok=True)
 
     def image_url(self, image_id: int) -> str | None:
         return next((url for i, url, _ in self.image_recorder if i == image_id), None)
-
-    def refresh(self, timestamp: float):
-        """刷新记忆"""
-        timeout = timestamp - self.memory_timeout
-        while self.image_recorder and (self.image_recorder[0][2] <= timeout):
-            self.image_recorder.popleft()
-        timeout = timestamp - self.silence_timeout
-        while self.silence_recorder and (self.silence_recorder[0][1] <= timeout):
-            self.silence_recorder.popleft()
 
     def step(self, message: str, timestamp: float):
         if not self.recorder:

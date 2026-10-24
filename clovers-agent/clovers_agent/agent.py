@@ -19,6 +19,7 @@ from .utils import deep_add, read_file, load_json, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     USER_TAG,
+    ASSISTANT_TAG,
     ON_CHAT,
     ON_CHAT_DESC,
     SKILL_MENU,
@@ -268,7 +269,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning(f"[{self.name}][CHIME IN] {e}")
 
-    async def handle_wait_replay(self, session: Session, event: Event, content: str):
+    async def handle_wait_reply(self, session: Session, event: Event, content: str):
         if session.cursor is None:
             return
         s = session.create_turn()
@@ -281,20 +282,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             s.payload[k] = deepcopy(v)
         if session.cursor > 0:
             s.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
-        ask = session.executing_ask
-        if isinstance(ask, list):
-            ask = "".join(x["text"] for x in ask if x["type"] == "text")
-        if session.executing_reply:
-            s.payload["messages"].append({"role": "user", "content": ask})
-            s.payload["messages"].append({"role": "assistant", "content": session.executing_reply})
-        else:
-            s.input_text(ask)
         s.input_text(content)
         s.unit_prompts.append(self.wait_prompt)
         s.activate()
         from .api import pretty_payload
 
-        print("=" * 10, "wait_replay".upper(), "=" * 10)
+        print("=" * 10, "wait_replay 3".upper(), "=" * 10)
         print("\n".join(pretty_payload(s.payload)))
         return await self.run_turn(s, event)
 
@@ -312,38 +305,42 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         elif event.to_me:
             body = f"@ME {at}{message}"
         else:
-            body = f"{at}{message}"
-            session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
+            session.record_history(USER_TAG.format(event.nickname, f"{at}{message}"), timestamp)
             if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
                 return
             if session.execute_lock.locked() or session.wait_lock.locked():
                 return
-            content = "\n".join(x for x, _ in session.silence_recorder)
-            session.executing_ask = content
-            session.executing_reply = None
             async with session.execute_lock, session.wait_lock:
-                content = "\n".join(x for x, _ in session.silence_recorder)
-                if reply := await self.handle_chime_in(session, content):
+                turn_input = session.turn_input
+                if reply := await self.handle_chime_in(session, turn_input):
                     self.send(reply, event)
-                    session.executing_reply = reply
-                    session.record_turn(timestamp)
+                if reply:
+                    session.record_turn(turn_input, reply, timestamp)
                 return
-        session.refresh(timestamp)
-        session.silence_recorder.append((USER_TAG.format(event.nickname, body), timestamp))
-        content = "\n".join(x for x, _ in session.silence_recorder)
+        session.record_history(USER_TAG.format(event.nickname, body), timestamp)
         if session.execute_lock.locked():
             if session.wait_lock.locked():
                 return
             silence_duration = timestamp - session.last_active_time
             if silence_duration < self.wait_cooldown:
                 return
-            async with session.wait_lock:
-                if reply := await self.handle_wait_replay(session, event, content):
-                    self.send(reply, event)
+            if session.idle_event.is_set():
                 return
-        session.executing_ask = content
-        session.executing_reply = None
+            async with session.wait_lock:
+                turn_input = session.turn_input
+                task = asyncio.create_task(self.handle_wait_reply(session, event, turn_input))
+                _, p = await asyncio.wait((task, asyncio.create_task(session.idle_event.wait())), return_when=asyncio.FIRST_COMPLETED)
+                if p:
+                    for t in p:
+                        t.cancel()
+                    await asyncio.wait(p)
+                if task.done() and not task.cancelled() and (reply := task.result()):
+                    self.send(reply, event)
+                    session.record_history(ASSISTANT_TAG.format(reply), timestamp)
+                return
+        session.turn_output = None
         async with session.execute_lock:
+            turn_input = session.turn_input
             if session.step(body, timestamp) and (summary := await self.summary_context(session)):
                 session.clear()
                 session.input_text(summary)
@@ -355,11 +352,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     if unit["images"]:
                         session.input_image(unit["images"])
                 session.input_text("\n</quote>")
-            session.input_text(content)
+            session.input_text(turn_input)
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             session.input_image(x for x in image_list if x)
             try:
-                intro = await self.router(content, session, event)
+                intro = await self.router(turn_input, session, event)
                 session.api
                 session.payload
                 logger.info(f"[{self.name}][ROUTER] {intro}")
@@ -373,30 +370,32 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            session.executing_ask = session.current_input.copy()
+            turn_input = session.current_input.copy()
             async for reply in self.call_turn(session, event):
                 session.flush_outbox()
                 if reply:
-                    session.executing_reply = reply
+                    session.turn_output = reply
                     self.send(reply, event)
-            session.record_turn(timestamp)
+            if session.turn_output:
+                session.record_turn(turn_input, session.turn_output, timestamp)
 
     async def handle_wakeup(self, session: Turn, event: Event, m_idx: int, r_idx: int):
         current_session = self.current_session(session.session_id)
         recorder = current_session.recorder
-        current_session.executing_ask = session.current_input.copy()
-        current_session.executing_reply = None
+        current_session.turn_output = None
         async with current_session.execute_lock, current_session.wait_lock:
             if len(recorder) <= r_idx:
                 session.payload["messages"].extend(iter_recoder(recorder))
             else:
                 session.payload["messages"][m_idx] = recorder[r_idx][0].copy()
                 session.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
+            current_input = session.current_input.copy()
             async for reply in self.call_turn(session, event):
                 if reply:
-                    current_session.executing_reply = reply
+                    current_session.turn_output = reply
                     self.send(reply, event)
-            current_session.record_turn(time.time())
+            if current_session.turn_output:
+                current_session.record_turn(current_input, current_session.turn_output, time.time())
 
     def update_usage(self, usage_counter: dict):
         if not usage_counter:
