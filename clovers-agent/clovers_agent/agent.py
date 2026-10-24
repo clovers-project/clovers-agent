@@ -280,8 +280,17 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         s.input_text(content)
         s.unit_prompts.append(self.wait_prompt.format(session.turn_output))
         s.activate()
-        logger.info(f"[{self.name}][WAIT REPLY]")
-        return await self.run_turn(s, event)
+        try:
+            message = await s.call_api()
+            if tool_calls := message.get("tool_calls"):
+                await self.invoke_tool(tool_calls[0], s, event)
+                reply = None
+            else:
+                reply = (message["content"] or "").strip()
+            logger.info(f"[{self.name}][WAIT REPLY]")
+            return reply
+        except Exception as e:
+            logger.warning(f"[{self.name}][WAIT REPLY] {e}")
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()

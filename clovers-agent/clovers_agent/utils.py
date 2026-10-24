@@ -12,7 +12,7 @@ from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attem
 from collections.abc import Callable
 from clovers.base import Coro
 
-type AsyncFunction[**P, Return] = Callable[P, Coro[Return]]
+type AsyncFunction[**P, T] = Callable[P, Coro[T]]
 
 B64_PATTERN = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
 
