@@ -7,10 +7,10 @@ from .utils import load_jsonl, save_jsonl
 from .config import SESSION as SESSION_CONFIG
 from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
 
-from typing import TYPE_CHECKING, cast, override, Never
+from typing import TYPE_CHECKING, cast, override, overload, Never
 from collections.abc import Iterable
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
-from .typing.message import MultimodalContent, TextUserMessage
+from .typing.message import MultimodalContent, TextSegment, ImageSegment, TextUserMessage
 
 if TYPE_CHECKING:
     from .api import OpenAIAPI
@@ -46,13 +46,23 @@ class Turn:
         self.payload = self.api.build_payload(system_prompt)
 
     def input_text(self, text: str):
-        self.current_input.append({"type": "text", "text": text})
+        x = cast(TextSegment, {"type": "text", "text": text})
+        self.current_input.append(x)
+        return x
+
+    @overload
+    def input_image(self, image: str) -> ImageSegment: ...
+    @overload
+    def input_image(self, image: Iterable[str]) -> tuple[ImageSegment]: ...
 
     def input_image(self, image: str | Iterable[str]):
         if isinstance(image, str):
-            self.current_input.append({"type": "image_url", "image_url": {"url": image}})
+            x = cast(ImageSegment, {"type": "image_url", "image_url": {"url": image}})
+            self.current_input.append(x)
         else:
-            self.current_input.extend({"type": "image_url", "image_url": {"url": x}} for x in image)
+            x = cast(tuple[ImageSegment], tuple({"type": "image_url", "image_url": {"url": x}} for x in image))
+            self.current_input.extend(x)
+        return x
 
     def activate(self):
         self.cursor = len(self.payload["messages"])

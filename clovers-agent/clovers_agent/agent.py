@@ -285,10 +285,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         s.input_text(content)
         s.unit_prompts.append(self.wait_prompt)
         s.activate()
-        from .api import pretty_payload
-
-        print("=" * 10, "wait_replay 3".upper(), "=" * 10)
-        print("\n".join(pretty_payload(s.payload)))
         return await self.run_turn(s, event)
 
     async def handle_chat(self, session: Session, event: Event):
@@ -352,9 +348,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     if unit["images"]:
                         session.input_image(unit["images"])
                 session.input_text("\n</quote>")
-            session.input_text(turn_input)
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             session.input_image(x for x in image_list if x)
+            text = session.input_text(turn_input)
             try:
                 intro = await self.router(turn_input, session, event)
                 session.api
@@ -370,14 +366,15 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            turn_input = session.current_input.copy()
+            current_input = session.current_input.copy()
             async for reply in self.call_turn(session, event):
                 session.flush_outbox()
                 if reply:
                     session.turn_output = reply
                     self.send(reply, event)
             if session.turn_output:
-                session.record_turn(turn_input, session.turn_output, timestamp)
+                text["text"] = session.turn_input
+                session.record_turn(current_input, session.turn_output, timestamp)
 
     async def handle_wakeup(self, session: Turn, event: Event, m_idx: int, r_idx: int):
         current_session = self.current_session(session.session_id)
