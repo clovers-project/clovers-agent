@@ -1,5 +1,4 @@
 from pathlib import Path
-from datetime import datetime
 from uuid import uuid4
 from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.api import ALLOWED_IMAGE_SUBTYPES
@@ -10,7 +9,7 @@ from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES, retry_request
 from .turn_batch import TurnBatch
-from .utils import format_path, format_size, md5
+from .utils import format_path, format_size, md5, list_entries, render_listing
 from .constants import WORKSPACE, KEY_SUBAGENTS, KEY_SUBAGENTS, SUBAGENT_PROMPT
 
 from typing import cast
@@ -221,9 +220,6 @@ async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
     return "OK"
 
 
-MAX_LS_ENTRIES = 200
-
-
 @TOOLS.register(
     "ls",
     "List files and directories under a workspace path. Lists direct children by default; set depth to recurse.",
@@ -236,40 +232,20 @@ MAX_LS_ENTRIES = 200
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./", depth: int = 1):
     workspace = WORKSPACE_PATH / session.session_id
-    folder = workspace / format_path(path)
+    relative = format_path(path)
+    folder = workspace / relative
     if not folder.is_relative_to(workspace):
         return f'Not a workspace folder: "{path}"'
-    if not folder.exists():
-        return f'Path not found: "{path}"'
-    if not folder.is_dir():
-        return f'Not a directory: "{path}"'
     depth = max(1, depth)
-    pattern = "/".join(["*"] * depth)
-    entries = sorted(
-        folder.glob(pattern),
-        key=lambda f: (not f.is_dir(), str(f.relative_to(folder))),
-    )
-    truncated = len(entries) > MAX_LS_ENTRIES
-    entries = entries[:MAX_LS_ENTRIES]
-    lines = [
-        f"Contents of `{path}` (depth {depth}):\n",
-        "kind|size|mtime|name",
-        "---|---|---|---",
-    ]
-    for file in entries:
-        name = str(file.relative_to(folder))
-        try:
-            mtime = datetime.fromtimestamp(file.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-            if file.is_file():
-                ks = f"f|{format_size(file.stat().st_size)}"
-            else:
-                ks = "d|-"
-            lines.append(f"{ks}|{mtime}|{name}")
-        except OSError:
-            lines.append(f"?|?|?|{name}")
-    if truncated:
-        lines.append(f"\n(truncated at {MAX_LS_ENTRIES} entries)")
-    return "\n".join(lines)
+    try:
+        entries = list_entries(folder, depth)
+    except FileNotFoundError:
+        return f'Path not found: "{path}"'
+    except NotADirectoryError:
+        return f'Not a directory: "{path}"'
+    except OSError as exc:
+        return f'Cannot list "{path}": {exc.strerror or exc}'
+    return render_listing(path, depth, entries)
 
 
 @TOOLS.register(
