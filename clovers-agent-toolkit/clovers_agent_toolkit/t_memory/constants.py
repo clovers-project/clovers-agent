@@ -64,9 +64,9 @@ Arguments:
 
 Example:
 
-{
-    "address_as": "姐姐",
-    "promote_memories": [{"id": 2, "content": "用户之前说过就像我的姐姐一样，现在她直接让我叫她姐姐。"}],
-    "demote_memory_ids": [1, 3]
-}
+{{
+    'address_as': '姐姐',
+    'promote_memories': [{{'id': 2, 'content': '用户之前说过就像我的姐姐一样，现在她直接让我叫她姐姐。'}}],
+    'demote_memory_ids': [1, 3]
+}}
 """

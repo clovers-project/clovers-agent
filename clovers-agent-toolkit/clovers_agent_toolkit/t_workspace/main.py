@@ -19,7 +19,7 @@ DOCKER_IMAGE = CONFIG.docker_image
 MAX_SUBAGENT_COUNT = CONFIG.max_subagent_count
 MAX_DOWNLOAD_RETURN_SIZE = CONFIG.max_download_return_size
 SUCCESS_TOOLIST = ("execute_command", "subagent")
-FALLBACK_TOOLIST = ("ls", "read_files", "write_file")
+FALLBACK_TOOLIST = ("ls", "read_file", "write_file")
 
 
 async def enter_workspace(agent: CloversAgent, session: Turn):

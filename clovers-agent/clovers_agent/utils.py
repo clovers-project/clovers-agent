@@ -25,11 +25,11 @@ def data_url(data: bytes, allowed_subtype: tuple[str, ...]) -> str | None:
     mime = puremagic.from_string(data, mime=True).split("/", 2)
     if len(mime) != 2:
         return
-    subtype = mime[1]
+    mime, subtype = mime
     if allowed_subtype and subtype not in allowed_subtype:
         return
     b64 = base64.b64encode(data).decode()
-    return f"data:{mime};base64,{b64}"
+    return f"data:{mime}/{subtype};base64,{b64}"
 
 
 def deep_add(total: dict, detail: dict):
