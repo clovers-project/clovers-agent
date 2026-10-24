@@ -489,8 +489,7 @@ async def view_id_image(agent: CloversAgent, session: Turn, event: Event, image_
 
 @as_invoker
 async def inject_prompt(agent: CloversAgent, session: Turn, event: Event, prompt: str):
-    assert isinstance(session, Session)
-    session.outbox.append(prompt)
+    agent.current_session(session.session_id).outbox.append(prompt)
     return "OK"
 
 
