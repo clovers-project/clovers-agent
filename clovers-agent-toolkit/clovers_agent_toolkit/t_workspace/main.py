@@ -1,8 +1,9 @@
 from pathlib import Path
 from datetime import datetime
 from clovers_agent import CloversAgent, Turn, Event
+from clovers_agent.api import ALLOWED_IMAGE_SUBTYPES
 from clovers_agent.session import Session
-from clovers_agent.utils import decode_bytes
+from clovers_agent.utils import decode_bytes, data_url
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
@@ -64,6 +65,32 @@ async def on_task(agent: CloversAgent, session: Turn, event: Event):
 @TOOLS.create_category(WORKSPACE, "包含文件读写与发送、命令执行等工具，用于进行相关工作。")
 async def workspace_category(agent: CloversAgent, session: Turn, event: Event):
     return await enter_workspace(agent, session)
+
+
+@TOOLS.register(
+    "read_image",
+    "当助手需要查看图片时调用此工具。支持网络图片 URL（http/https）和工作区内的本地图片文件路径。",
+    {"path": {"type": "string", "description": '图片来源：网络 URL（如 "https://example.com/a.png"）或本地路径（如 "logo.png"）'}},
+    INTRINSIC_CATEGORY,
+    required=["path"],
+)
+async def _(agent: CloversAgent, session: Turn, event: Event, path: str):
+    path = path.strip()
+    if not path:
+        return "参数 path 不能为空。"
+    if path.lower().startswith("http"):
+        b64url = await session.api.download_url(path)
+        if not b64url:
+            return "资源不存在或非图片格式"
+    else:
+        file = WORKSPACE_PATH / session.session_id / format_path(path)
+        if not file.exists() or not file.is_file():
+            return f'本地文件 "{path}" 不存在。'
+        b64url = data_url(file.read_bytes(), ALLOWED_IMAGE_SUBTYPES)
+        if not b64url:
+            return f'本地文件 "{path}" 不是可识别的图片格式。'
+    session.input_image(b64url)
+    return "已将图片注入到当前用户输入"
 
 
 @TOOLS.register(
@@ -150,22 +177,6 @@ async def _(
         file.write_bytes(content)  # 原代码遗漏，修复
         return f"响应内容过大（{s_size}），未直接返回。内容已保存至工作区文件 {saved_name}。"
     return decode_bytes(content)
-
-
-@TOOLS.register(
-    "get_image_by_url",
-    "当助手需要查看一个URL图片时调用此工具。",
-    {"url": {"type": "string", "description": "图片的完整 URL 地址"}},
-    INTRINSIC_CATEGORY,
-)
-async def get_image_by_url(agent: CloversAgent, session: Turn, event: Event, image_url: str):
-    if not image_url.startswith("http"):
-        image_url = f"https://{image_url}"
-    b64url = await session.api.download_url(image_url)
-    if not b64url:
-        return "资源不存在或非图片格式"
-    session.input_image(b64url)
-    return "已将图片注入到当前用户输入"
 
 
 @TOOLS.register(

@@ -9,6 +9,7 @@ from .typing import AssistantMessage, Payload
 from .typing.message import MultimodalContent
 
 retry_request = retry_httpx(3)(httpx_request)
+ALLOWED_IMAGE_SUBTYPES = ("png", "jpeg", "webp", "gif")
 
 
 class OpenAIAPI:
@@ -37,7 +38,7 @@ class OpenAIAPI:
     async def download_url(
         self,
         url: str,
-        allowed_subtype: tuple[str, ...] = ("png", "jpeg", "webp", "gif"),
+        allowed_subtype: tuple[str, ...] = ALLOWED_IMAGE_SUBTYPES,
         max_size: int = 1024 * 1024 * 10,
     ):
         if not url.startswith("http"):

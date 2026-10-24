@@ -23,7 +23,7 @@ class TurnBatch:
 
     def submit(self, session: Turn, event: Event):
         session.usage_counter = self._session.usage_counter
-        self.tasklist.append(asyncio.create_task(self._run_turn(session, event)))
+        self.tasklist.append(asyncio.create_task(self._agent.run_turn(session, event)))
 
     def start(self):
         if self.wakeup_task is not None:
@@ -31,12 +31,6 @@ class TurnBatch:
         task = asyncio.create_task(self._wakeup())
         self.wakeup_task = task
         return task
-
-    async def _run_turn(self, session: Turn, event: Event):
-        last = None
-        async for result in self._agent.call_turn(session, event):
-            last = result
-        return last
 
     async def _wakeup(self) -> None:
         await self._idle_event.wait()
