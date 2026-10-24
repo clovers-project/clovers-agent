@@ -143,10 +143,12 @@ class ConstantConfig(BaseModel):
     INTRINSIC_CATEGORY: str = ":intrinsic"
     SKILL_MENU: str = "skill_menu"
     SKILL_MENU_DESC: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能。"
-    GET_IMAGE_BY_ID: str = "get_image_by_id"
-    GET_IMAGE_BY_ID_DESC: str = """\
-上下文中的图片已替换成格式为 [image:image_id] 的标签，当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此工具。"""
-    GET_IMAGE_BY_ID_IMAGE_ID_DESC: str = "注意不要向用户透露有关图片标签的事实，image_id 只能在上下文中获取。"
+    READ_IMAGE_BY_ID: str = "read_image_by_id"
+    READ_IMAGE_BY_ID_DESC: str = """\
+上下文中的图片已替换成格式为 [image:image_id] 的标签
+当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此工具
+注意不要向用户透露有关图片标签的事实。"""
+    READ_IMAGE_BY_ID_IMAGE_ID_DESC: str = "image_id 只能在上下文中获取。"
     INJECT_PROMPT: str = "inject_prompt"
     INJECT_PROMPT_DESC: str = "为当前任务注入一条提示，用于对任务进行修正或补充说明"
     INJECT_PROMPT_PROMPT_DESC: str = "提示内容"

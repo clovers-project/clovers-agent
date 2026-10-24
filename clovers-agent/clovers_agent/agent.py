@@ -25,7 +25,7 @@ from .constants import (
     SKILL_MENU_DESC,
     BUILTIN_CATEGORY,
     INTRINSIC_CATEGORY,
-    GET_IMAGE_BY_ID_INFO,
+    READ_IMAGE_BY_ID_INFO,
     INJECT_PROMPT_INFO,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
@@ -80,7 +80,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(skill_menu)
         self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
         self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
-        self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
+        self.category_decorator(READ_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(read_image_by_id)
         self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(inject_prompt)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
@@ -488,7 +488,7 @@ async def skill_menu(agent: CloversAgent, session: Turn, event: Event, category:
 
 
 @as_invoker
-async def view_id_image(agent: CloversAgent, session: Turn, event: Event, image_id: int):
+async def read_image_by_id(agent: CloversAgent, session: Turn, event: Event, image_id: int):
     url = agent.current_session(session.session_id).image_url(image_id)
     if not url:
         return f"Error: [image:{image_id}] is missing."

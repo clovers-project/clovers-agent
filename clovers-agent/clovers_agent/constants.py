@@ -12,15 +12,15 @@ BUILTIN_CATEGORY = CONSTANT.BUILTIN_CATEGORY
 INTRINSIC_CATEGORY = CONSTANT.INTRINSIC_CATEGORY
 SKILL_MENU = CONSTANT.SKILL_MENU
 SKILL_MENU_DESC = CONSTANT.SKILL_MENU_DESC
-GET_IMAGE_BY_ID = CONSTANT.GET_IMAGE_BY_ID
-GET_IMAGE_BY_ID_INFO: FunctionToolInfo = {
+READ_IMAGE_BY_ID = CONSTANT.READ_IMAGE_BY_ID
+READ_IMAGE_BY_ID_INFO: FunctionToolInfo = {
     "type": "function",
     "function": {
-        "name": GET_IMAGE_BY_ID,
-        "description": CONSTANT.GET_IMAGE_BY_ID_DESC,
+        "name": READ_IMAGE_BY_ID,
+        "description": CONSTANT.READ_IMAGE_BY_ID_DESC,
         "parameters": {
             "type": "object",
-            "properties": {"image_id": {"type": "integer", "description": CONSTANT.GET_IMAGE_BY_ID_IMAGE_ID_DESC}},
+            "properties": {"image_id": {"type": "integer", "description": CONSTANT.READ_IMAGE_BY_ID_IMAGE_ID_DESC}},
             "required": ["image_id"],
         },
     },

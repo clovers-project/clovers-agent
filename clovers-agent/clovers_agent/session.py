@@ -5,7 +5,7 @@ from itertools import count
 from collections import deque
 from .utils import load_jsonl, save_jsonl
 from .config import SESSION as SESSION_CONFIG
-from .constants import SYSTEM_TAG, GET_IMAGE_BY_ID_INFO
+from .constants import SYSTEM_TAG, READ_IMAGE_BY_ID_INFO
 
 from typing import TYPE_CHECKING, cast, override, overload, Never
 from collections.abc import Iterable
@@ -169,7 +169,7 @@ class Session(Turn):
         self.idle_event.clear()
         self.payload["messages"].extend(self.messages)
         if self.image_recorder:
-            self.extend_tools((GET_IMAGE_BY_ID_INFO,))
+            self.extend_tools((READ_IMAGE_BY_ID_INFO,))
         self.outbox = []
         super().activate()
 
