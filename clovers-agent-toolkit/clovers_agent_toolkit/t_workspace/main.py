@@ -4,7 +4,7 @@ from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.session import Session
 from clovers_agent.utils import decode_bytes
 from clovers_agent.config import CONFIG as AGENT_CONFIG
-from clovers_agent.constants import HIDDEN_CATEGORY, SKILL_MENU
+from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES, retry_request
 from .turn_batch import TurnBatch
@@ -54,7 +54,6 @@ async def on_task(agent: CloversAgent, session: Turn, event: Event):
     if readme.exists():
         session.unit_prompts.append(decode_bytes(readme.read_bytes()))
     session.payload["tools"] = [
-        agent.manifest[SKILL_MENU],
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
@@ -154,6 +153,22 @@ async def _(
 
 
 @TOOLS.register(
+    "get_image_by_url",
+    "当助手需要查看一个URL图片时调用此工具。",
+    {"url": {"type": "string", "description": "图片的完整 URL 地址"}},
+    INTRINSIC_CATEGORY,
+)
+async def get_image_by_url(agent: CloversAgent, session: Turn, event: Event, image_url: str):
+    if not image_url.startswith("http"):
+        image_url = f"https://{image_url}"
+    b64url = await session.api.download_url(image_url)
+    if not b64url:
+        return "资源不存在或非图片格式"
+    session.input_image(b64url)
+    return "已将图片注入到当前用户输入"
+
+
+@TOOLS.register(
     "execute_command",
     "在工作区环境下执行命令",
     {"command": {"type": "string", "description": "需要执行的命令，如需要执行多条命令，请使用 `&&` 或 `;`隔开"}},
@@ -194,7 +209,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     s = session.create_turn()
     s.create_payload(session.api, SUBAGENT_PROMPT)
     s.payload["tools"] = [
-        agent.manifest[SKILL_MENU],
+        *agent.select_tools(INTRINSIC_CATEGORY),
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]

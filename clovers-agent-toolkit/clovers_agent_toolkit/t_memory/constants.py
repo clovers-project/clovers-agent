@@ -34,12 +34,11 @@ UPDATE_USER_PROFILE_PROMPT = f"""\
 
 用于保存具有一定长期价值的具体事件案例。
 
-**请调用 {EDIT_USER_PROFILE} 工具** 维护一份简洁、准确、可持续更新的用户档案。
-"""
+**请调用 `{EDIT_USER_PROFILE}` 工具** 维护一份简洁、准确、可持续更新的用户档案。
 
+`{EDIT_USER_PROFILE}` 工具介绍:
 
-EDIT_USER_PROFILE_DESC = """\
-编辑用户档案工具。注意该工具的所有参数都不是必填的，未传入的字段不进行更新。
+编辑用户档案。
 
 当记忆与当前上下文形成明确呼应时使用 promote_memories 强化并更新该记忆
 
@@ -47,9 +46,24 @@ EDIT_USER_PROFILE_DESC = """\
 
 记忆之外的其他参数是覆盖原有内容。
 
-下面是一个只更新`称呼`，删除几个记忆，增加一条新记忆的参数示例。
+注意该工具的所有参数都不是必填的，未传入的字段不进行更新。
 
-EXAMPLE:
+Arguments:
+
+- address_as (string)：指定你对用户的称呼。
+- tags (string)：为用户设置若干核心关键词标签。
+- preferences (string)：记录用户的话题偏好、语言风格偏好、特定观点、禁忌/雷区等。
+- impression (string)：描述当前你与用户之间的关系状态。
+- new_memories (array[string])：本次新增的记忆条目列表。
+- promote_memories (array[object])：需要强化的记忆列表。每项包含：
+  - id (number)：待强化的记忆序号。
+  - content (string)：更新后的记忆内容，需与该序号对应的原记忆融合。
+- demote_memory_ids (array[number])：需要弱化的记忆序号列表。
+
+下面是一个只更新`称呼`，弱化记忆 1、3，强化记忆 2 的参数示例。
+
+Example:
+
 {
     "address_as": "姐姐",
     "promote_memories": [{"id": 2, "content": "用户之前说过就像我的姐姐一样，现在她直接让我叫她姐姐。"}],

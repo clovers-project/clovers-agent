@@ -4,8 +4,8 @@ import pydantic
 from pathlib import Path
 from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.config import CONFIG as AGENT_CONFIG
-from clovers_agent.constants import ON_CHAT, HIDDEN_CATEGORY
-from .constants import UPDATE_USER_PROFILE, UPDATE_USER_PROFILE_PROMPT, EDIT_USER_PROFILE, EDIT_USER_PROFILE_DESC
+from clovers_agent.constants import ON_CHAT
+from .constants import UPDATE_USER_PROFILE, UPDATE_USER_PROFILE_PROMPT, EDIT_USER_PROFILE
 from ..base import TOOLS, CONFIG
 
 from .typing import UserProfile, MemoryItem, MemoryItemTuple
@@ -69,32 +69,25 @@ async def _(agent: CloversAgent, session: Turn, event: Event, block_days: int = 
     category=ON_CHAT,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, **kwargs):
-    session.extend_tools((agent.manifest[EDIT_USER_PROFILE],))
     return UPDATE_USER_PROFILE_PROMPT
 
 
 @TOOLS.register(
     EDIT_USER_PROFILE,
-    EDIT_USER_PROFILE_DESC,
+    "",
     {
-        "address_as": {"type": "string", "description": "记录你应当如何称呼对方"},
-        "tags": {"type": "string", "description": "为用户贴几个核心关键词"},
-        "preferences": {"type": "string", "description": "记录用户的话题偏好、语言风格偏好、特定观点、禁忌等"},
-        "impression": {"type": "string", "description": "你对该用户的整体印象"},
-        "new_memories": {"type": "array", "items": {"type": "string", "description": "新记忆"}},
+        "address_as": {"type": "string"},
+        "tags": {"type": "string"},
+        "preferences": {"type": "string"},
+        "impression": {"type": "string"},
+        "new_memories": {"type": "array", "items": {"type": "string"}},
         "promote_memories": {
             "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "number", "description": "升星的记忆序号"},
-                    "content": {"type": "string", "description": "更新后的记忆，该记忆应融合"},
-                },
-            },
+            "items": {"type": "object", "properties": {"id": {"type": "number"}, "content": {"type": "string"}}},
         },
-        "demote_memory_ids": {"type": "array", "items": {"type": "number", "description": "降星的记忆序号"}},
+        "demote_memory_ids": {"type": "array", "items": {"type": "number"}},
     },
-    category=HIDDEN_CATEGORY,
+    category=ON_CHAT,
     required=[],
 )
 async def _(

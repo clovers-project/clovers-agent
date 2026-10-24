@@ -139,7 +139,8 @@ class ConstantConfig(BaseModel):
     ON_CHAT_DESC: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
     # 内置工具
     HIDDEN_CATEGORY: str = ":hidden"
-    BUILTIN_CATEGORY: str = "builtin"
+    BUILTIN_CATEGORY: str = ":builtin"
+    INTRINSIC_CATEGORY: str = ":intrinsic"
     SKILL_MENU: str = "skill_menu"
     SKILL_MENU_DESC: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能。"
     GET_IMAGE_BY_ID: str = "get_image_by_id"

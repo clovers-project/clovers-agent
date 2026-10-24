@@ -5,7 +5,6 @@ import time
 import json
 import asyncio
 import httpx
-from copy import deepcopy
 from pathlib import Path
 from datetime import datetime
 from collections import deque
@@ -25,6 +24,7 @@ from .constants import (
     SKILL_MENU,
     SKILL_MENU_DESC,
     BUILTIN_CATEGORY,
+    INTRINSIC_CATEGORY,
     GET_IMAGE_BY_ID_INFO,
     INJECT_PROMPT_INFO,
     EXECUTE_SCRIPT,
@@ -77,7 +77,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 技能初始化
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
-        self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, BUILTIN_CATEGORY)(skill_menu)
+        self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(skill_menu)
         self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
         self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
         self.category_decorator(GET_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(view_id_image)
@@ -364,6 +364,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 intro = await on_chat(self, session, event)
                 logger.warning(f"[{self.name}][ROUTER] {intro} {e}")
+            session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
             try:
                 if intro_prompts := await self.activate_category(intro, session, event):
@@ -432,7 +433,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 @as_invoker
 async def on_chat(agent: CloversAgent, session: Turn, event: Event):
     session.create_payload(agent.api(ON_CHAT), agent.chat_prompt)
-    session.payload["tools"] = [agent.manifest[SKILL_MENU]]
     return ON_CHAT
 
 
@@ -442,7 +442,7 @@ async def skill_menu(agent: CloversAgent, session: Turn, event: Event, category:
         prompt = "\n".join(x for x in prompts if x)
     else:
         prompt = ""
-    payload_tools = session.extend_tools((agent.manifest[SKILL_MENU], *agent.select_tools(category)))
+    payload_tools = session.extend_tools(agent.select_tools(category))
     if scripts_map := agent.scripts_map.get(category):
         if not session.scripts_enum:
             payload_tools.append(

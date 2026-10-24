@@ -57,19 +57,3 @@ async def _(agent: CloversAgent, session: Turn, event: Event, url: str):
         output_format="markdown",
     )
     return text or "none"
-
-
-@TOOLS.register(
-    "get_image_by_url",
-    "当助手需要查看一个URL图片时调用此工具。",
-    {"url": {"type": "string", "description": "图片的完整 URL 地址"}},
-    NETWORK,
-)
-async def _(agent: CloversAgent, session: Turn, event: Event, image_url: str):
-    if not image_url.startswith("http"):
-        image_url = f"https://{image_url}"
-    b64url = await session.api.download_url(image_url)
-    if not b64url:
-        return "资源不存在或非图片格式"
-    session.input_image(b64url)
-    return "已将图片注入到当前用户输入"
