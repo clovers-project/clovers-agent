@@ -33,10 +33,10 @@ def data_url(data: bytes, allowed_subtype: tuple[str, ...]) -> str | None:
 
 
 _B64_DELETE = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-_CHUNK = 1 << 16
+_CHUNK = 1 << 16  # 64 KiB: bounds temporary allocations for huge payloads
 
 
-def parse_b64uri(uri: str) -> tuple[str, str, int] | None:
+def parse_b64_data_uri(uri: str) -> tuple[str, str, int] | None:
     """Parse ``data:<type>/<subtype>[;param...];base64,<payload>``.
 
     Returns ``(type, subtype, decoded_byte_length)``, or ``None`` if *uri* is
@@ -44,8 +44,11 @@ def parse_b64uri(uri: str) -> tuple[str, str, int] | None:
 
     Behaviour
     ---------
-    * ``;base64`` is matched case-insensitively and must be the last header
-      parameter, as required by RFC 2397.  Other parameters are ignored.
+    * The ``data:`` scheme is matched case-insensitively, as required by
+      RFC 3986.
+    * ``;base64`` is matched case-insensitively and must appear exactly once,
+      as the last header parameter, as required by RFC 2397.  Other
+      parameters are ignored (but not otherwise validated).
     * An omitted media type defaults to ``text/plain``; type and subtype are
       returned lower-cased.
     * Only the standard base64 alphabet is accepted.  Whitespace and the
@@ -53,7 +56,9 @@ def parse_b64uri(uri: str) -> tuple[str, str, int] | None:
     * Padding is optional (``AAA`` and ``AAA=`` are both fine), but if
       present it must be correct: one or two ``=``, only at the very end.
     """
-    if not isinstance(uri, str) or not uri.startswith("data:"):
+    if not isinstance(uri, str):
+        return None
+    if not uri.startswith("data:") and uri[:5].lower() != "data:":
         return None
 
     comma = uri.find(",", 5)
@@ -67,6 +72,19 @@ def parse_b64uri(uri: str) -> tuple[str, str, int] | None:
 
     type_end = comma - 7
     param = uri.find(";", 5, type_end)
+
+    # RFC 2397 allows the ;base64 marker only once, as the final parameter.
+    # Reject an earlier one; it would otherwise be silently ignored.
+    if param >= 0:
+        p = param
+        while p < type_end:
+            q = uri.find(";", p + 1, type_end)
+            if q < 0:
+                q = type_end
+            if q - p == 7 and uri[p + 1 : q].lower() == "base64":
+                return None
+            p = q
+
     mediatype = uri[5 : type_end if param < 0 else param]
 
     if mediatype:
