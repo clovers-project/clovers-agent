@@ -21,7 +21,7 @@ MAX_SUBAGENT_COUNT = workspace_config.max_subagent_count
 MAX_DOWNLOAD_RETURN_SIZE = workspace_config.max_download_return_size
 USE_SHELL = workspace_config.use_shell
 
-SUCCESS_TOOLIST = ("execute_command", "subagent")
+SUCCESS_TOOLIST = "execute_command"
 FALLBACK_TOOLIST = ("fetch_url", "ls", "read_file", "write_file")
 WORKSPACE_PATH = Path(AGENT_CONFIG.path) / "workspace"
 
@@ -121,22 +121,6 @@ async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
 
 
 @TOOLS.register(
-    "execute_command",
-    "Run a shell command in the workspace. The shell persists between calls, so the working directory carries over — each result ends with the current working directory.",
-    {"command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."}},
-    HIDDEN_CATEGORY,
-)
-async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
-    from .docker import Shell
-
-    extra = session.extra
-    if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
-        return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
-    output = await shell.execute(command)
-    return f"{output}\nCurrent working directory: {shell.workdir}"
-
-
-@TOOLS.register(
     "subagent",
     f"Delegate a self-contained task to a subagent (a separate agent that executes in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. The result is delivered after the current call chain ends, waking you to continue. You can run up to {MAX_SUBAGENT_COUNT} subagents per call chain.",
     {
@@ -145,7 +129,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
             "description": "The complete, self-contained task for the subagent: the goal, the relevant files or paths, any constraints, and the expected output format. The subagent does not share this conversation's context, so include everything it needs to finish unaided",
         }
     },
-    HIDDEN_CATEGORY,
+    WORKSPACE,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
     extra = session.extra
@@ -176,6 +160,22 @@ async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
     s.input_text(prompt)
     batch.submit(s, event)
     return "OK"
+
+
+@TOOLS.register(
+    "execute_command",
+    "Run a shell command in the workspace. The shell persists between calls, so the working directory carries over — each result ends with the current working directory.",
+    {"command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."}},
+    HIDDEN_CATEGORY,
+)
+async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
+    from .docker import Shell
+
+    extra = session.extra
+    if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
+        return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
+    output = await shell.execute(command)
+    return f"{output}\nCurrent working directory: {shell.workdir}"
 
 
 @TOOLS.register(
