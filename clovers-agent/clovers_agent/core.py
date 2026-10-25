@@ -322,7 +322,7 @@ class AgentTools:
                 self_hooks.clear()
                 self_hooks.update(hooks)
         # others 注册的类别可能被其他工具添加新工具，所以当前还有工具的类别不丢失 Desc
-        for category in self.category_desc_map:
+        for category in list(self.category_desc_map.keys()):
             if category in self.category_tools_map:
                 continue
             if category in self.category_hooks:
