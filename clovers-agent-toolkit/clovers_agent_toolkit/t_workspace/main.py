@@ -264,9 +264,6 @@ async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     if not file.exists():
         return f'File not found: "{file_path}"'
     content = file.read_bytes()
-    if b64url := data_url(content, ALLOWED_IMAGE_SUBTYPES):
-        session.input_image(b64url)
-        return "Image attached to the current user input."
     if b"\x00" in content or not (text := decode_bytes(content)):
         return f'Unsupported file type: "{file_path}"'
     return text

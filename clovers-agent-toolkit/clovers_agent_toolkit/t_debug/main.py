@@ -2,11 +2,13 @@ import sys
 import importlib
 
 from clovers.logger import logger
-from clovers_agent import CloversAgent, Turn, Event
+from clovers_agent import CloversAgent, Turn, Event, AgentTools
 
 from ..base import TOOLS
 from .utils import f_list, f_log, get_tool_source
 from .constants import DEBUG_UTILS, KEY_DEBUG_TARGET, DEBUG_PROMPT
+
+from typing import cast
 
 logger.warning("Debug 模式已启用，请勿将此模式用于生产环境。")
 
@@ -88,30 +90,26 @@ Traceback:
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, module_name: str | None = None) -> str:
     if module_name is not None:
-        agent.extra[KEY_DEBUG_TARGET] = module_name
+        agent.extra[KEY_DEBUG_TARGET] = module_name.strip()
         logger.info("调试目标模块已切换为 %s", module_name)
     target = agent.extra.get(KEY_DEBUG_TARGET)
     if not target:
         return "目标模块名未设置，请先向开发者获取。"
     if target not in sys.modules:
+        logger.warning("模块 %s 未加载，将尝试加载该模块。", target)
         agent.load_from_list([target])
         return f"已加载模块 {target}"
-    previous_tools = getattr(sys.modules[target], "TOOLS", None)
-    if previous_tools is not None:
-        agent.detach(previous_tools)
+    tools = cast(AgentTools, getattr(sys.modules[target], "TOOLS"))
+    agent.detach(tools)
     prefix = f"{target}."
-    for name in [n for n in sys.modules if n == target or n.startswith(prefix)]:
-        del sys.modules[name]
+    deletion = [(name, sys.modules.pop(name)) for name in sys.modules if name == target or name.startswith(prefix)]
     try:
-        module = importlib.import_module(target)
-        new_tools = module.TOOLS
+        tools = cast(AgentTools, getattr(importlib.import_module(target), "TOOLS"))
+        info = f"已重新加载模块 {target}"
     except Exception as exc:
-        # 导入失败时回滚，否则工具集会整个消失，且 sys.modules 里也不再有目标模块
-        logger.exception("重新加载模块 %s 失败", target)
-        if previous_tools is not None:
-            agent.merge(previous_tools)
-        agent.sync_menu()
-        return f"重新加载模块 {target} 失败：{type(exc).__name__}: {exc}"
-    agent.merge(new_tools)
+        info = f"重新加载模块 {target} 失败：{type(exc).__name__}: {exc}"
+        logger.error(info)
+        sys.modules.update(deletion)
+    agent.merge(tools)
     agent.sync_menu()
-    return f"已重新加载模块 {target}"
+    return info

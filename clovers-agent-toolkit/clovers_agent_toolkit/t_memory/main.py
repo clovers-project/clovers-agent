@@ -74,7 +74,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, **kwargs):
 
 @TOOLS.register(
     EDIT_USER_PROFILE,
-    "",
+    f"在调用此工具前必须先调用`{UPDATE_USER_PROFILE}`",
     {
         "address_as": {"type": "string"},
         "tags": {"type": "string"},
