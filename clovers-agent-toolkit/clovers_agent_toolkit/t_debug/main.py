@@ -90,7 +90,7 @@ Traceback:
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, module_name: str | None = None) -> str:
     if module_name is not None:
-        agent.extra[KEY_DEBUG_TARGET] = module_name.strip()
+        agent.extra[KEY_DEBUG_TARGET] = module_name.strip().replace("-", "_")
         logger.info("调试目标模块已切换为 %s", module_name)
     target = agent.extra.get(KEY_DEBUG_TARGET)
     if not target:

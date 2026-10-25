@@ -19,7 +19,7 @@ DOCKER_IMAGE = CONFIG.docker_image
 MAX_SUBAGENT_COUNT = CONFIG.max_subagent_count
 MAX_DOWNLOAD_RETURN_SIZE = CONFIG.max_download_return_size
 SUCCESS_TOOLIST = ("execute_command", "subagent")
-FALLBACK_TOOLIST = ("ls", "read_file", "write_file")
+FALLBACK_TOOLIST = ("download_file", "ls", "read_file", "write_file")
 
 
 async def enter_workspace(agent: CloversAgent, session: Turn):
@@ -116,56 +116,6 @@ async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     return "File sent to the user."
 
 
-TOOLS.register(
-    "download_file",
-    "Fetch a URL with an HTTP GET or POST request. Set file_path to save the response to the workspace; otherwise the response body is returned as the tool output.",
-    {
-        "method": {"type": "string", "description": "HTTP method: get to fetch a resource, post to submit data.", "enum": ["get", "post"]},
-        "url": {"type": "string", "description": "Full URL including scheme (http:// or https://)."},
-        "headers": {"type": "object", "description": 'Custom request headers, e.g. {"Authorization": "Bearer xxx"}. Usually omitted.'},
-        "data": {"type": "object", "description": "Request payload: query parameters for get, JSON body for post."},
-        "file_path": {"type": "string", "description": 'Path to save the response to, e.g. "logo.png".'},
-    },
-    WORKSPACE,
-    required=["method", "url"],
-)
-
-
-async def _(
-    agent: CloversAgent,
-    session: Turn,
-    event: Event,
-    method: str,
-    url: str,
-    headers: dict | None = None,
-    data: dict | None = None,
-    file_path: str | None = None,
-):
-    if method.lower() == "post":
-        resp = await retry_request(agent.async_client.post, url, json=data, headers=headers)
-    else:
-        resp = await retry_request(agent.async_client.get, url, params=data, headers=headers)
-    content = resp.content
-    if not content:
-        return f"Request succeeded (HTTP {resp.status_code}), but the response body was empty."
-    r_size = len(content)
-    s_size = format_size(r_size)
-    # 指定了保存路径：写入工作区
-    if file_path:
-        file = WORKSPACE_PATH / session.session_id / format_path(file_path)
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_bytes(content)
-        return f'Saved to "{file_path}" ({s_size}, HTTP {resp.status_code}).'
-    # 未指定保存路径，但内容过大：拦截并落盘
-    if r_size > MAX_DOWNLOAD_RETURN_SIZE:
-        saved_name = f"{md5(content)}.bin"
-        file = WORKSPACE_PATH / session.session_id / saved_name
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_bytes(content)
-        return f'Response too large to return ({s_size}); saved to the workspace as "{saved_name}".'
-    return decode_bytes(content)
-
-
 @TOOLS.register(
     "execute_command",
     "Run a shell command in the workspace. The shell persists between calls, so the working directory carries over — each result ends with the current working directory.",
@@ -220,6 +170,54 @@ async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
     s.input_text(prompt)
     batch.submit(s, event)
     return "OK"
+
+
+@TOOLS.register(
+    "download_file",
+    "Fetch a URL with an HTTP GET or POST request. Set file_path to save the response to the workspace; otherwise the response body is returned as the tool output.",
+    {
+        "method": {"type": "string", "description": "HTTP method: get to fetch a resource, post to submit data.", "enum": ["get", "post"]},
+        "url": {"type": "string", "description": "Full URL including scheme (http:// or https://)."},
+        "headers": {"type": "object", "description": 'Custom request headers, e.g. {"Authorization": "Bearer xxx"}. Usually omitted.'},
+        "data": {"type": "object", "description": "Request payload: query parameters for get, JSON body for post."},
+        "file_path": {"type": "string", "description": 'Path to save the response to, e.g. "logo.png".'},
+    },
+    HIDDEN_CATEGORY,
+    required=["method", "url"],
+)
+async def _(
+    agent: CloversAgent,
+    session: Turn,
+    event: Event,
+    method: str,
+    url: str,
+    headers: dict | None = None,
+    data: dict | None = None,
+    file_path: str | None = None,
+):
+    if method.lower() == "post":
+        resp = await retry_request(agent.async_client.post, url, json=data, headers=headers)
+    else:
+        resp = await retry_request(agent.async_client.get, url, params=data, headers=headers)
+    content = resp.content
+    if not content:
+        return f"Request succeeded (HTTP {resp.status_code}), but the response body was empty."
+    r_size = len(content)
+    s_size = format_size(r_size)
+    # 指定了保存路径：写入工作区
+    if file_path:
+        file = WORKSPACE_PATH / session.session_id / format_path(file_path)
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(content)
+        return f'Saved to "{file_path}" ({s_size}, HTTP {resp.status_code}).'
+    # 未指定保存路径，但内容过大：拦截并落盘
+    if r_size > MAX_DOWNLOAD_RETURN_SIZE:
+        saved_name = f"{md5(content)}.bin"
+        file = WORKSPACE_PATH / session.session_id / saved_name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(content)
+        return f'Response too large to return ({s_size}); saved to the workspace as "{saved_name}".'
+    return decode_bytes(content)
 
 
 @TOOLS.register(
