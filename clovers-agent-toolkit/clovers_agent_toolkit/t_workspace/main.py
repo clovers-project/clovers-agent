@@ -39,7 +39,7 @@ async def enter_workspace(agent: CloversAgent, session: Turn):
             prompts.append("Current system: Debian\nCurrent working directory: /workspace")
             return "\n\n".join(prompts)
         except Exception as e:
-            logger.error(e)
+            logger.error("enter_workspace failed: %s: %s", type(e).__name__, e)
     session.extend_tools(agent.manifest[x] for x in FALLBACK_TOOLIST)
     prompts.append("Current working directory: /workspace")
     return "\n\n".join(prompts)
@@ -293,5 +293,4 @@ async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str, co
         file.write_text(content, encoding="utf-8")
         return tip
     except Exception as e:
-        logger.error(e)
-        return f"Failed to write file: {e}"
+        return f"Failed to write file: {type(e).__name__}: {e}"
