@@ -32,49 +32,91 @@ def data_url(data: bytes, allowed_subtype: tuple[str, ...]) -> str | None:
     return f"data:{mime}/{subtype};base64,{b64}"
 
 
-def parse_b64url(s: str):
+_B64_DELETE = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+_CHUNK = 1 << 16
+
+
+def parse_b64uri(uri: str) -> tuple[str, str, int] | None:
+    """Parse ``data:<type>/<subtype>[;param...];base64,<payload>``.
+
+    Returns ``(type, subtype, decoded_byte_length)``, or ``None`` if *uri* is
+    not a well-formed base64 data URI.
+
+    Behaviour
+    ---------
+    * ``;base64`` is matched case-insensitively and must be the last header
+      parameter, as required by RFC 2397.  Other parameters are ignored.
+    * An omitted media type defaults to ``text/plain``; type and subtype are
+      returned lower-cased.
+    * Only the standard base64 alphabet is accepted.  Whitespace and the
+      URL-safe alphabet (``-``/``_``) are rejected.
+    * Padding is optional (``AAA`` and ``AAA=`` are both fine), but if
+      present it must be correct: one or two ``=``, only at the very end.
     """
-    解析 data URI（仅 base64），返回 (type, subtype, 精确字节数)；
-    解析失败或不支持的格式返回 None。
-    """
-    # 1) 快速前缀检查（大小写不敏感）
-    if s[:5].lower() != "data:":
+    if not isinstance(uri, str) or not uri.startswith("data:"):
         return None
-    # 2) 定位分隔逗号（header 一般很短，find 很快）
-    comma = s.find(",", 5)
+
+    comma = uri.find(",", 5)
     if comma < 0:
         return None
-    # 3) 解析 header： type/subtype;param1;param2...
-    header = s[5:comma]  # header 很短，切片开销可忽略
-    parts = header.split(";")
-    mediatype = parts[0]
-    is_b64 = any(p.strip().lower() == "base64" for p in parts[1:])
-    if not is_b64:
-        return None  # 非 base64 不支持，直接失败
-    # 4) 拆 type / subtype
-    slash = mediatype.find("/")
-    if slash < 0:
-        if mediatype:  # 有内容但没有 '/' → 非法
+
+    # ---- header: ... ;base64 , --------------------------------------
+    header_len = comma - 5
+    if header_len < 7 or uri[comma - 7] != ";" or uri[comma - 6 : comma].lower() != "base64":
+        return None
+
+    type_end = comma - 7
+    param = uri.find(";", 5, type_end)
+    mediatype = uri[5 : type_end if param < 0 else param]
+
+    if mediatype:
+        slash = mediatype.find("/")
+        if (
+            slash < 1
+            or slash == len(mediatype) - 1
+            or mediatype.find("/", slash + 1) >= 0
+            or not mediatype.isascii()
+            or not mediatype.isprintable()
+            or " " in mediatype
+        ):
             return None
-        tp, st = "text", "plain"  # data:, 默认值
+        mime_type = mediatype[:slash].lower()
+        mime_subtype = mediatype[slash + 1 :].lower()
     else:
-        tp = mediatype[:slash]
-        st = mediatype[slash + 1 :]
-    # 5) 计算 base64 解码后的精确字节数（不切片、不解码）
-    L = len(s) - comma - 1  # data 部分的字符数
-    if L == 0:
-        return tp, st, 0
-    rem = L & 3
-    if rem:  # 无填充
-        if rem == 1:  # base64 长度非法
+        mime_type, mime_subtype = "text", "plain"
+
+    # ---- payload: validate in chunks, compute length ----------------
+    start = comma + 1
+    end = len(uri)
+    n = end - start
+    if n % 4 == 1:  # a single leftover base64 character is impossible
+        return None
+
+    # Peel off the (at most two) trailing '=' characters.
+    k = end
+    pad = 0
+    while k > start and uri[k - 1] == "=":
+        k -= 1
+        pad += 1
+        if pad > 2:
             return None
-        n = (L * 3) >> 2  # floor(L * 3 / 4)
-    else:  # 4 的倍数，看尾部 '=' 填充
-        if s[-1] == "=":
-            n = ((L >> 2) * 3) - (2 if s[-2] == "=" else 1)
-        else:
-            n = (L >> 2) * 3
-    return tp, st, n
+
+    if pad and n % 4:  # padding only makes sense on whole 4-char groups
+        return None
+
+    # Anything left in the payload must be a base64 alphabet character.
+    try:
+        for i in range(start, k, _CHUNK):
+            stop = i + _CHUNK
+            if stop > k:
+                stop = k
+            if uri[i:stop].encode("ascii").translate(None, _B64_DELETE):
+                return None
+    except UnicodeEncodeError:  # non-ASCII character in the payload
+        return None
+
+    # 4 base64 chars -> 3 bytes; each '=' removes one byte.
+    return mime_type, mime_subtype, (n * 3 >> 2) - pad
 
 
 def deep_add(total: dict, detail: dict):

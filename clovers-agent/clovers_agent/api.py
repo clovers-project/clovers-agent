@@ -1,7 +1,7 @@
 import httpx
 from pathlib import Path
 from clovers.logger import logger
-from .utils import data_url, deep_add, retry_httpx, httpx_request
+from .utils import data_url, parse_b64uri, deep_add, retry_httpx, httpx_request
 from .config import OpenAIConfig, HybridOpenAIConfig
 from .constants import VISION_TAG, VISION_PROMPT
 
@@ -43,8 +43,8 @@ class OpenAIAPI:
         max_size: int = 1024 * 1024 * 10,
     ):
         try:
-            if url.startswith("data:"):
-                _, subtype, size = ...
+            if p := parse_b64uri(url):
+                _, subtype, size = p
                 if subtype in allowed_subtype and size <= max_size:
                     return url
             else:
