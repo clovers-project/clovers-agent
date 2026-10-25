@@ -7,24 +7,28 @@ from clovers_agent.utils import decode_bytes, to_b64url
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
-from ..base import TOOLS, CONFIG, CATEGORIES, retry_request
+from ..base import TOOLS, CONFIG, CATEGORIES
+from ..utils import retry_request, format_path, format_size, md5, list_entries, render_listing
 from .turn_batch import TurnBatch
-from .utils import format_path, format_size, md5, list_entries, render_listing
 from .constants import WORKSPACE, KEY_SUBAGENTS, KEY_SUBAGENTS, SUBAGENT_PROMPT
 
 from typing import cast
 
-WORKSPACE_PATH = Path(AGENT_CONFIG.path) / "workspace"
-DOCKER_IMAGE = CONFIG.docker_image
-MAX_SUBAGENT_COUNT = CONFIG.max_subagent_count
-MAX_DOWNLOAD_RETURN_SIZE = CONFIG.max_download_return_size
+workspace_config = CONFIG.workspace
+
+DOCKER_IMAGE = workspace_config.docker_image
+MAX_SUBAGENT_COUNT = workspace_config.max_subagent_count
+MAX_DOWNLOAD_RETURN_SIZE = workspace_config.max_download_return_size
+USE_SHELL = workspace_config.use_shell
+
 SUCCESS_TOOLIST = ("execute_command", "subagent")
 FALLBACK_TOOLIST = ("fetch_url", "ls", "read_file", "write_file")
+WORKSPACE_PATH = Path(AGENT_CONFIG.path) / "workspace"
 
 
 async def enter_workspace(agent: CloversAgent, session: Turn):
     prompts = ["# Workspace initialized"]
-    if CONFIG.use_shell:
+    if USE_SHELL:
         try:
             from .docker import Shell
 

@@ -4,8 +4,18 @@ import stat
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+from clovers_agent.utils import retry_httpx, httpx_request
 
 from typing import NamedTuple
+
+retry_request = retry_httpx(5)(httpx_request)
+
+
+def fmt_datetime(timestamp: float) -> str:
+    try:
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+    except (OSError, OverflowError, ValueError):
+        return "?"
 
 
 def format_path(path: str):
@@ -47,13 +57,6 @@ def _is_junction(entry: os.DirEntry) -> bool:
         return is_junction()
     except OSError:
         return False
-
-
-def _format_mtime(timestamp: float) -> str:
-    try:
-        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
-    except (OSError, OverflowError, ValueError):
-        return "?"
 
 
 def _first_visit(visited: set[tuple[int, int]], st: os.stat_result) -> bool:
@@ -101,7 +104,7 @@ def list_entries(root: Path, depth: int) -> list[LsEntry]:
                     name,
                     "d" if is_dir else "l" if is_link else "f",
                     None if is_dir or is_link else st.st_size,
-                    _format_mtime(st.st_mtime),
+                    fmt_datetime(st.st_mtime),
                 )
             )
             if is_dir and _first_visit(visited, st):

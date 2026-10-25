@@ -10,9 +10,11 @@ from ..base import TOOLS, CONFIG
 
 from .typing import UserProfile, MemoryItem, MemoryItemTuple
 
-REMINDER_THRESHOLD = CONFIG.reminder_threshold
-STRONG_REMINDER_THRESHOLD = CONFIG.strong_reminder_threshold
-PROFILE_MEMORY_SIZE = CONFIG.profile_memory_size
+memory_config = CONFIG.memory
+REMINDER_THRESHOLD = memory_config.reminder_threshold
+STRONG_REMINDER_THRESHOLD = memory_config.strong_reminder_threshold
+PROFILE_MEMORY_SIZE = memory_config.profile_memory_size
+
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 
 

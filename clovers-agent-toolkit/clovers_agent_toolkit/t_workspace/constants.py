@@ -1,3 +1,5 @@
-WORKSPACE = "workspace"
+from ..config import CATEGORIES
+
+WORKSPACE = CATEGORIES.WORKSPACE
 KEY_SUBAGENTS = f"{WORKSPACE}.subagent_wakeups"
 SUBAGENT_PROMPT = ""
