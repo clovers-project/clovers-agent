@@ -257,7 +257,6 @@ async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./", 
     HIDDEN_CATEGORY,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
-    print("read_file")
     workspace = WORKSPACE_PATH / session.session_id
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
