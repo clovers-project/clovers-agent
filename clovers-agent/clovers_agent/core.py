@@ -24,7 +24,7 @@ class Invoker[**P](Protocol):
     async def __call__(self, agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
 
 
-type Parameters[V: JSONSchemaType] = dict[str, V]
+type Parameters = dict[str, JSONSchemaType]
 type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 type IntroK = tuple[None, str]
 type CategoryK = tuple[str, None]

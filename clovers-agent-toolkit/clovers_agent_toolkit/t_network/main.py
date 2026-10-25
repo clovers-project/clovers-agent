@@ -1,9 +1,13 @@
 import json
+import httpx
 import trafilatura
 from clovers_agent import CloversAgent, Turn, Event
 from ..utils import retry_request
 from ..base import TOOLS, CONFIG
 from ..config import CATEGORIES
+
+from typing import cast
+from .typing import SearchResult
 
 NETWORK = CATEGORIES.NETWORK
 network_config = CONFIG.network
@@ -15,93 +19,118 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
 
 @TOOLS.register(
     "web_search",
-    "联网搜索",
-    {"query": {"type": "string", "description": "搜索关键词"}},
-    NETWORK,
-)
-async def _(agent: CloversAgent, session: Turn, event: Event, query: str):
-    headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_API_KEY}
-    params = {"q": query, "count": 8}
-    resp = await retry_request(agent.async_client.get, BRAVE_URL, headers=headers, params=params, timeout=30.0)
-    try:
-        results = resp.json()["web"]["results"]
-    except (json.JSONDecodeError, KeyError):
-        return "服务器未返回合法数据"
-    if not results:
-        return f"未找到关于 '{query}' 的相关搜索结果。"
-    md_output = [f"### 关于 '{query}' 的搜索结果：\n"]
-    for idx, item in enumerate(results, 1):
-        title = item.get("title", "无标题")
-        link = item.get("url", "#")
-        snippet = item.get("description", "无摘要")
-        md_output.append(f"{idx}. **[{title}]({link})**\n   摘要: {snippet}\n")
-    return "\n".join(md_output)
-
-
-@TOOLS.register(
-    "web_search",
-    "联网搜索",
+    "搜索网页",
     {
-        "query": {"type": "string", "description": "关键词，多个关键词用空格分隔"},
-        "question": {"type": "string", "description": "触发搜索的问题，提供该字段有助于更好地理解搜索意图"},
-        "sites": {"type": "string", "description": "返回结果限制在指定站点，指定多个时用空格分隔 e.g. github.com huggingface.co."},
-        "exclude_sites": {"type": "string", "description": "返回结果排除指定站点，指定多个时用空格分隔。"},
-        "exclude_terms": {"type": "array", "description": "返回结果排除指定关键词，指定多个时用空格分隔。"},
-        "exact_phrases": {"type": "string", "description": "返回结果精准匹配目标短语"},
-        "exclude_phrases": {"type": "string", "description": "排除包含指定短语的网页"},
-        "after": {"type": "string", "description": "将结果限制在指定日期之后发布的网页 e.g. 2025-01-01"},
-        "before": {"type": "string", "description": "将结果限制在指定日期之前发布的网页"},
+        "query": {
+            "type": "string",
+            "description": "Space-separated search keywords used for matching",
+        },
+        "question": {
+            "type": "string",
+            "description": "Describe the question to be answered to help the search service understand the search intent.",
+        },
+        "sites": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": 'Restrict results to the specified domains. e.g. ["github.com", "huggingface.co"]',
+        },
+        "exclude_sites": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Exclude results from the specified domains. Same format as `sites`.",
+        },
+        "exclude_terms": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Exclude webpages that contain any of the specified keywords.",
+        },
+        "exact_phrases": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Return only webpages that contain the specified phrases.",
+        },
+        "exclude_phrases": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Return only webpages that do not contain the specified phrases.",
+        },
+        "after": {
+            "type": "string",
+            "description": "Only include webpages published after this date. Accepts YYYY or YYYY-MM-DD. e.g. `2025-01-01`.",
+        },
+        "before": {
+            "type": "string",
+            "description": "Only include webpages published before this date. Same format as `after`.",
+        },
     },
     NETWORK,
+    required=["query"],
 )
 async def _(
     agent: CloversAgent,
     session: Turn,
     event: Event,
+    query: str,
+    question: str | None = None,
+    sites: list[str] | None = None,
+    exclude_sites: list[str] | None = None,
+    exclude_terms: list[str] | None = None,
+    exact_phrases: list[str] | None = None,
+    exclude_phrases: list[str] | None = None,
+    after: str | None = None,
+    before: str | None = None,
 ):
     headers = {"Authorization": f"Bearer {deepseek_search_key}"}
+    query_list = [query]
+    if sites and isinstance(sites, list):
+        query_list.append(" OR ".join(f"site:{site}" for site in sites))
+    if exclude_sites and isinstance(exclude_sites, list):
+        query_list.append(" ".join(f"-site:{site}" for site in exclude_sites))
+    if exclude_terms and isinstance(exclude_terms, list):
+        query_list.append(" ".join(f"-{term}" for term in exclude_terms))
+    if exact_phrases and isinstance(exact_phrases, list):
+        query_list.append(" ".join(f'"{phrase}"' for phrase in exact_phrases))
+    if exclude_phrases and isinstance(exclude_phrases, list):
+        query_list.append(" ".join(f'-"{phrase}"' for phrase in exclude_phrases))
+    if after:
+        query_list.append(f"after:{after}")
+    if before:
+        query_list.append(f"before:{before}")
     payload = {
-        "query": query,
-        "count": max(1, min(int(count or 5), 15)),
-        # 需要正文时再打开(正文很长，慎用)：
-        # "need_content": True,
-        # 若能把用户原问题拿到，传进去能提升召回：
-        # "ori_question": session.user_message[:128],
+        "query": " ".join(query_list),
+        "count": 10,
+        "ori_question": question or event.message,
+        "need_content": True,
     }
-
-    resp = await retry_request(
-        agent.async_client.post,
-        DEEPSEEK_SEARCH_URL,
-        headers=headers,
-        json=payload,
-        timeout=30.0,
-    )
-
-    if resp.status_code != 200:
+    try:
+        resp = await retry_request(agent.async_client.post, deepseek_search_url, headers=headers, json=payload, timeout=30.0)
+    except httpx.HTTPStatusError as e:
+        resp = e.response
         try:
             return f"搜索请求失败（HTTP {resp.status_code}）：{resp.json()["error"]["message"]}"
         except Exception:
             return f"搜索请求失败（HTTP {resp.status_code}）"
-
+    except Exception:
+        return "搜索请求失败"
     try:
-        results = resp.json()["results"]
+        results = cast(list[SearchResult], resp.json()["results"])
     except (json.JSONDecodeError, KeyError, TypeError):
         return "服务器未返回合法数据"
-
     if not results:
         return f"未找到关于 '{query}' 的相关搜索结果。"
-
+    results.sort(key=lambda x: x.setdefault("rerank_score", 0.0), reverse=True)
+    avg_score = sum(x["rerank_score"] for x in results) / len(results)
     md_output = [f"### 关于 '{query}' 的搜索结果：\n"]
-    for idx, item in enumerate(results, 1):
+    for idx, item in enumerate(results[:6], 1):
+        if idx > 3 and item["rerank_score"] < avg_score:
+            break
         title = item.get("title") or "无标题"
         link = item.get("url") or "#"
         site = item.get("site_name") or "未知来源"
-        date = _fmt_date(item.get("date"))
-        summary = (item.get("summary") or item.get("snippet") or "无摘要").strip()
-
+        date = item.get("date")
+        summary = (item.get("summary") or item.get("snippet") or "无").strip()
         meta = f"来源: {site}" + (f" | 发布: {date}" if date else "")
         md_output.append(f"{idx}. **[{title}]({link})**\n   {meta}\n   摘要: {summary}\n")
-
     return "\n".join(md_output)
 
 
