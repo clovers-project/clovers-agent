@@ -32,6 +32,51 @@ def data_url(data: bytes, allowed_subtype: tuple[str, ...]) -> str | None:
     return f"data:{mime}/{subtype};base64,{b64}"
 
 
+def parse_b64url(s: str):
+    """
+    解析 data URI（仅 base64），返回 (type, subtype, 精确字节数)；
+    解析失败或不支持的格式返回 None。
+    """
+    # 1) 快速前缀检查（大小写不敏感）
+    if s[:5].lower() != "data:":
+        return None
+    # 2) 定位分隔逗号（header 一般很短，find 很快）
+    comma = s.find(",", 5)
+    if comma < 0:
+        return None
+    # 3) 解析 header： type/subtype;param1;param2...
+    header = s[5:comma]  # header 很短，切片开销可忽略
+    parts = header.split(";")
+    mediatype = parts[0]
+    is_b64 = any(p.strip().lower() == "base64" for p in parts[1:])
+    if not is_b64:
+        return None  # 非 base64 不支持，直接失败
+    # 4) 拆 type / subtype
+    slash = mediatype.find("/")
+    if slash < 0:
+        if mediatype:  # 有内容但没有 '/' → 非法
+            return None
+        tp, st = "text", "plain"  # data:, 默认值
+    else:
+        tp = mediatype[:slash]
+        st = mediatype[slash + 1 :]
+    # 5) 计算 base64 解码后的精确字节数（不切片、不解码）
+    L = len(s) - comma - 1  # data 部分的字符数
+    if L == 0:
+        return tp, st, 0
+    rem = L & 3
+    if rem:  # 无填充
+        if rem == 1:  # base64 长度非法
+            return None
+        n = (L * 3) >> 2  # floor(L * 3 / 4)
+    else:  # 4 的倍数，看尾部 '=' 填充
+        if s[-1] == "=":
+            n = ((L >> 2) * 3) - (2 if s[-2] == "=" else 1)
+        else:
+            n = (L >> 2) * 3
+    return tp, st, n
+
+
 def deep_add(total: dict, detail: dict):
     """递归累加两个字典中的数值（仅限整数）"""
     if not isinstance(detail, dict):

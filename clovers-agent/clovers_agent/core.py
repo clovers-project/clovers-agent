@@ -1,4 +1,5 @@
 from __future__ import annotations
+import contextlib
 import importlib.util
 import frontmatter
 from pathlib import Path
@@ -244,7 +245,7 @@ class AgentTools:
             others (SkillCore): 加载的 SkillCore 实例。
         """
         if others in self._merged:
-            logger.warning(f"[{self.name}][MERGE]{repr(others)} already merged")
+            logger.warning("[%s][MERGE] %r already merged", self.name, others)
             return
         others.validate_manifest()
         conflict_intros = others.intro_manifest.keys() & self.intro_manifest.keys()
@@ -283,7 +284,7 @@ class AgentTools:
             请勿在 `self.merge` 后修改 `others`，否则会导致 `self.detach` 失败或工具残留
         """
         if others not in self._merged:
-            logger.warning(f"[{self.name}][DETACH]{repr(others)} not merged")
+            logger.warning("[%s][DETACH] %r not merged", self.name, others)
             return
         others.validate_manifest()
         # 验证
@@ -393,7 +394,7 @@ class AgentSkills(AgentTools):
         if skill_path.is_file() and skill_path.suffix == ".md" and (skill_md := parse_skill(skill_path)):
             intro_k = self.load_skill_md(skill_md, None)
             if intro_k:
-                logger.info(f'[{self.name}][LOAD SKILL] "Intro - {intro_k[1]}" loaded')
+                logger.info('[%s][LOAD SKILL] "Intro - %s" loaded', self.name, intro_k[1])
             return
         md_file = skill_path / "SKILL.md"
         if not (md_file.exists() and (skill_md := parse_skill(md_file))):
@@ -405,7 +406,7 @@ class AgentSkills(AgentTools):
         if not other_mds and not scripts and not references:
             intro_k = self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
             if intro_k:
-                logger.info(f'[{self.name}][LOAD SKILL] "Intro - {intro_k[1]}" loaded')
+                logger.info('[%s][LOAD SKILL] "Intro - %s" loaded', self.name, intro_k[1])
             return
         category, desc, *_, content = skill_md
         # 加载的 skill 必须独占一个工具组
@@ -429,7 +430,7 @@ class AgentSkills(AgentTools):
                 self.references_map[category] = {}
             path = category / reference_path.relative_to(skill_path)
             self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
-        logger.info(f'[{self.name}][LOAD SKILL] "Category - {category}" loaded')
+        logger.info('[%s][LOAD SKILL] "Category - %s" loaded', self.name, category)
 
     @property
     def skill_dirs(self):
@@ -452,11 +453,7 @@ class AgentSkills(AgentTools):
 def invoker_wrapper[**P](name: str, func: Invoker[P, ...]) -> WrappedInvoker[P]:
     @wraps(func)
     async def wrapper(agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
-        logger.info(f"[{agent.name}][CALL][{name}] called")
-        logger.debug(kwargs)
-        content = coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
-        logger.debug(f"[{name}][RETURNED] {content}")
-        return content
+        return coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
 
     return wrapper
 
@@ -492,7 +489,7 @@ def load_module_from_path(module_name: str, file: Path):
 
 
 def parse_skill(md: Path) -> SkillMD | None:
-    try:
+    with contextlib.suppress(Exception):
         skill = frontmatter.loads(md.read_text("utf-8"))
         name = skill.get("name")
         if not name or not isinstance(name, str):
@@ -507,7 +504,4 @@ def parse_skill(md: Path) -> SkillMD | None:
             parameters = None
             required = None
         content = skill.content.strip()
-    except Exception as e:
-        logger.exception(e)
-        return
-    return name.replace("-", "_"), desc, parameters, required, content
+        return name.replace("-", "_"), desc, parameters, required, content

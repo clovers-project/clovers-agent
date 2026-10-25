@@ -19,6 +19,20 @@ def f_summarize(failure: ToolCallError) -> str:
     return f"{failure['name']} - {tail}"
 
 
+def list_tool_failures(agent: CloversAgent):
+    log = f_log(agent) or deque(maxlen=MAX_FAILURES)
+    next_id = log[-1][0] + 1 if log else 1
+    for i, failure in enumerate(agent.tool_failures, next_id):
+        log.append((i, f_summarize(failure), failure))
+    agent.tool_failures.clear()
+    if log:
+        return
+    agent.extra[KEY_FAILURE_LOG] = log
+    lines = ["历史报错信息（新旧排序）："]
+    lines.extend(f"{i}. {summary}" for i, summary, _ in log)
+    return "\n".join(lines)
+
+
 def code_block(source: str, lang: str = "python") -> str:
     best = cur = 0
     for ch in source:
@@ -42,17 +56,3 @@ def get_tool_source(agent: CloversAgent, tool_name: str) -> str:
         return code_block(inspect.getsource(inspect.unwrap(func)))
     except (OSError, TypeError):
         return f'Source Not Available for tool "{tool_name}"'
-
-
-def f_list(agent: CloversAgent):
-    log = f_log(agent) or deque(maxlen=MAX_FAILURES)
-    next_id = log[-1][0] + 1 if log else 1
-    for i, failure in enumerate(agent.tool_failures, next_id):
-        log.append((i, f_summarize(failure), failure))
-    agent.tool_failures.clear()
-    if log:
-        return
-    agent.extra[KEY_FAILURE_LOG] = log
-    lines = ["历史报错信息（新旧排序）："]
-    lines.extend(f"{i}. {summary}" for i, summary, _ in log)
-    return "\n".join(lines)

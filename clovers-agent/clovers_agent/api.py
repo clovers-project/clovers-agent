@@ -1,4 +1,5 @@
 import httpx
+from pathlib import Path
 from clovers.logger import logger
 from .utils import data_url, deep_add, retry_httpx, httpx_request
 from .config import OpenAIConfig, HybridOpenAIConfig
@@ -41,19 +42,25 @@ class OpenAIAPI:
         allowed_subtype: tuple[str, ...] = ALLOWED_IMAGE_SUBTYPES,
         max_size: int = 1024 * 1024 * 10,
     ):
-        if not url.startswith("http"):
-            if any(url.startswith(f"data:image/{x}") for x in allowed_subtype):
-                return url
-            return
         try:
-            resp = await retry_request(self.async_client.get, url, timeout=60)
-        except Exception as e:
-            logger.exception(e)
-            return None
-        data = resp.content
-        if len(data) > max_size:
-            return None
-        return data_url(resp.content, allowed_subtype)
+            if url.startswith("data:"):
+                _, subtype, size = ...
+                if subtype in allowed_subtype and size <= max_size:
+                    return url
+            else:
+                if url.startswith(("https://", "http://")):
+                    resp = await retry_request(self.async_client.get, url, timeout=60)
+                    data = resp.content
+                elif url.startswith("file://"):
+                    file = Path(url[7:])
+                    if not file.exists() or not file.is_file():
+                        return
+                    data = file.read_bytes()
+                if len(data) > max_size:
+                    return
+                return data_url(data, allowed_subtype)
+        except Exception:
+            logger.exception("download_url failed")
 
 
 class HybridOpenAIAPI(OpenAIAPI):
@@ -90,8 +97,8 @@ class HybridOpenAIAPI(OpenAIAPI):
             payload["messages"].append({"role": "user", "content": content})
             resp = await self.vision.call_api(payload, usage_counter)
             return resp["content"].strip()
-        except Exception as e:
-            logger.exception(e)
+        except Exception:
+            logger.exception("call_vision failed")
 
 
 def pretty_payload(payload: Payload):

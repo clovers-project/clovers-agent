@@ -5,7 +5,7 @@ from clovers.logger import logger
 from clovers_agent import CloversAgent, Turn, Event, AgentTools
 
 from ..base import TOOLS
-from .utils import f_list, f_log, get_tool_source
+from .utils import f_log, list_tool_failures, get_tool_source
 from .constants import DEBUG_UTILS, KEY_DEBUG_TARGET, DEBUG_PROMPT
 
 from typing import cast
@@ -19,8 +19,8 @@ async def _(agent: CloversAgent, session: Turn, event: Event):
     if module_name := agent.extra.get(KEY_DEBUG_TARGET):
         sections.append(f"当前 Debug 目标: {module_name}")
     else:
-        sections.append("当前未指定 Debug 目标，请向用户获取。")
-    if listing := f_list(agent):
+        sections.append("当前未指定 Debug 目标，请在第一次调用 `reload_module` 时传入 `module_name`")
+    if listing := list_tool_failures(agent):
         sections.append(listing)
     sections.append(DEBUG_PROMPT)
     return "\n\n".join(sections)
@@ -32,7 +32,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event):
     category=DEBUG_UTILS,
 )
 async def _(agent: CloversAgent, session: Turn, event: Event):
-    return f_list(agent) or "暂无工具调用失败记录。"
+    return list_tool_failures(agent) or "暂无工具调用失败记录。"
 
 
 @TOOLS.register(
@@ -54,7 +54,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, tool_name: str) ->
 async def _(agent: CloversAgent, session: Turn, event: Event, failure_id: int) -> str:
     log = f_log(agent)
     if log is None:
-        listing = f_list(agent)
+        listing = list_tool_failures(agent)
         if not listing:
             return "暂无工具调用失败记录。"
         else:
@@ -102,7 +102,9 @@ async def _(agent: CloversAgent, session: Turn, event: Event, module_name: str |
     tools = cast(AgentTools, getattr(sys.modules[target], "TOOLS"))
     agent.detach(tools)
     prefix = f"{target}."
-    deletion = [(name, sys.modules.pop(name)) for name in sys.modules if name == target or name.startswith(prefix)]
+    modules = [name for name in sys.modules if name == target or name.startswith(prefix)]
+    logger.debug("reload_module: 待重载模块: %s", modules)
+    deletion = [(name, sys.modules.pop(name)) for name in modules]
     try:
         tools = cast(AgentTools, getattr(importlib.import_module(target), "TOOLS"))
         info = f"已重新加载模块 {target}"

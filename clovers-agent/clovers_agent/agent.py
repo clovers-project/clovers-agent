@@ -135,18 +135,18 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         try:
             self.merge(tools)
         except Exception as e:
-            logger.error(f'[{self.name}][LOAD TOOLS] "{package}" load failed: {e}')
+            logger.error('[%s][LOAD TOOLS] "%s" load failed: %s', self.name, package, e)
             return
-        logger.info(f'[{self.name}][LOAD TOOLS] "{package}" loaded')
+        logger.info('[%s][LOAD TOOLS] "%s" loaded', self.name, package)
 
     def daily_tasks(self):
         timestamp = time.time()
         sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
         for sessions_id in sessions_ids:
             del self.sessions[sessions_id]
-        logger.info(f"[{self.name}][SESSIONS CLEAR]")
+        logger.info("[%s][SESSIONS CLEAR]", self.name)
         usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
-        logger.info(f"[{self.name}][USAGE TODAY] {usage}")
+        logger.info("[%s][USAGE TODAY] %s", self.name, usage)
         self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
         self.usage_counter.clear()
 
@@ -159,11 +159,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         try:
             resp = await s.call_api()
             summary = resp["content"].strip()
-            logger.info(f"[{self.name}][SUMMARY]")
+            logger.info("[%s][SUMMARY]", self.name)
             logger.debug(summary)
             return summary
         except Exception as e:
-            logger.warning(f"[{self.name}][SUMMARY] {e}")
+            logger.warning("[%s][SUMMARY] failed: %s", self.name, e)
             return
 
     @staticmethod
@@ -188,25 +188,28 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         name = call_info["function"]["name"]
         tc_id = call_info["id"]
         raw_args = call_info["function"]["arguments"]
+        logger.info("[%s][CALL][%s]", self.name, name)
+        logger.debug("[%s][CALL][%s][IN] %s", self.name, name, raw_args)
         if name not in self.invoker:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: not found"}
         try:
             args = json.loads(raw_args)
         except json.JSONDecodeError as e:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}`: bad JSON args"}
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: bad JSON args: {e}"}
         try:
             invoker = self.invoker[name](self, session, event, **args)
         except TypeError as e:
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name}: invalid args: {e}"}
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: invalid args: {e}"}
         try:
-            return {"role": "tool", "tool_call_id": tc_id, "content": await invoker}
+            content = await invoker
+            logger.debug("[%s][CALL][%s][OUT] %s", self.name, name, content)
         except SessionComplete:
             raise
         except Exception as e:
-            logger.exception(e)
-            if self.tool_failures is not None:
-                self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
-            return {"role": "tool", "tool_call_id": tc_id, "content": f"{name} failed"}
+            logger.exception("[%s][CALL][%s][%s] failed", self.name, name, tc_id)
+            self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}` failed"}
+        return {"role": "tool", "tool_call_id": tc_id, "content": content}
 
     async def call_turn(self, session: Turn, event: Event):
         try:
@@ -226,7 +229,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     return
             raise TimeoutError(f"Maximum tool call chain length exceeded")
         except Exception as e:
-            logger.exception(e)
+            logger.exception("[%s][CALL TURN] session %s failed", self.name, session.session_id)
             file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
             save_json(self.session_dir / session.session_id / file, session.payload)
             session.inactivate()
@@ -264,10 +267,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         try:
             message = await s.call_api()
             content = message["content"].strip()
-            logger.info(f"[{self.name}][CHIME IN]")
+            logger.info("[%s][CHIME IN]", self.name)
             return content
         except Exception as e:
-            logger.warning(f"[{self.name}][CHIME IN] {e}")
+            logger.warning("[%s][CHIME IN] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
 
     async def handle_wait_reply(self, session: Session, event: Event, content: str):
         if session.cursor is None:
@@ -287,10 +290,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 reply = None
             else:
                 reply = (message["content"] or "").strip()
-            logger.info(f"[{self.name}][WAIT REPLY]")
+            logger.info("[%s][WAIT REPLY]", self.name)
             return reply
         except Exception as e:
-            logger.warning(f"[{self.name}][WAIT REPLY] {e}")
+            logger.warning("[%s][WAIT REPLY] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
 
     async def handle_chat(self, session: Session, event: Event):
         timestamp = time.time()
@@ -360,17 +363,17 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 intro = await self.router(turn_input, session, event)
                 session.api
                 session.payload
-                logger.info(f"[{self.name}][ROUTER] {intro}")
+                logger.info("[%s][ROUTER] %s", self.name, intro)
             except Exception as e:
                 intro = await on_chat(self, session, event)
-                logger.warning(f"[{self.name}][ROUTER] {intro} {e}")
+                logger.warning("[%s][ROUTER] session %s failed: %s: %s", self.name, session.session_id, type(e).__name__, e)
             session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
             try:
                 if intro_prompts := await self.activate_category(intro, session, event):
                     session.unit_prompts.extend(intro_prompts)
             except Exception as e:
-                logger.warning(f"[{self.name}][INTRO HOOK] {intro} {e}")
+                logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             current_input = session.current_input.copy()
             async for reply in self.call_turn(session, event):
@@ -406,7 +409,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         deep_add(self.usage_counter, usage_counter)
         usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
         usage_counter.clear()
-        logger.info(f"[{self.name}][USAGE] {usage}")
+        logger.info("[%s][USAGE] %s", self.name, usage)
         save_json(self.usage_file, self.usage_counter)
 
     def send(self, text: str, event: Event):

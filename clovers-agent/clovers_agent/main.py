@@ -49,17 +49,17 @@ def check(e: Event) -> bool: ...
 # clovers 设置
 if CHECK.whitelist:
     whitelist = set(CHECK.whitelist)
-    logger.info(f"[{AGENT.name}] 检查规则设置为白名单模式：{whitelist}")
+    logger.info("[%s] 检查规则设置为白名单模式: %s", AGENT.name, whitelist)
     check = lambda e: e.group_id is not None and e.group_id in whitelist
 elif CHECK.blacklist:
     blacklist = set(CHECK.blacklist)
-    logger.info(f"[{AGENT.name}] 检查规则设置为黑名单模式：{blacklist}")
+    logger.info("[%s] 检查规则设置为黑名单模式: %s", AGENT.name, blacklist)
     check = lambda e: e.group_id is not None and e.group_id not in blacklist
 elif CHECK.console_mode:
-    logger.info(f"[{AGENT.name}] 启动控制台模式")
+    logger.info("[%s] 启动控制台模式", AGENT.name)
     check = lambda e: True
 else:
-    logger.info(f"[{AGENT.name}] 已关闭")
+    logger.info("[%s] 已关闭", AGENT.name)
     check = lambda e: False
 
 PLUGIN.handle(None, ["user_id", "group_id", "nickname", "to_me", "image_list", "at"], rule=check, priority=2, block=False)(AGENT.chat)
