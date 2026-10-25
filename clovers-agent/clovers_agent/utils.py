@@ -1,8 +1,10 @@
+import os
 import re
 import json
 import base64
 import contextlib
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import httpx
 import chardet
@@ -21,7 +23,7 @@ def is_base64(s: str) -> bool:
     return bool(len(s) % 4 == 0 and B64_PATTERN.match(s))
 
 
-def data_url(data: bytes, allowed_subtype: tuple[str, ...]) -> str | None:
+def to_b64url(data: bytes, allowed_subtype: tuple[str, ...]) -> str | None:
     mime = puremagic.from_string(data, mime=True).split("/", 2)
     if len(mime) != 2:
         return
@@ -135,6 +137,19 @@ def parse_b64uri(uri: str) -> tuple[str, str, int] | None:
 
     # 4 base64 chars -> 3 bytes; each '=' removes one byte.
     return mime_type, mime_subtype, (n * 3 >> 2) - pad
+
+
+def read_file_url(url: str) -> bytes | None:
+    parsed = urlparse(url)
+    if parsed.netloc not in ("", "localhost"):
+        return
+    path = unquote(parsed.path)
+    if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+        path = path[1:]
+    file = Path(path)
+    if not file.is_file():
+        return
+    return file.read_bytes()
 
 
 def deep_add(total: dict, detail: dict):

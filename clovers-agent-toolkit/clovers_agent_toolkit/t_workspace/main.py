@@ -3,7 +3,7 @@ from uuid import uuid4
 from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.api import ALLOWED_IMAGE_SUBTYPES
 from clovers_agent.session import Session
-from clovers_agent.utils import decode_bytes, data_url
+from clovers_agent.utils import decode_bytes, to_b64url
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
@@ -87,7 +87,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, path: str):
         file = WORKSPACE_PATH / session.session_id / format_path(path)
         if not file.exists() or not file.is_file():
             return f'File not found: "{path}"'
-        b64url = data_url(file.read_bytes(), ALLOWED_IMAGE_SUBTYPES)
+        b64url = to_b64url(file.read_bytes(), ALLOWED_IMAGE_SUBTYPES)
         if not b64url:
             return f'Not a recognized image format: "{path}"'
     session.input_image(b64url)
