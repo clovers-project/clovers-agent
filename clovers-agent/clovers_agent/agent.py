@@ -12,7 +12,7 @@ from clovers.core import ModuleLoader
 from clovers.logger import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
-from .core import invoker_wrapper, as_invoker, AgentTools, AgentSkills, Event
+from .core import cast_invoker, AgentTools, AgentSkills, Event
 from .session import iter_recoder, Session, Turn, SessionComplete
 from .utils import deep_add, read_file, load_json, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
@@ -78,8 +78,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
         self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(skill_menu)
-        self.invoker[EXECUTE_SCRIPT] = invoker_wrapper(EXECUTE_SCRIPT, execute_script)
-        self.invoker[READ_REFERENCE] = invoker_wrapper(READ_REFERENCE, read_reference)
+        self.invoker[EXECUTE_SCRIPT] = execute_script
+        self.invoker[READ_REFERENCE] = read_reference
         self.category_decorator(READ_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(read_image_by_id)
         self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(inject_prompt)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
@@ -182,7 +182,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         hooks = self.category_hooks.get(name)
         if not hooks:
             return
-        return [coro if isinstance((coro := hook(self, session, event)), str) else await coro for hook in hooks]
+        return await asyncio.gather(*(hook(self, session, event) for hook in hooks))
 
     async def invoke_tool(self, call_info: ToolCallInfo, session: Turn, event: Event) -> ToolMessage:
         name = call_info["function"]["name"]
@@ -431,13 +431,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.update_usage(session.usage_counter)
 
 
-@as_invoker
+@cast_invoker
 async def on_chat(agent: CloversAgent, session: Turn, event: Event):
     session.create_payload(agent.api(ON_CHAT), agent.chat_prompt)
     return ON_CHAT
 
 
-@as_invoker
+@cast_invoker
 async def skill_menu(agent: CloversAgent, session: Turn, event: Event, category: str):
     if prompts := await agent.activate_category(category, session, event):
         prompt = "\n".join(x for x in prompts if x)
@@ -488,7 +488,7 @@ async def skill_menu(agent: CloversAgent, session: Turn, event: Event, category:
     return prompt or f"Skills for '{category}' have been loaded."
 
 
-@as_invoker
+@cast_invoker
 async def read_image_by_id(agent: CloversAgent, session: Turn, event: Event, image_id: int):
     url = agent.current_session(session.session_id).image_url(image_id)
     if not url:
@@ -497,7 +497,7 @@ async def read_image_by_id(agent: CloversAgent, session: Turn, event: Event, ima
     return "OK"
 
 
-@as_invoker
+@cast_invoker
 async def inject_prompt(agent: CloversAgent, session: Turn, event: Event, prompt: str):
     agent.current_session(session.session_id).outbox.append(prompt)
     return "OK"
@@ -529,7 +529,7 @@ async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
     return "".join(buffer)
 
 
-@as_invoker
+@cast_invoker
 async def execute_script(
     agent: CloversAgent,
     session: Turn,
@@ -578,7 +578,7 @@ async def execute_script(
         return f"ERROR: Unexpected error – {e}"
 
 
-@as_invoker
+@cast_invoker
 async def read_reference(agent: CloversAgent, session: Turn, event: Event, path: str):
     file = Path(agent.references_map[path.split("/", 1)[0]][path])
     if not file.exists():

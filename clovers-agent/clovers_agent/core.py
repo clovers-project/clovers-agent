@@ -7,9 +7,8 @@ from functools import wraps
 from clovers.logger import logger
 from collections import Counter
 
-from typing import TYPE_CHECKING, overload, Concatenate, Protocol
-from collections.abc import Iterable, Callable
-from clovers.base import Coro
+from typing import TYPE_CHECKING, overload, Protocol
+from collections.abc import Iterable
 from clovers_client import Event as BaseEvent
 from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
@@ -18,8 +17,11 @@ if TYPE_CHECKING:
     from .session import Turn
     from .agent import CloversAgent
 
-type Invoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent, Turn, Event, P], ReturnT]
-type WrappedInvoker[**P] = Invoker[P, Coro[str]]
+
+class SyncInvoker[**P](Protocol):
+    def __call__(self, agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
+class Invoker[**P](Protocol):
+    async def __call__(self, agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
 
 
 type Parameters[V: JSONSchemaType] = dict[str, V]
@@ -29,7 +31,7 @@ type CategoryK = tuple[str, None]
 type SingleK = tuple[str, str]
 
 
-def as_invoker[F: Invoker](func: F) -> F:
+def cast_invoker[F: Invoker](func: F) -> F:
     return func
 
 
@@ -47,13 +49,13 @@ class AgentTools:
         self,
     ) -> None:
         self.manifest: dict[str, FunctionToolInfo] = {}
-        self.invoker: dict[str, WrappedInvoker] = {}
+        self.invoker: dict[str, Invoker] = {}
         self.intro_manifest: dict[str, FunctionToolInfo] = {}
-        self.intro_invoker: dict[str, WrappedInvoker] = {}
+        self.intro_invoker: dict[str, Invoker] = {}
         # 工具组
         self.category_tools_map: dict[str, list[str]] = {}
         self.category_desc_map: dict[str, str] = {}
-        self.category_hooks: dict[str, Counter[WrappedInvoker]] = {}
+        self.category_hooks: dict[str, Counter[Invoker]] = {}
         # inner
         self._merged: set[AgentTools] = set()
 
@@ -120,7 +122,7 @@ class AgentTools:
                 raise ValueError(f"Intro {name} already exists.")
 
             self.intro_manifest[name] = info
-            self.intro_invoker[name] = invoker_wrapper(name, func)
+            self.intro_invoker[name] = func
             return func
 
         return decorator
@@ -151,7 +153,7 @@ class AgentTools:
                     self.category_tools_map[c] = []
                 self.category_tools_map[c].append(name)
             self.manifest[name] = info
-            self.invoker[name] = invoker_wrapper(name, func)
+            self.invoker[name] = func
             return func
 
         return decorator
@@ -365,7 +367,6 @@ class AgentSkills(AgentTools):
         """
 
         name, desc, parameters, required, content = skill
-
         if f := md_wrapper(content, func, None if category else name):
             self.register(name, desc, parameters, category, required)(f)
             return category, name
@@ -450,28 +451,26 @@ class AgentSkills(AgentTools):
             self.load_skill(path)
 
 
-def invoker_wrapper[**P](name: str, func: Invoker[P, ...]) -> WrappedInvoker[P]:
-    @wraps(func)
-    async def wrapper(agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str:
-        return coro if isinstance(coro := func(agent, session, event, *args, **kwargs), str) else await coro
-
-    return wrapper
-
-
 def md_wrapper(content: str | None = None, func: Invoker | None = None, intro: str | None = None) -> Invoker | None:
     if not content:
         return func
     if func:
         return wraps(func)(lambda agent, session, event, **kwargs: func(agent, session, event, content=content, **kwargs))
     if not intro:
-        return lambda *_: content
 
-    def f(agent: CloversAgent, session: Turn, event: Event):
-        session.create_payload(agent.api(intro), agent.style_prompt)
-        session.unit_prompts.append(content)
-        return intro
+        async def tool_invoker(agent: CloversAgent, sesson: Turn, event: Event):
+            return content
 
-    return f
+        invoker = tool_invoker
+    else:
+
+        async def intro_invoker(agent: CloversAgent, session: Turn, event: Event):
+            session.create_payload(agent.api(intro), agent.style_prompt)
+            session.unit_prompts.append(content)
+            return intro
+
+        invoker = intro_invoker
+    return invoker
 
 
 def load_module_from_path(module_name: str, file: Path):

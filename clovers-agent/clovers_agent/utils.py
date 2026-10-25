@@ -11,10 +11,10 @@ import chardet
 import puremagic
 from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_random_exponential
 
-from collections.abc import Callable
-from clovers.base import Coro
+from collections.abc import Callable, Coroutine
+from typing import Any
 
-type AsyncFunction[**P, T] = Callable[P, Coro[T]]
+type AsyncFunction[**P, T] = Callable[P, Coroutine[Any, Any, T]]
 
 B64_PATTERN = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
 
