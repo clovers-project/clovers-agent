@@ -109,7 +109,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 
     def sync_menu(self):
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
-        self._category_schema["enum"] = list(self.category_desc_map.keys())
+        self._category_schema["enum"] = list(self.category_desc_map)
 
     def recorder_file(self, session_id: str):
         return self.session_dir / session_id / "recorder.jsonl"

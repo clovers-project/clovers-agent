@@ -21,7 +21,7 @@ type Invoker[**P, ReturnT: str | Coro[str]] = Callable[Concatenate[CloversAgent,
 type WrappedInvoker[**P] = Invoker[P, Coro[str]]
 
 
-type Parameters[K: str, V: JSONSchemaType] = dict[K, V]
+type Parameters[V: JSONSchemaType] = dict[str, V]
 type SkillMD = tuple[str, str, Parameters | None, list[str] | None, str]
 type IntroK = tuple[None, str]
 type CategoryK = tuple[str, None]
@@ -64,7 +64,7 @@ class AgentTools:
         Returns:
             tuple[FunctionToolInfo, ...]: 工具列表。
         """
-        if category not in self.category_tools_map.keys():
+        if category not in self.category_tools_map:
             return EMPTY_ITER
         namelist = self.category_tools_map[category]
         return tuple(self.manifest[name] for name in namelist)
@@ -182,7 +182,7 @@ class AgentTools:
             info["function"]["parameters"] = {
                 "type": "object",
                 "properties": parameters,
-                "required": required if required is not None else list(parameters.keys()),
+                "required": required if required is not None else list(parameters),
             }
         if category:
             return self.category_decorator(info, category)
@@ -220,7 +220,7 @@ class AgentTools:
         # 实例可以为非自己创建的 Category 添加 Hook
         # 但是自己创建的 Category 必须要有 Hook 或者 Tools
         # 这里验证是修复而非报错
-        for category in list(self.category_desc_map.keys()):
+        for category in tuple(self.category_desc_map):
             if category in self.category_tools_map and not self.category_tools_map[category]:
                 del self.category_tools_map[category]
             if category in self.category_hooks:
@@ -233,8 +233,8 @@ class AgentTools:
                     del self.category_hooks[category]
             if category not in self.category_tools_map and category not in self.category_hooks:
                 del self.category_desc_map[category]
-        manifest_keys = set(self.manifest.keys())
-        if any(set(namelist).difference(manifest_keys) for namelist in self.category_tools_map.values()):
+        manifest_keys = set(self.manifest)
+        if any(not manifest_keys.issuperset(namelist) for namelist in self.category_tools_map.values()):
             raise ValueError("Manifest mismatch")
 
     def merge(self, others: "AgentTools"):
@@ -297,7 +297,7 @@ class AgentTools:
             if not category in self.category_hooks:
                 raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
             self_hooks = self.category_hooks[category]
-            if set(other_hooks.keys()).difference(self_hooks.keys()):
+            if set(other_hooks).difference(self_hooks):
                 raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
         for category in others.category_desc_map:
             if not category in self.category_desc_map:
@@ -322,7 +322,7 @@ class AgentTools:
                 self_hooks.clear()
                 self_hooks.update(hooks)
         # others 注册的类别可能被其他工具添加新工具，所以当前还有工具的类别不丢失 Desc
-        for category in list(self.category_desc_map.keys()):
+        for category in tuple(self.category_desc_map):
             if category in self.category_tools_map:
                 continue
             if category in self.category_hooks:
