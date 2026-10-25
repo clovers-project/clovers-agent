@@ -19,7 +19,7 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
 
 @TOOLS.register(
     "web_search",
-    "搜索网页",
+    "",
     {
         "query": {
             "type": "string",
@@ -125,13 +125,15 @@ async def _(
         if idx > 3 and item["rerank_score"] < avg_score:
             break
         title = item.get("title") or "无标题"
-        link = item.get("url") or "#"
         site = item.get("site_name") or "未知来源"
         date = item.get("date")
         summary = (item.get("summary") or item.get("snippet") or "无").strip()
-        meta = f"来源: {site}" + (f" | 发布: {date}" if date else "")
-        md_output.append(f"{idx}. **[{title}]({link})**\n   {meta}\n   摘要: {summary}\n")
-    return "\n".join(md_output)
+        if date:
+            meta = f"来源: {site}  | 发布: {date}"
+        else:
+            meta = f"来源: {site}"
+        md_output.append(f"### {title}\n{meta}\n{summary}")
+    return "\n---\n".join(md_output)
 
 
 @TOOLS.register(
