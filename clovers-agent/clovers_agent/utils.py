@@ -36,7 +36,7 @@ _B64_DELETE = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/
 _CHUNK = 1 << 16  # 64 KiB: bounds temporary allocations for huge payloads
 
 
-def parse_b64_data_uri(uri: str) -> tuple[str, str, int] | None:
+def parse_b64uri(uri: str) -> tuple[str, str, int] | None:
     """Parse ``data:<type>/<subtype>[;param...];base64,<payload>``.
 
     Returns ``(type, subtype, decoded_byte_length)``, or ``None`` if *uri* is

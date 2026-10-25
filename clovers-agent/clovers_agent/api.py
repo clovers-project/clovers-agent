@@ -43,8 +43,8 @@ class OpenAIAPI:
         max_size: int = 1024 * 1024 * 10,
     ):
         try:
-            if p := parse_b64uri(url):
-                _, subtype, size = p
+            if url_info := parse_b64uri(url):
+                _, subtype, size = url_info
                 if subtype in allowed_subtype and size <= max_size:
                     return url
             else:
