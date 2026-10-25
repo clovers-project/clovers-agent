@@ -61,8 +61,6 @@ async def on_task(agent: CloversAgent, session: Turn, event: Event):
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
     await enter_workspace(agent, session)
-    tools = session.payload["tools"]
-    session.payload["tools"] = [x for x in tools if x["function"]["name"] != "subagent"]
     return ""
 
 
@@ -169,6 +167,8 @@ async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
     s.unit_prompts.append(await enter_workspace(agent, s))
+    tools = s.payload["tools"]
+    s.payload["tools"] = [x for x in tools if x["function"]["name"] != "subagent"]
     s.input_text(prompt)
     batch.submit(s, event)
     return "OK"
