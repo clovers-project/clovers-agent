@@ -19,18 +19,20 @@ DOCKER_IMAGE = CONFIG.docker_image
 MAX_SUBAGENT_COUNT = CONFIG.max_subagent_count
 MAX_DOWNLOAD_RETURN_SIZE = CONFIG.max_download_return_size
 SUCCESS_TOOLIST = ("execute_command", "subagent")
-FALLBACK_TOOLIST = ("download_file", "ls", "read_file", "write_file")
+FALLBACK_TOOLIST = ("fetch_url", "ls", "read_file", "write_file")
 
 
 async def enter_workspace(agent: CloversAgent, session: Turn):
     prompts = ["# Workspace initialized"]
     if CONFIG.use_shell:
         try:
+            from .docker import Shell
+
             if "shell" in session.extra:
                 shell = session.extra["shell"]
             else:
-                from .docker import Shell
-
+                shell = None
+            if not isinstance(shell, Shell):
                 shell = Shell(session.session_id, WORKSPACE_PATH, DOCKER_IMAGE)
                 session.extra["shell"] = shell
             await shell.activate()
@@ -173,13 +175,13 @@ async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
 
 
 @TOOLS.register(
-    "download_file",
-    "Fetch a URL with an HTTP GET or POST request. Set file_path to save the response to the workspace; otherwise the response body is returned as the tool output.",
+    "fetch_url",
+    "Fetch a URL using an HTTP GET or POST request. Set file_path to save the response to the workspace; otherwise the response body is returned as the tool output.",
     {
-        "method": {"type": "string", "description": "HTTP method: get to fetch a resource, post to submit data.", "enum": ["get", "post"]},
-        "url": {"type": "string", "description": "Full URL including scheme (http:// or https://)."},
+        "method": {"type": "string", "description": "HTTP method: GET to fetch a resource, POST to submit data.", "enum": ["GET", "POST"]},
+        "url": {"type": "string", "description": "Absolute HTTP or HTTPS URL, e.g. https://example.com/path."},
         "headers": {"type": "object", "description": 'Custom request headers, e.g. {"Authorization": "Bearer xxx"}. Usually omitted.'},
-        "data": {"type": "object", "description": "Request payload: query parameters for get, JSON body for post."},
+        "data": {"type": "object", "description": "Request data: query parameters for get, JSON body for post."},
         "file_path": {"type": "string", "description": 'Path to save the response to, e.g. "logo.png".'},
     },
     HIDDEN_CATEGORY,
@@ -195,7 +197,7 @@ async def _(
     data: dict | None = None,
     file_path: str | None = None,
 ):
-    if method.lower() == "post":
+    if method.upper() == "POST":
         resp = await retry_request(agent.async_client.post, url, json=data, headers=headers)
     else:
         resp = await retry_request(agent.async_client.get, url, params=data, headers=headers)
