@@ -44,19 +44,19 @@ class OpenAIAPI:
         try:
             if url_info := parse_b64uri(url):
                 _, subtype, size = url_info
-                if subtype in allowed_subtype and size <= max_size:
-                    return url
+                if subtype not in allowed_subtype or size > max_size:
+                    return
+                return url
+            if url.startswith(("https://", "http://")):
+                resp = await retry_request(self.async_client.get, url, timeout=60)
+                data = resp.content
+            elif url.startswith("file://"):
+                data = read_file_url(url)
             else:
-                if url.startswith(("https://", "http://")):
-                    resp = await retry_request(self.async_client.get, url, timeout=60)
-                    data = resp.content
-                elif url.startswith("file://"):
-                    data = read_file_url(url)
-                else:
-                    return
-                if not data or len(data) > max_size:
-                    return
-                return to_b64url(data, allowed_subtype)
+                return
+            if not data or len(data) > max_size:
+                return
+            return to_b64url(data, allowed_subtype)
         except Exception:
             logger.exception("download_url failed")
 
