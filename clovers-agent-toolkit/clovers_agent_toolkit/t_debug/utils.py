@@ -9,8 +9,12 @@ type FailureRecord = tuple[int, str, ToolCallError]
 MAX_FAILURES = 10
 
 
-def f_log(agent: CloversAgent) -> deque[FailureRecord] | None:
-    return agent.extra.get(KEY_FAILURE_LOG)
+def f_log(agent: CloversAgent) -> deque[FailureRecord]:
+    if KEY_FAILURE_LOG in agent.extra:
+        log = agent.extra[KEY_FAILURE_LOG]
+    else:
+        log = agent.extra[KEY_FAILURE_LOG] = deque(maxlen=MAX_FAILURES)
+    return log
 
 
 def f_summarize(failure: ToolCallError) -> str:
@@ -20,16 +24,16 @@ def f_summarize(failure: ToolCallError) -> str:
 
 
 def list_tool_failures(agent: CloversAgent):
-    log = f_log(agent) or deque(maxlen=MAX_FAILURES)
+    log = f_log(agent)
     next_id = log[-1][0] + 1 if log else 1
-    for i, failure in enumerate(agent.tool_failures, next_id):
-        log.append((i, f_summarize(failure), failure))
+    log.extend((i, f_summarize(failure), failure) for i, failure in enumerate(agent.tool_failures, next_id))
+    print(log)
+    print(agent.tool_failures)
     agent.tool_failures.clear()
-    if log:
+    if not log:
         return
-    agent.extra[KEY_FAILURE_LOG] = log
-    lines = ["历史报错信息（新旧排序）："]
-    lines.extend(f"{i}. {summary}" for i, summary, _ in log)
+    lines = ["历史报错信息（按发生时间从新到旧排列，编号越大表示越新）"]
+    lines.extend(f"{i}. {summary}" for i, summary, _ in reversed(log))
     return "\n".join(lines)
 
 

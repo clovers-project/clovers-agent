@@ -1,11 +1,12 @@
 from __future__ import annotations
+import time
 import asyncio
 from pathlib import Path
 from itertools import count
 from collections import deque
 from .utils import load_jsonl, save_jsonl
 from .config import SESSION as SESSION_CONFIG
-from .constants import SYSTEM_TAG, READ_IMAGE_BY_ID_INFO
+from .constants import SYSTEM_TAG, SUMMARY_TAG, READ_IMAGE_BY_ID_INFO
 
 from typing import TYPE_CHECKING, cast, override, overload, Never
 from collections.abc import Iterable
@@ -197,6 +198,19 @@ class Session(Turn):
             self.message_history.popleft()
         self.message_history.append((content, timestamp))
 
+    def summary(self, content: str):
+        self.recorder.clear()
+        self.image_recorder.clear()
+        self.router_recorder.clear()
+        self.decouple_count = 0
+        self.recorder_file.unlink(missing_ok=True)
+        summary = SUMMARY_TAG.format(content)
+        if self.message_history:
+            timestamp = self.message_history[0][1]
+        else:
+            timestamp = time.time()
+        self.message_history.appendleft((summary, timestamp))
+
     @property
     def turn_input(self):
         return "\n".join(x for x, _ in self.message_history)
@@ -221,15 +235,6 @@ class Session(Turn):
         self.message_history.clear()
         self.last_active_time = timestamp
         save_jsonl(self.recorder_file, record)
-
-    def clear(self):
-        """清理记录"""
-        self.recorder.clear()
-        self.image_recorder.clear()
-        self.router_recorder.clear()
-        self.message_history.clear()
-        self.decouple_count = 0
-        self.recorder_file.unlink(missing_ok=True)
 
     def image_url(self, image_id: int) -> str | None:
         return next((url for i, url, _ in self.image_recorder if i == image_id), None)

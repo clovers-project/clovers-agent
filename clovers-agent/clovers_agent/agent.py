@@ -303,13 +303,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         nicknames = session.extra["nicknames"]
         nicknames[event.user_id] = event.nickname
         at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
-        message = event.message
         if "extra_context" in event.properties:
-            body = f"@ME {at}{message}\n{"\n".join(event.extra_context)}"
+            message = f"@ME {at}{event.message}\n{"\n".join(event.extra_context)}"
         elif event.to_me:
-            body = f"@ME {at}{message}"
+            message = f"@ME {at}{event.message}"
         else:
-            session.record_history(USER_TAG.format(event.nickname, f"{at}{message}"), timestamp)
+            session.record_history(USER_TAG.format(event.nickname, f"{at}{event.message}"), timestamp)
             if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
                 return
             if session.execute_lock.locked() or session.wait_lock.locked():
@@ -321,7 +320,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 if reply:
                     session.record_turn(turn_input, reply, timestamp)
                 return
-        session.record_history(USER_TAG.format(event.nickname, body), timestamp)
+        session.record_history(USER_TAG.format(event.nickname, message), timestamp)
         if session.execute_lock.locked():
             if session.wait_lock.locked():
                 return
@@ -344,10 +343,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
         session.turn_output = None
         async with session.execute_lock:
+            if session.step(message, timestamp) and (summary := await self.summary_context(session)):
+                session.summary(summary)
             turn_input = session.turn_input
-            if session.step(body, timestamp) and (summary := await self.summary_context(session)):
-                session.clear()
-                session.input_text(summary)
             if (call := event.call("flat_context")) and (flat_context := await call):
                 session.input_text("<quote>\n")
                 for unit in flat_context:

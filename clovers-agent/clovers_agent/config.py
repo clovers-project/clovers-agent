@@ -134,6 +134,8 @@ class ConstantConfig(BaseModel):
     USER_TAG: str = '<user name="{}">\n{}\n</user>'
     # 助手标签
     ASSISTANT_TAG: str = "<assistant>\n{}\n</assistant>"
+    # 总结标签
+    SUMMARY_TAG: str = "<summary>\n{}\n</summary>"
     # 内置路由路由指令
     ON_CHAT: str = "on_chat"
     ON_CHAT_DESC: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"

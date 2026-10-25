@@ -53,7 +53,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, tool_name: str) ->
 )
 async def _(agent: CloversAgent, session: Turn, event: Event, failure_id: int) -> str:
     log = f_log(agent)
-    if log is None:
+    if not log:
         listing = list_tool_failures(agent)
         if not listing:
             return "暂无工具调用失败记录。"
