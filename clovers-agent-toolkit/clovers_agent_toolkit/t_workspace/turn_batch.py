@@ -13,7 +13,7 @@ class TurnBatch:
         self._event = event
         self._idle_event = session.idle_event
         self._m_idx = cursor
-        self._r_idx = len(session.recorder)
+        self._last_rt = session.last_active_time
         s = session.create_turn()
         s.usage_counter = {}
         s.api = session.api
@@ -43,7 +43,7 @@ class TurnBatch:
             await asyncio.gather(*pending)
         self._session.unit_prompts.append("本条信息为子代理唤醒\n")
         self._session.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in self.tasklist))
-        asyncio.create_task(self._agent.on_wakeup(self._session, self._event, self._m_idx, self._r_idx))
+        asyncio.create_task(self._agent.on_wakeup(self._session, self._event, self._m_idx, self._last_rt))
 
     def cancel(self) -> None:
         for t in self.tasklist:

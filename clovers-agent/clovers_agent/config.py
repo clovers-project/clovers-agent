@@ -119,7 +119,7 @@ Never attempt to execute the current task yourself.
 """
     """总结提示 这是总结上下文的用户提示词"""
     chime_in_prompt: str = """\
-请作为群聊一员自然参与聊天，明确当前并非单独与你对话
+请自然地参与当前群聊
 
 - 保持简短、自然，像普通人一样融入讨论
 - 严禁总结前文、主导话题走向、向群友提问或引导他人回应
@@ -205,6 +205,7 @@ class ConstantConfig(BaseModel):
 **说明**：
 - 该工具只能读取 Skill 的 reference/参考资料文件，不能读取普通工作区文件。
 """
+    WAKEUP_TIP: str = "The following is a wakeup message."
 
 
 class CheckConfig(BaseConfig):

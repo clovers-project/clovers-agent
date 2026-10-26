@@ -13,7 +13,7 @@ from clovers.logger import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import cast_invoker, AgentTools, AgentSkills, Event
-from .session import iter_recoder, Turn, Session, SessionComplete
+from .session import iter_recoder, Turn, Session, SessionComplete, WakeupContext
 from .utils import deep_add, read_file, load_json, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
@@ -32,6 +32,7 @@ from .constants import (
     EXECUTE_SCRIPT_MAX_TIMEOUT,
     EXECUTE_SCRIPT_MAX_TAIL_LEN,
     READ_REFERENCE,
+    WAKEUP_TIP,
 )
 
 from typing import override, TypedDict
@@ -251,7 +252,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
         return await self.intro_invoker[intro](self, session, event) or intro
 
-    async def handle_chime_in(self, session: Session, content: str):
+    async def call_chime_in(self, session: Session, content: str):
         s = session.create_turn()
         s.create_payload(self.api("chime_in"), self.chat_prompt)
         s.payload["messages"].extend(session.messages)
@@ -303,8 +304,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 
     async def execute_session(self, session: Session, turn: Turn, event: Event, timestamp: float):
         current_input = turn.current_input.copy()
-        session.pending_prompt = None
         last_reply = None
+        session.pending_prompt = None
+        session.last_active_time = timestamp
         async for reply in self.iter_replies(turn, event):
             last_reply = reply
             if session.pending_prompt:
@@ -323,7 +325,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     self.send(reply, event)
         if reply:
             current_input[-1] = {"type": "text", "text": session.turn_input}
-            session.record_turn(current_input, reply, timestamp)
+            session.record_turn(current_input, reply)
         return last_reply
 
     async def handle_input(self, session: Session, event: Event):
@@ -346,10 +348,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
             async with session.execute_lock, session.aside_lock:
                 turn_input = session.turn_input
-                if reply := await self.handle_chime_in(session, turn_input):
-                    self.send(reply, event)
-                if reply:
-                    session.record_turn(turn_input, reply, timestamp)
+                if chime_in_reply := await self.call_chime_in(session, turn_input):
+                    self.send(chime_in_reply, event)
+                    session.last_active_time = timestamp
+                    session.record_turn(turn_input, chime_in_reply)
                 return
         session.record_history(USER_TAG.format(event.nickname, message), timestamp)
         if session.execute_lock.locked():
@@ -357,7 +359,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
             session.pending_prompt = session.turn_input
             return
-        session.pending_prompt = None
         async with session.execute_lock:
             if session.step(message, timestamp) and (summary := await self.summary_context(session)):
                 session.compact_history(summary)
@@ -391,20 +392,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             await self.execute_session(session, session, event, timestamp)
 
-    async def handle_wakeup(self, turn: Turn, event: Event, m_idx: int, r_idx: int):
-        session = self.current_session(turn.session_id)
-        recorder = session.recorder
-        session.pending_prompt = None
-        async with session.execute_lock:
-            if len(recorder) <= r_idx:
-                turn.payload["messages"].extend(iter_recoder(recorder))
-            else:
-                turn.payload["messages"][m_idx] = recorder[r_idx][0].copy()
-                turn.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
-            timestamp = time.time()
-            turn.input_text(session.turn_input)
-            await self.execute_session(session, turn, event, timestamp)
-
     async def on_input(self, event: Event):
         session = self.current_session(self.session_id(event))
         try:
@@ -414,16 +401,52 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 self.send(reply, event)
         self.update_usage(session.usage_counter)
 
-    async def on_wakeup(self, session: Turn, event: Event, m_idx: int, ridx: int):
+    def submit_turn_for_wakeup(self, turn: Turn, event: Event):
+        session = self.current_session(turn.session_id)
+        if session.wakeup_context is None:
+            if session.cursor is None:
+                raise RuntimeError("Cannot create WakeupContext when the session is inactive")
+            turn = turn.create_turn()
+            turn.usage_counter = {}
+            turn.api = session.api
+            turn.payload = session.payload
+            wakeup_context = session.wakeup_context = WakeupContext(turn)
+            asyncio.create_task(self.run_wakeup(session, event, session.last_active_time))
+        else:
+            wakeup_context = session.wakeup_context
+        turn.usage_counter = wakeup_context.turn.usage_counter
+        wakeup_context.tasks.append(asyncio.create_task(self.resolve_turn(turn, event)))
+
+    async def run_wakeup(self, session: Session, event: Event, action_time: float):
+        if not (wakeup_context := session.wakeup_context):
+            raise RuntimeError("Cannot run wakeup without a WakeupContext")
+        turn = wakeup_context.turn
+        tasks = wakeup_context.tasks
+        seen = set()
+        while True:
+            # 合并多个调用链的唤醒任务，触发一次醒
+            # 当 session.idle_event 重新 clear 时 session 仍保有 wakeup_context
+            await session.idle_event.wait()
+            pending = [t for t in tasks if t not in seen]
+            seen.update(pending)
+            if not pending:
+                break
+            await asyncio.gather(*pending)
+        session.wakeup_context = None
+        turn.unit_prompts.append(WAKEUP_TIP)
+        turn.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in tasks))
         try:
-            await self.handle_wakeup(session, event, m_idx, ridx)
+            async with session.execute_lock:
+                recorder = session.recorder
+                turn.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
+                turn.input_text(session.turn_input)
+                await self.execute_session(session, turn, event, time.time())
         except SessionComplete as e:
             if reply := e.data:
                 self.send(reply, event)
         self.update_usage(session.usage_counter)
 
 
-@cast_invoker
 async def on_chat(agent: CloversAgent, session: Turn, event: Event):
     session.create_payload(agent.api(ON_CHAT), agent.chat_prompt)
     return ON_CHAT

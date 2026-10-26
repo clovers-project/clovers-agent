@@ -16,8 +16,8 @@ from .constants import (
     READ_REFERENCE_DESC,
 )
 
-from typing import TYPE_CHECKING, cast, override, overload, Never
-from collections.abc import Iterable
+from typing import TYPE_CHECKING, cast, override, overload, Never, Any
+from collections.abc import Iterable, Callable, Coroutine
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextSegment, ImageSegment, TextUserMessage
 
@@ -222,8 +222,8 @@ class Session(Turn):
         self.aside_lock = asyncio.Lock()
         self.idle_event = asyncio.Event()
         self.idle_event.set()
-        # Wait Chat
         self.pending_prompt: str | None
+        self.wakeup_context: WakeupContext | None = None
 
     @override
     def activate(self):
@@ -269,7 +269,8 @@ class Session(Turn):
     def turn_input(self):
         return "\n".join(x for x, _ in self.message_history)
 
-    def record_turn(self, turn_input: str | MultimodalContent, turn_output: str, timestamp: float):
+    def record_turn(self, turn_input: str | MultimodalContent, turn_output: str):
+        timestamp = self.last_active_time
         if isinstance(turn_input, list):
             contents: list[str] = []
             for seg in turn_input:
@@ -287,7 +288,6 @@ class Session(Turn):
         self.recorder.append(record)
         self.decouple_count += len(record[0]["content"]) + len(record[1]["content"])
         self.message_history.clear()
-        self.last_active_time = timestamp
         save_jsonl(self.recorder_file, record)
 
     def image_url(self, image_id: int) -> str | None:
@@ -295,6 +295,8 @@ class Session(Turn):
 
     def step(self, message: str, timestamp: float):
         if not self.recorder:
+            return False
+        if self.wakeup_context is not None:
             return False
         if len(self.recorder) > self.memory_size:
             return True
@@ -304,3 +306,9 @@ class Session(Turn):
         if self.decouple_count < self.decouple_length:
             return False
         return self.decoupler.step(message)
+
+
+class WakeupContext:
+    def __init__(self, turn: Turn) -> None:
+        self.turn = turn
+        self.tasks: list[asyncio.Task[str | None]] = []
