@@ -240,8 +240,6 @@ class Config(BaseConfig):
     """词嵌入向量模型缓存路径"""
     call_depth: int = 40
     """最大调用深度"""
-    wait_cooldown: int = 20
-    """等待回复冷却（秒）"""
     chime_in_cooldown: int = 3600
     """主动参与话题冷却（秒）"""
     session: SessionConfig = SessionConfig()

@@ -107,7 +107,7 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_i
         api = agent.api("analyze_security")
         payload = api.build_payload(({"role": "user", "content": user_prompt},), system_prompt)
         payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
-        news = await agent.call_turn(api, payload, session.usage_counter, event)
+        news = await agent.iter_replies(api, payload, session.usage_counter, event)
         news_md.write_text(news, encoding="utf-8")
     if asset_type == "stock":
         stock_info = name
@@ -133,7 +133,7 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_i
         user_prompt = "\n\n".join(prompts)
         payload = api.build_payload(({"role": "user", "content": user_prompt},), STOCK_ANALYSIS_PROMPT)
         try:
-            advice = await agent.call_turn(api, payload, session.usage_counter, event)
+            advice = await agent.iter_replies(api, payload, session.usage_counter, event)
         except Exception as e:
             logger.error(f"分析股票时发生错误: {e}")
             return user_prompt

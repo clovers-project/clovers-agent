@@ -22,7 +22,7 @@ class TurnBatch:
 
     def submit(self, session: Turn, event: Event):
         session.usage_counter = self._session.usage_counter
-        self.tasklist.append(asyncio.create_task(self._agent.run_turn(session, event)))
+        self.tasklist.append(asyncio.create_task(self._agent.resolve_turn(session, event)))
 
     def start(self):
         if self.wakeup_task is not None:
@@ -43,7 +43,7 @@ class TurnBatch:
             await asyncio.gather(*pending)
         self._session.unit_prompts.append("本条信息为子代理唤醒")
         self._session.input_text("\n---\n".join(task.result() or "None" for task in self.tasklist))
-        asyncio.create_task(self._agent.wakeup(self._session, self._event, self._m_idx, self._r_idx))
+        asyncio.create_task(self._agent.on_wakeup(self._session, self._event, self._m_idx, self._r_idx))
 
     def cancel(self) -> None:
         for t in self.tasklist:

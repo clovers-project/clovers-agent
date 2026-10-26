@@ -80,11 +80,11 @@ class Turn:
             self.current_input.insert(0, {"type": "text", "text": unit_prompt})
         self.payload["messages"].append({"role": "user", "content": self.current_input})
 
-    def complete(self, message: str | None = None) -> Never:
-        self.inactivate()
+    def complete_session(self, message: str | None = None) -> Never:
+        self.deactivate()
         raise SessionComplete(message)
 
-    def inactivate(self):
+    def deactivate(self):
         # 按注入顺序删除
         if self.unit_prompts:
             self.unit_prompts.clear()
@@ -184,7 +184,7 @@ class Session(Turn):
     def __init__(
         self,
         session_id: str,
-        recorder_file: Path,
+        session_dir: Path,
         sentence_model: SentenceTransformer,
         router_size: int = SESSION_CONFIG.router_size,
         memory_size: int = SESSION_CONFIG.memory_size,
@@ -195,7 +195,7 @@ class Session(Turn):
     ) -> None:
 
         super().__init__(session_id, {}, {})
-        self.recorder_file = recorder_file
+        self.recorder_file = session_dir / "recorder.jsonl"
         # 主题分离
         from .embedding import TopicDecoupler
 
@@ -222,8 +222,8 @@ class Session(Turn):
         self.wait_lock = asyncio.Lock()
         self.idle_event = asyncio.Event()
         self.idle_event.set()
-        self.turn_output: str | None
-        self.outbox: list[str]
+        # Wait Chat
+        self.pending_input: str | None
 
     @override
     def activate(self):
@@ -231,19 +231,13 @@ class Session(Turn):
         self.payload["messages"].extend(self.messages)
         if self.image_recorder:
             self.extend_tools((READ_IMAGE_BY_ID_INFO,))
-        self.outbox = []
         super().activate()
 
     @override
-    def inactivate(self):
+    def deactivate(self):
         self.idle_event.set()
-        super().inactivate()
+        super().deactivate()
         self.outbox = None  # type: ignore
-
-    def flush_outbox(self):
-        if self.outbox:
-            self.payload["messages"].append({"role": "user", "content": "\n".join(self.outbox)})
-            self.outbox.clear()
 
     @property
     def messages(self):

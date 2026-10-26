@@ -62,4 +62,4 @@ else:
     logger.info("[%s] 已关闭", AGENT.name)
     check = lambda e: False
 
-PLUGIN.handle(None, ["user_id", "group_id", "nickname", "to_me", "image_list", "at"], rule=check, priority=2, block=False)(AGENT.chat)
+PLUGIN.handle(None, ["user_id", "group_id", "nickname", "to_me", "image_list", "at"], rule=check, priority=2, block=False)(AGENT.on_input)

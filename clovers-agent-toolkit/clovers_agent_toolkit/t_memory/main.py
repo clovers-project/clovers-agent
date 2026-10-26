@@ -37,7 +37,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event):
         profile_path.unlink()
         return f"# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行使用 '{UPDATE_USER_PROFILE}' 工具进行第一次更新。"
     if user_profile.block_until > time.time():
-        session.complete()
+        session.complete_session()
     notes.append(user_profile.to_markdown())
     if count > STRONG_REMINDER_THRESHOLD:
         notes.append(f"档案在 {count} 次对话前更新，请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
