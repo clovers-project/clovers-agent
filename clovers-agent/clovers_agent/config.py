@@ -239,7 +239,7 @@ class Config(BaseConfig):
     """词嵌入向量模型"""
     sentence_model_cache: str = "./data/CloversAgent/sentence_model_cache"
     """词嵌入向量模型缓存路径"""
-    call_depth: int = 40
+    max_call_depth: int = 40
     """最大调用深度"""
     chime_in_cooldown: int = 3600
     """主动参与话题冷却（秒）"""

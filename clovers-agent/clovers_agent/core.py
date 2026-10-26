@@ -19,9 +19,9 @@ if TYPE_CHECKING:
 
 
 class SyncInvoker[**P](Protocol):
-    def __call__(self, agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
+    def __call__(self, agent: CloversAgent, turn: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
 class Invoker[**P](Protocol):
-    async def __call__(self, agent: CloversAgent, session: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
+    async def __call__(self, agent: CloversAgent, turn: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
 
 
 type Parameters = dict[str, JSONSchemaType]
@@ -455,18 +455,18 @@ def md_wrapper(content: str | None = None, func: Invoker | None = None, intro: s
     if not content:
         return func
     if func:
-        return wraps(func)(lambda agent, session, event, **kwargs: func(agent, session, event, content=content, **kwargs))
+        return wraps(func)(lambda agent, turn, event, **kwargs: func(agent, turn, event, content=content, **kwargs))
     if not intro:
 
-        async def tool_invoker(agent: CloversAgent, sesson: Turn, event: Event):
+        async def tool_invoker(agent: CloversAgent, turn: Turn, event: Event):
             return content
 
         invoker = tool_invoker
     else:
 
-        async def intro_invoker(agent: CloversAgent, session: Turn, event: Event):
-            session.create_payload(agent.api(intro), agent.style_prompt)
-            session.unit_prompts.append(content)
+        async def intro_invoker(agent: CloversAgent, turn: Turn, event: Event):
+            turn.create_payload(agent.api(intro), agent.style_prompt)
+            turn.unit_prompts.append(content)
             return intro
 
         invoker = intro_invoker

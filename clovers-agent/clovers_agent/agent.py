@@ -70,7 +70,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.tool_failures: deque[ToolCallError] = deque(maxlen=5)
         self.extra = {}
         # 聊天配置
-        self.call_depth = CONFIG.call_depth
+        self.max_call_depth = CONFIG.max_call_depth
         self.chime_in_cooldown = CONFIG.chime_in_cooldown
         # 技能初始化
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
@@ -136,24 +136,25 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
 
     def daily_tasks(self):
         timestamp = time.time()
-        sessions_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
-        for sessions_id in sessions_ids:
-            del self.sessions[sessions_id]
+        expired_session_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
+        for session_id in expired_session_ids:
+            self.sessions[session_id].cleanup()
+            del self.sessions[session_id]
         logger.info("[%s][SESSIONS CLEAR]", self.name)
         usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
         logger.info("[%s][USAGE TODAY] %s", self.name, usage)
         self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
         self.usage_counter.clear()
 
-    async def summary_context(self, session: Session):
-        s = session.create_turn()
-        s.create_payload(self.api("summary"), self.base_prompt)
-        s.payload["messages"].extend(session.messages)
-        s.unit_prompts.append(self.summary_prompt)
-        s.activate()
+    async def summarize_context(self, session: Session):
+        turn = session.create_turn()
+        turn.create_payload(self.api("summary"), self.base_prompt)
+        turn.payload["messages"].extend(session.messages)
+        turn.unit_prompts.append(self.summary_prompt)
+        turn.activate()
         try:
-            resp = await s.call_api()
-            summary = resp["content"].strip()
+            message = await turn.call_api()
+            summary = (message["content"] or "").strip()
             logger.info("[%s][SUMMARY]", self.name)
             logger.debug(summary)
             return summary
@@ -173,13 +174,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             self.sessions[session_id] = session
         return session
 
-    async def activate_category(self, name: str, session: Turn, event: Event) -> list[str] | None:
+    async def activate_category(self, name: str, turn: Turn, event: Event) -> list[str] | None:
         hooks = self.category_hooks.get(name)
         if not hooks:
             return
-        return await asyncio.gather(*(hook(self, session, event) for hook in hooks))
+        return await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
 
-    async def invoke_tool(self, call_info: ToolCallInfo, session: Turn, event: Event) -> ToolMessage:
+    async def invoke_tool(self, call_info: ToolCallInfo, turn: Turn, event: Event) -> ToolMessage:
         name = call_info["function"]["name"]
         tc_id = call_info["id"]
         raw_args = call_info["function"]["arguments"]
@@ -192,7 +193,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except json.JSONDecodeError as e:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: bad JSON args: {e}"}
         try:
-            invoker = self.invoker[name](self, session, event, **args)
+            invoker = self.invoker[name](self, turn, event, **args)
         except TypeError as e:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: invalid args: {e}"}
         try:
@@ -206,46 +207,46 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}` failed"}
         return {"role": "tool", "tool_call_id": tc_id, "content": content}
 
-    async def iter_replies(self, session: Turn, event: Event):
+    async def iter_replies(self, turn: Turn, event: Event):
         try:
-            session.activate()
-            for _ in range(self.call_depth):
-                message = await session.call_api()
-                session.payload["messages"].append(message)
+            turn.activate()
+            for _ in range(self.max_call_depth):
+                message = await turn.call_api()
+                turn.payload["messages"].append(message)
                 content = (message["content"] or "").strip()
                 if tool_calls := message.get("tool_calls"):
-                    messages = await asyncio.gather(*(self.invoke_tool(x, session, event) for x in tool_calls))
-                    session.payload["messages"].extend(messages)
+                    messages = await asyncio.gather(*(self.invoke_tool(x, turn, event) for x in tool_calls))
+                    turn.payload["messages"].extend(messages)
                     yield content
                     continue
                 else:
-                    session.deactivate()
+                    turn.deactivate()
                     yield content
                     return
             raise TimeoutError(f"Maximum tool call chain length exceeded")
         except Exception as e:
-            logger.exception("[%s][CALL TURN] session %s failed", self.name, session.session_id)
-            file = f"payload_{session.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(session.payload)}.json"
-            save_json(self.session_dir / session.session_id / file, session.payload)
-            session.deactivate()
+            logger.exception("[%s][CALL TURN] session %s failed", self.name, turn.session_id)
+            file = f"payload_{turn.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(turn.payload)}.json"
+            save_json(self.session_dir / turn.session_id / file, turn.payload)
+            turn.deactivate()
 
-    async def resolve_turn(self, session: Turn, event: Event):
+    async def resolve_turn(self, turn: Turn, event: Event):
         last_reply = None
-        async for reply in self.iter_replies(session, event):
+        async for reply in self.iter_replies(turn, event):
             last_reply = reply
         return last_reply
 
-    async def router(self, content: str, session: Session, event: Event):
+    async def route(self, content: str, session: Session, event: Event):
         if len(self.intro_manifest) < 2:
             return await on_chat(self, session, event)
-        s = session.create_turn()
-        s.create_payload(self.api("router"), self.base_prompt)
-        s.unit_prompts.append(self.router_prompt)
-        s.payload["messages"].extend(iter_recoder(session.router_recorder))
-        s.input_text(content)
-        s.payload["tools"] = list(self.intro_manifest.values())
-        s.activate()
-        message = await s.call_api()
+        turn = session.create_turn()
+        turn.create_payload(self.api("router"), self.base_prompt)
+        turn.unit_prompts.append(self.router_prompt)
+        turn.payload["messages"].extend(iter_recoder(session.router_recorder))
+        turn.input_text(content)
+        turn.payload["tools"] = list(self.intro_manifest.values())
+        turn.activate()
+        message = await turn.call_api()
         if "tool_calls" not in message:
             raise ValueError(f"message must contain tool_calls, but got {message}")
         intro = message["tool_calls"][0]["function"]["name"]
@@ -253,42 +254,42 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         return await self.intro_invoker[intro](self, session, event) or intro
 
     async def call_chime_in(self, session: Session, content: str):
-        s = session.create_turn()
-        s.create_payload(self.api("chime_in"), self.chat_prompt)
-        s.payload["messages"].extend(session.messages)
-        s.unit_prompts.append(self.chime_in_prompt)
-        s.input_text(content)
-        s.activate()
+        turn = session.create_turn()
+        turn.create_payload(self.api("chime_in"), self.chat_prompt)
+        turn.payload["messages"].extend(session.messages)
+        turn.unit_prompts.append(self.chime_in_prompt)
+        turn.input_text(content)
+        turn.activate()
         try:
-            message = await s.call_api()
-            content = message["content"].strip()
+            message = await turn.call_api()
+            reply = (message["content"] or "").strip()
             logger.info("[%s][CHIME IN]", self.name)
-            return content
+            return reply
         except Exception as e:
-            logger.warning("[%s][CHIME IN] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
+            logger.warning("[%s][CHIME IN] session %s failed: %s: %s", self.name, turn.session_id, type(e).__name__, e)
 
     async def call_aside(self, session: Session, event: Event, content: str, current_output: str):
         if session.cursor is None:
             return
-        s = session.create_turn()
-        s.create_payload(session.api)
+        turn = session.create_turn()
+        turn.create_payload(session.api)
         if session.cursor > 0:
-            s.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
-        s.payload["tools"] = [INJECT_PROMPT_INFO]
-        s.input_text(content)
-        s.unit_prompts.append(self.aside_prompt.format(current_output))
-        s.activate()
+            turn.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
+        turn.payload["tools"] = [INJECT_PROMPT_INFO]
+        turn.input_text(content)
+        turn.unit_prompts.append(self.aside_prompt.format(current_output))
+        turn.activate()
         try:
-            message = await s.call_api()
+            message = await turn.call_api()
             if tool_calls := message.get("tool_calls"):
-                await self.invoke_tool(tool_calls[0], s, event)
+                await self.invoke_tool(tool_calls[0], turn, event)
                 reply = None
             else:
                 reply = (message["content"] or "").strip()
             logger.info("[%s][ASIDE]", self.name)
             return reply
         except Exception as e:
-            logger.warning("[%s][ASIDE] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
+            logger.warning("[%s][ASIDE] session %s failed: %s: %s", self.name, turn.session_id, type(e).__name__, e)
 
     def update_usage(self, usage_counter: dict):
         if not usage_counter:
@@ -354,11 +355,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             # 合并多个调用链的唤醒任务，触发一次醒
             # 当 session.idle_event 重新 clear 时 session 仍保有 wakeup_context
             await session.idle_event.wait()
-            pending = [t for t in tasks if t not in seen]
-            seen.update(pending)
-            if not pending:
+            unseen_tasks = [t for t in tasks if t not in seen]
+            seen.update(unseen_tasks)
+            if not unseen_tasks:
                 break
-            await asyncio.gather(*pending)
+            await asyncio.gather(*unseen_tasks)
         session.wakeup_context = None
         turn.unit_prompts.append(WAKEUP_TIP)
         turn.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in tasks))
@@ -380,13 +381,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.extra["nicknames"] = {}
         nicknames = session.extra["nicknames"]
         nicknames[event.user_id] = event.nickname
-        at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
+        mention_prefix = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
         if "extra_context" in event.properties:
-            message = f"@ME {at}{event.message}\n{"\n".join(event.extra_context)}"
+            message = f"@ME {mention_prefix}{event.message}\n{"\n".join(event.extra_context)}"
         elif event.to_me:
-            message = f"@ME {at}{event.message}"
+            message = f"@ME {mention_prefix}{event.message}"
         else:
-            session.record_history(USER_TAG.format(event.nickname, f"{at}{event.message}"), timestamp)
+            session.record_history(USER_TAG.format(event.nickname, f"{mention_prefix}{event.message}"), timestamp)
             if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
                 return
             if session.execute_lock.locked() or session.aside_lock.locked():
@@ -405,7 +406,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.pending_prompt = session.turn_input
             return
         async with session.execute_lock:
-            if session.should_summarize(message, timestamp) and (summary := await self.summary_context(session)):
+            if session.should_summarize(message, timestamp) and (summary := await self.summarize_context(session)):
                 session.compact_history(summary)
             turn_input = session.turn_input
             if (call := event.call("flat_context")) and (flat_context := await call):
@@ -416,11 +417,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     if unit["images"]:
                         session.input_image(unit["images"])
                 session.input_text("\n</quote>")
-            image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
-            session.input_image(x for x in image_list if x)
+            images = await asyncio.gather(*(map(self._api.download_url, event.image_list)))
+            session.input_image(image for image in images if image)
             session.input_text(turn_input)
             try:
-                intro = await self.router(turn_input, session, event)
+                intro = await self.route(turn_input, session, event)
                 session.api
                 session.payload
                 logger.info("[%s][ROUTER] %s", self.name, intro)

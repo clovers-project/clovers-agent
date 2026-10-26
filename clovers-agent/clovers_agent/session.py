@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time
 import asyncio
+import contextlib
 from pathlib import Path
 from itertools import count
 from collections import deque
@@ -17,7 +18,7 @@ from .constants import (
 )
 
 from typing import TYPE_CHECKING, cast, override, overload, Never, Any
-from collections.abc import Iterable, Callable, Coroutine
+from collections.abc import Iterable
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextSegment, ImageSegment, TextUserMessage
 
@@ -306,6 +307,13 @@ class Session(Turn):
 
     def image_url(self, image_id: int) -> str | None:
         return next((url for i, url, _ in self.image_recorder if i == image_id), None)
+
+    def cleanup(self):
+        with contextlib.suppress(Exception):
+            if self.wakeup_context:
+                for task in self.wakeup_context.tasks:
+                    task.cancel()
+            self.recorder_file.unlink(missing_ok=True)
 
 
 class WakeupContext:
