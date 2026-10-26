@@ -17,7 +17,7 @@ from .constants import (
     READ_REFERENCE_DESC,
 )
 
-from typing import TYPE_CHECKING, cast, override, overload, Never, Any
+from typing import TYPE_CHECKING, cast, override, overload, Never
 from collections.abc import Iterable
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextSegment, ImageSegment, TextUserMessage
