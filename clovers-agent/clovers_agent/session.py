@@ -6,7 +6,15 @@ from itertools import count
 from collections import deque
 from .utils import load_jsonl, save_jsonl
 from .config import SESSION as SESSION_CONFIG
-from .constants import SYSTEM_TAG, SUMMARY_TAG, READ_IMAGE_BY_ID_INFO
+from .constants import (
+    SYSTEM_TAG,
+    SUMMARY_TAG,
+    READ_IMAGE_BY_ID_INFO,
+    EXECUTE_SCRIPT,
+    EXECUTE_SCRIPT_DESC,
+    READ_REFERENCE,
+    READ_REFERENCE_DESC,
+)
 
 from typing import TYPE_CHECKING, cast, override, overload, Never
 from collections.abc import Iterable
@@ -90,6 +98,19 @@ class Turn:
         self.scripts_enum.clear()
         self.references_enum.clear()
 
+    def create_turn(self):
+        """创建一个子会话"""
+        return Turn(self.session_id, self.usage_counter, self.extra)
+
+    def call_api(self):
+        return self.api.call_api(self.payload, self.usage_counter)
+
+    @property
+    def system_message(self) -> SystemMessage | None:
+        message = self.payload["messages"][0]
+        if message["role"] == "system":
+            return message
+
     def extend_tools(self, extends: Iterable[FunctionToolInfo]):
         payload = self.payload
         if "tools" not in payload:
@@ -98,20 +119,59 @@ class Turn:
         else:
             used = {tool["function"]["name"] for tool in payload["tools"]}
             payload["tools"].extend(x for x in extends if x["function"]["name"] not in used)
-        return payload["tools"]
 
-    def call_api(self):
-        return self.api.call_api(self.payload, self.usage_counter)
+    def upsert_tool(self, info: FunctionToolInfo):
+        payload = self.payload
+        if "tools" not in payload:
+            payload["tools"] = [info]
+            return
+        name = info["function"]["name"]
+        tool = next((x for x in payload["tools"] if x["function"]["name"] == name), None)
+        if tool:
+            tool.update(info)
+        else:
+            payload["tools"].append(info)
 
-    def create_turn(self):
-        """创建一个子会话"""
-        return Turn(self.session_id, self.usage_counter, self.extra)
+    def extend_scripts(self, scripts: Iterable[str]):
+        existing = set(self.scripts_enum)
+        self.scripts_enum.extend(path for path in scripts if path not in existing)
+        self.upsert_tool(
+            {
+                "type": "function",
+                "function": {
+                    "name": EXECUTE_SCRIPT,
+                    "description": EXECUTE_SCRIPT_DESC,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "interpreter": {"type": "string"},
+                            "path": {"type": "string", "enum": self.scripts_enum},
+                            "args": {"type": "array", "items": {"type": "string"}},
+                            "timeout": {"type": "number"},
+                        },
+                        "required": ["path"],
+                    },
+                },
+            }
+        )
 
-    @property
-    def system_message(self) -> SystemMessage | None:
-        message = self.payload["messages"][0]
-        if message["role"] == "system":
-            return message
+    def extend_references(self, references: Iterable[str]):
+        existing = set(self.references_enum)
+        self.references_enum.extend(path for path in references if path not in existing)
+        self.upsert_tool(
+            {
+                "type": "function",
+                "function": {
+                    "name": READ_REFERENCE,
+                    "description": READ_REFERENCE_DESC,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string", "enum": self.references_enum}},
+                        "required": ["path"],
+                    },
+                },
+            }
+        )
 
 
 def iter_recoder(recorder: Iterable[Record]):

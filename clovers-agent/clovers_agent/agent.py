@@ -30,10 +30,8 @@ from .constants import (
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
     EXECUTE_SCRIPT_MAX_TIMEOUT,
-    EXECUTE_SCRIPT_DESC,
     EXECUTE_SCRIPT_MAX_TAIL_LEN,
     READ_REFERENCE,
-    READ_REFERENCE_DESC,
 )
 
 from typing import override, TypedDict
@@ -443,48 +441,11 @@ async def skill_menu(agent: CloversAgent, session: Turn, event: Event, category:
         prompt = "\n".join(x for x in prompts if x)
     else:
         prompt = ""
-    payload_tools = session.extend_tools(agent.select_tools(category))
+    session.extend_tools(agent.select_tools(category))
     if scripts_map := agent.scripts_map.get(category):
-        if not session.scripts_enum:
-            payload_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": EXECUTE_SCRIPT,
-                        "description": EXECUTE_SCRIPT_DESC,
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "interpreter": {"type": "string"},
-                                "path": {"type": "string", "enum": session.scripts_enum},
-                                "args": {"type": "array", "items": {"type": "string"}},
-                                "timeout": {"type": "number"},
-                            },
-                            "required": ["path"],
-                        },
-                    },
-                }
-            )
-        existing = set(session.scripts_enum)
-        session.scripts_enum.extend(path for path in scripts_map if path not in existing)
+        session.extend_scripts(scripts_map.keys())
     if references_map := agent.references_map.get(category):
-        if not session.references_enum:
-            payload_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": READ_REFERENCE,
-                        "description": READ_REFERENCE_DESC,
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"path": {"type": "string", "enum": session.references_enum}},
-                            "required": ["path"],
-                        },
-                    },
-                }
-            )
-        existing = set(session.references_enum)
-        session.references_enum.extend(path for path in references_map if path not in existing)
+        session.extend_references(references_map.keys())
     return prompt or f"Skills for '{category}' have been loaded."
 
 
@@ -558,10 +519,12 @@ async def execute_script(
         return f"ERROR: Permission denied – cannot execute script."
     except Exception as e:
         return f"ERROR: Unexpected error – {e}"
+    assert process.stdout is not None
+    assert process.stderr is not None
     try:
         tasks = (
-            decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
-            decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN),  # type: ignore
+            decode_stream(process.stdout, EXECUTE_SCRIPT_MAX_TAIL_LEN),
+            decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN),
             process.wait(),
         )
         if not isinstance(timeout, int):
