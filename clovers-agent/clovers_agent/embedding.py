@@ -63,49 +63,49 @@ class TopicDecoupler:
             raise ValueError("SentenceTransformer model does not have a fixed sentence embedding dimension.")
         self.model = model
         self.alpha = alpha
-        self.context_emb = torch.zeros(emb_dim, device=self.model.device)
-        self.scores_history: list[float] = []
-        self.weights_history: list[float] = []
-        self.topic_change = self._topic_change_0
+        self.topic_embedding = torch.zeros(emb_dim, device=self.model.device)
+        self.similarity_history: list[float] = []
+        self.weight_history: list[float] = []
+        self.decouple = self._start_detection
 
-    def _topic_change_0(self, sentence_emb: torch.Tensor, weight: float):
-        self.weights_history.append(weight)
-        self.topic_change = self._topic_change_1
+    def _start_detection(self, sentence_emb: torch.Tensor, weight: float):
+        self.weight_history.append(weight)
+        self.decouple = self._collect_baseline
         return False
 
-    def _topic_change_1(self, sentence_emb: torch.Tensor, weight: float):
-        self.weights_history.append(weight)
-        self.scores_history.append(util.cos_sim(sentence_emb, self.context_emb).item())
-        self.topic_change = self._topic_change_2
+    def _collect_baseline(self, sentence_emb: torch.Tensor, weight: float):
+        self.weight_history.append(weight)
+        self.similarity_history.append(util.cos_sim(sentence_emb, self.topic_embedding).item())
+        self.decouple = self._detect_change
         return False
 
-    def _topic_change_2(self, sentence_emb: torch.Tensor, weight: float):
-        score = util.cos_sim(sentence_emb, self.context_emb).item()
-        scores_history = np.array(self.scores_history)
+    def _detect_change(self, sentence_emb: torch.Tensor, weight: float):
+        score = util.cos_sim(sentence_emb, self.topic_embedding).item()
+        scores_history = np.array(self.similarity_history)
         threshold = scores_history.mean() - max(scores_history.std(), 0.01)
         if flag := (score < threshold):
-            self.weights_history.clear()
-            self.scores_history.clear()
-            self.topic_change = self._topic_change_1
+            self.weight_history.clear()
+            self.similarity_history.clear()
+            self.decouple = self._collect_baseline
         elif scores_history.size > 3:
-            self.topic_change = self._topic_change_3
-        self.weights_history.append(weight)
-        self.scores_history.append(score)
+            self.decouple = self._detect_change_adaptive
+        self.weight_history.append(weight)
+        self.similarity_history.append(score)
         return flag
 
-    def _topic_change_3(self, sentence_emb: torch.Tensor, weight: float):
-        score = util.cos_sim(sentence_emb, self.context_emb).item()
-        scores_history = np.array(self.scores_history)
-        weights_history = np.array(self.weights_history)
+    def _detect_change_adaptive(self, sentence_emb: torch.Tensor, weight: float):
+        score = util.cos_sim(sentence_emb, self.topic_embedding).item()
+        scores_history = np.array(self.similarity_history)
+        weights_history = np.array(self.weight_history)
         Q1, Q2, Q3 = np.quantile(scores_history, [0.25, 0.5, 0.75])
         scale = (weight - weights_history.mean()) * scores_history.std() / max(weights_history.std(), 0.01)
         threshold = Q1 + Q2 - Q3 + scale
         if flag := (score < threshold):
-            self.weights_history.clear()
-            self.scores_history.clear()
-            self.topic_change = self._topic_change_1
-        self.weights_history.append(weight)
-        self.scores_history.append(score)
+            self.weight_history.clear()
+            self.similarity_history.clear()
+            self.decouple = self._collect_baseline
+        self.weight_history.append(weight)
+        self.similarity_history.append(score)
         return flag
 
     @torch.no_grad()
@@ -114,10 +114,10 @@ class TopicDecoupler:
             return False
         sentence_emb = self.model.encode(sentence, convert_to_tensor=True)
         weight = sentence_weight(sentence)
-        if self.topic_change(sentence_emb, weight):
-            self.context_emb.mul_(0.5).add_(sentence_emb, alpha=0.5)
+        if self.decouple(sentence_emb, weight):
+            self.topic_embedding.mul_(0.5).add_(sentence_emb, alpha=0.5)
             return True
         else:
             # self.context_emb.add_((sentence_emb - self.context_emb) / self.__step_count)
-            self.context_emb.mul_(self.alpha).add_(sentence_emb, alpha=1 - self.alpha)
+            self.topic_embedding.mul_(self.alpha).add_(sentence_emb, alpha=1 - self.alpha)
             return False

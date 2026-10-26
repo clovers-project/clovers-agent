@@ -252,6 +252,20 @@ class Session(Turn):
             self.message_history.popleft()
         self.message_history.append((content, timestamp))
 
+    def should_summarize(self, message: str, timestamp: float):
+        if not self.recorder:
+            return False
+        if self.wakeup_context is not None:
+            return False
+        if len(self.recorder) > self.memory_size:
+            return True
+        timeout = timestamp - self.memory_timeout
+        if self.recorder[0][2] < timeout:
+            return True
+        if self.decouple_count < self.decouple_length:
+            return False
+        return self.decoupler.step(message)
+
     def compact_history(self, content: str):
         self.recorder.clear()
         self.image_recorder.clear()
@@ -292,20 +306,6 @@ class Session(Turn):
 
     def image_url(self, image_id: int) -> str | None:
         return next((url for i, url, _ in self.image_recorder if i == image_id), None)
-
-    def step(self, message: str, timestamp: float):
-        if not self.recorder:
-            return False
-        if self.wakeup_context is not None:
-            return False
-        if len(self.recorder) > self.memory_size:
-            return True
-        timeout = timestamp - self.memory_timeout
-        if self.recorder[0][2] < timeout:
-            return True
-        if self.decouple_count < self.decouple_length:
-            return False
-        return self.decoupler.step(message)
 
 
 class WakeupContext:

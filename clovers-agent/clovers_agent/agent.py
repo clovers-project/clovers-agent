@@ -328,79 +328,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.record_turn(current_input, reply)
         return last_reply
 
-    async def handle_input(self, session: Session, event: Event):
-        timestamp = time.time()
-        now = datetime.fromtimestamp(timestamp)
-        if "nicknames" not in session.extra:
-            session.extra["nicknames"] = {}
-        nicknames = session.extra["nicknames"]
-        nicknames[event.user_id] = event.nickname
-        at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
-        if "extra_context" in event.properties:
-            message = f"@ME {at}{event.message}\n{"\n".join(event.extra_context)}"
-        elif event.to_me:
-            message = f"@ME {at}{event.message}"
-        else:
-            session.record_history(USER_TAG.format(event.nickname, f"{at}{event.message}"), timestamp)
-            if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
-                return
-            if session.execute_lock.locked() or session.aside_lock.locked():
-                return
-            async with session.execute_lock, session.aside_lock:
-                turn_input = session.turn_input
-                if chime_in_reply := await self.call_chime_in(session, turn_input):
-                    self.send(chime_in_reply, event)
-                    session.last_active_time = timestamp
-                    session.record_turn(turn_input, chime_in_reply)
-                return
-        session.record_history(USER_TAG.format(event.nickname, message), timestamp)
-        if session.execute_lock.locked():
-            if session.aside_lock.locked() or session.idle_event.is_set():
-                return
-            session.pending_prompt = session.turn_input
-            return
-        async with session.execute_lock:
-            if session.step(message, timestamp) and (summary := await self.summary_context(session)):
-                session.compact_history(summary)
-            turn_input = session.turn_input
-            if (call := event.call("flat_context")) and (flat_context := await call):
-                session.input_text("<quote>\n")
-                for unit in flat_context:
-                    if unit["text"]:
-                        session.input_text(f'{unit["nickname"]}:{unit["text"]}')
-                    if unit["images"]:
-                        session.input_image(unit["images"])
-                session.input_text("\n</quote>")
-            image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
-            session.input_image(x for x in image_list if x)
-            session.input_text(turn_input)
-            try:
-                intro = await self.router(turn_input, session, event)
-                session.api
-                session.payload
-                logger.info("[%s][ROUTER] %s", self.name, intro)
-            except Exception as e:
-                intro = await on_chat(self, session, event)
-                logger.warning("[%s][ROUTER] session %s failed: %s: %s", self.name, session.session_id, type(e).__name__, e)
-            session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
-            session.extend_tools(self.select_tools(intro))
-            try:
-                if intro_prompts := await self.activate_category(intro, session, event):
-                    session.unit_prompts.extend(intro_prompts)
-            except Exception as e:
-                logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
-            session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            await self.execute_session(session, session, event, timestamp)
-
-    async def on_input(self, event: Event):
-        session = self.current_session(self.session_id(event))
-        try:
-            await self.handle_input(session, event)
-        except SessionComplete as e:
-            if reply := e.data:
-                self.send(reply, event)
-        self.update_usage(session.usage_counter)
-
     def submit_turn_for_wakeup(self, turn: Turn, event: Event):
         session = self.current_session(turn.session_id)
         if session.wakeup_context is None:
@@ -441,6 +368,79 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 turn.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
                 turn.input_text(session.turn_input)
                 await self.execute_session(session, turn, event, time.time())
+        except SessionComplete as e:
+            if reply := e.data:
+                self.send(reply, event)
+        self.update_usage(session.usage_counter)
+
+    async def handle_input(self, session: Session, event: Event):
+        timestamp = time.time()
+        now = datetime.fromtimestamp(timestamp)
+        if "nicknames" not in session.extra:
+            session.extra["nicknames"] = {}
+        nicknames = session.extra["nicknames"]
+        nicknames[event.user_id] = event.nickname
+        at = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
+        if "extra_context" in event.properties:
+            message = f"@ME {at}{event.message}\n{"\n".join(event.extra_context)}"
+        elif event.to_me:
+            message = f"@ME {at}{event.message}"
+        else:
+            session.record_history(USER_TAG.format(event.nickname, f"{at}{event.message}"), timestamp)
+            if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
+                return
+            if session.execute_lock.locked() or session.aside_lock.locked():
+                return
+            async with session.execute_lock, session.aside_lock:
+                turn_input = session.turn_input
+                if chime_in_reply := await self.call_chime_in(session, turn_input):
+                    self.send(chime_in_reply, event)
+                    session.last_active_time = timestamp
+                    session.record_turn(turn_input, chime_in_reply)
+                return
+        session.record_history(USER_TAG.format(event.nickname, message), timestamp)
+        if session.execute_lock.locked():
+            if session.aside_lock.locked() or session.idle_event.is_set():
+                return
+            session.pending_prompt = session.turn_input
+            return
+        async with session.execute_lock:
+            if session.should_summarize(message, timestamp) and (summary := await self.summary_context(session)):
+                session.compact_history(summary)
+            turn_input = session.turn_input
+            if (call := event.call("flat_context")) and (flat_context := await call):
+                session.input_text("<quote>\n")
+                for unit in flat_context:
+                    if unit["text"]:
+                        session.input_text(f'{unit["nickname"]}:{unit["text"]}')
+                    if unit["images"]:
+                        session.input_image(unit["images"])
+                session.input_text("\n</quote>")
+            image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
+            session.input_image(x for x in image_list if x)
+            session.input_text(turn_input)
+            try:
+                intro = await self.router(turn_input, session, event)
+                session.api
+                session.payload
+                logger.info("[%s][ROUTER] %s", self.name, intro)
+            except Exception as e:
+                intro = await on_chat(self, session, event)
+                logger.warning("[%s][ROUTER] session %s failed: %s: %s", self.name, session.session_id, type(e).__name__, e)
+            session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
+            session.extend_tools(self.select_tools(intro))
+            try:
+                if intro_prompts := await self.activate_category(intro, session, event):
+                    session.unit_prompts.extend(intro_prompts)
+            except Exception as e:
+                logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
+            session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
+            await self.execute_session(session, session, event, timestamp)
+
+    async def on_input(self, event: Event):
+        session = self.current_session(self.session_id(event))
+        try:
+            await self.handle_input(session, event)
         except SessionComplete as e:
             if reply := e.data:
                 self.send(reply, event)
