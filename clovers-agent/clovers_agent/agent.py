@@ -289,6 +289,43 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning("[%s][WAIT REPLY] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
 
+    def update_usage(self, usage_counter: dict):
+        if not usage_counter:
+            return
+        deep_add(self.usage_counter, usage_counter)
+        usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
+        usage_counter.clear()
+        logger.info("[%s][USAGE] %s", self.name, usage)
+        save_json(self.usage_file, self.usage_counter)
+
+    def send(self, text: str, event: Event):
+        asyncio.create_task(event.send("text", text))
+
+    async def execute_session(self, session: Session, turn: Turn, event: Event, timestamp: float):
+        current_input = turn.current_input.copy()
+        session.pending_prompt = None
+        last_reply = None
+        async for reply in self.iter_replies(turn, event):
+            last_reply = reply
+            if session.pending_prompt:
+                async with session.wait_lock:
+                    pending_prompt = session.pending_prompt
+                    session.pending_prompt = None
+                    wait_reply = await self.handle_wait_reply(session, event, pending_prompt, last_reply)
+                    if wait_reply:
+                        self.send(wait_reply, event)
+                        session.record_history(ASSISTANT_TAG.format(wait_reply), timestamp)
+                    elif prompt := session.pending_prompt:
+                        turn.payload["messages"].append({"role": "user", "content": prompt})
+                session.pending_prompt = None
+            else:
+                if reply:
+                    self.send(reply, event)
+        if reply:
+            current_input[-1] = {"type": "text", "text": session.turn_input}
+            session.record_turn(current_input, reply, timestamp)
+        return last_reply
+
     async def handle_input(self, session: Session, event: Event):
         timestamp = time.time()
         now = datetime.fromtimestamp(timestamp)
@@ -318,12 +355,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if session.execute_lock.locked():
             if session.wait_lock.locked() or session.idle_event.is_set():
                 return
-            session.pending_input = session.turn_input
+            session.pending_prompt = session.turn_input
             return
-        session.pending_input = None
+        session.pending_prompt = None
         async with session.execute_lock:
             if session.step(message, timestamp) and (summary := await self.summary_context(session)):
-                session.summary(summary)
+                session.compact_history(summary)
             turn_input = session.turn_input
             if (call := event.call("flat_context")) and (flat_context := await call):
                 session.input_text("<quote>\n")
@@ -335,7 +372,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.input_text("\n</quote>")
             image_list = await asyncio.gather(*map(self._api.download_url, event.image_list))
             session.input_image(x for x in image_list if x)
-            text = session.input_text(turn_input)
+            session.input_text(turn_input)
             try:
                 intro = await self.router(turn_input, session, event)
                 session.api
@@ -352,62 +389,21 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            current_input = session.current_input.copy()
-            reply = await self.execute_session(session, event, timestamp)
-            if reply:
-                text["text"] = session.turn_input
-                session.record_turn(current_input, reply, timestamp)
+            await self.execute_session(session, session, event, timestamp)
 
-    async def execute_session(self, session: Turn, event: Event, timestamp: float):
-        current_session = self.current_session(session.session_id)
-        current_session.pending_input = None
-        last_reply = None
-        async for reply in self.iter_replies(session, event):
-            last_reply = reply
-            if current_session.pending_input:
-                async with current_session.wait_lock:
-                    input_during_execution = current_session.pending_input
-                    current_session.pending_input = None
-                    wait_reply = await self.handle_wait_reply(current_session, event, input_during_execution, last_reply)
-                    if wait_reply:
-                        self.send(wait_reply, event)
-                        current_session.record_history(ASSISTANT_TAG.format(wait_reply), timestamp)
-                    elif prompt := current_session.pending_input:
-                        session.payload["messages"].append({"role": "user", "content": prompt})
-                current_session.pending_input = None
-            else:
-                if reply:
-                    self.send(reply, event)
-        return last_reply
-
-    async def handle_wakeup(self, session: Turn, event: Event, m_idx: int, r_idx: int):
-        current_session = self.current_session(session.session_id)
-        recorder = current_session.recorder
-        current_session.pending_input = None
-        async with current_session.execute_lock:
+    async def handle_wakeup(self, turn: Turn, event: Event, m_idx: int, r_idx: int):
+        session = self.current_session(turn.session_id)
+        recorder = session.recorder
+        session.pending_prompt = None
+        async with session.execute_lock:
             if len(recorder) <= r_idx:
-                session.payload["messages"].extend(iter_recoder(recorder))
+                turn.payload["messages"].extend(iter_recoder(recorder))
             else:
-                session.payload["messages"][m_idx] = recorder[r_idx][0].copy()
-                session.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
-            current_input = session.current_input.copy()
+                turn.payload["messages"][m_idx] = recorder[r_idx][0].copy()
+                turn.payload["messages"].extend(iter_recoder(recorder[r_idx + 1 :]))
             timestamp = time.time()
-            reply = await self.execute_session(session, event, timestamp)
-            if reply:
-                current_input.append({"type": "text", "text": current_session.turn_input})
-                current_session.record_turn(current_input, reply, timestamp)
-
-    def update_usage(self, usage_counter: dict):
-        if not usage_counter:
-            return
-        deep_add(self.usage_counter, usage_counter)
-        usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
-        usage_counter.clear()
-        logger.info("[%s][USAGE] %s", self.name, usage)
-        save_json(self.usage_file, self.usage_counter)
-
-    def send(self, text: str, event: Event):
-        asyncio.create_task(event.send("text", text))
+            turn.input_text(session.turn_input)
+            await self.execute_session(session, turn, event, timestamp)
 
     async def on_input(self, event: Event):
         session = self.current_session(self.session_id(event))
@@ -458,7 +454,7 @@ async def read_image_by_id(agent: CloversAgent, session: Turn, event: Event, ima
 
 @cast_invoker
 async def inject_prompt(agent: CloversAgent, session: Turn, event: Event, prompt: str):
-    agent.current_session(session.session_id).outbox.append(prompt)
+    agent.current_session(session.session_id).pending_prompt = prompt
     return "OK"
 
 

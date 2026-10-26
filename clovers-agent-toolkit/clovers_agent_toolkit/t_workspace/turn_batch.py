@@ -41,8 +41,8 @@ class TurnBatch:
             if not pending:
                 break
             await asyncio.gather(*pending)
-        self._session.unit_prompts.append("本条信息为子代理唤醒")
-        self._session.input_text("\n---\n".join(task.result() or "None" for task in self.tasklist))
+        self._session.unit_prompts.append("本条信息为子代理唤醒\n")
+        self._session.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in self.tasklist))
         asyncio.create_task(self._agent.on_wakeup(self._session, self._event, self._m_idx, self._r_idx))
 
     def cancel(self) -> None:

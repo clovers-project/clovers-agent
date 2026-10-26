@@ -223,7 +223,7 @@ class Session(Turn):
         self.idle_event = asyncio.Event()
         self.idle_event.set()
         # Wait Chat
-        self.pending_input: str | None
+        self.pending_prompt: str | None
 
     @override
     def activate(self):
@@ -252,7 +252,7 @@ class Session(Turn):
             self.message_history.popleft()
         self.message_history.append((content, timestamp))
 
-    def summary(self, content: str):
+    def compact_history(self, content: str):
         self.recorder.clear()
         self.image_recorder.clear()
         self.router_recorder.clear()
