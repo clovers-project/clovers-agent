@@ -448,37 +448,37 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.update_usage(session.usage_counter)
 
 
-async def on_chat(agent: CloversAgent, session: Turn, event: Event):
-    session.create_payload(agent.api(ON_CHAT), agent.chat_prompt)
+async def on_chat(agent: CloversAgent, turn: Turn, event: Event):
+    turn.create_payload(agent.api(ON_CHAT), agent.chat_prompt)
     return ON_CHAT
 
 
 @cast_invoker
-async def skill_menu(agent: CloversAgent, session: Turn, event: Event, category: str):
-    if prompts := await agent.activate_category(category, session, event):
+async def skill_menu(agent: CloversAgent, turn: Turn, event: Event, category: str):
+    if prompts := await agent.activate_category(category, turn, event):
         prompt = "\n".join(x for x in prompts if x)
     else:
         prompt = ""
-    session.extend_tools(agent.select_tools(category))
+    turn.extend_tools(agent.select_tools(category))
     if scripts_map := agent.scripts_map.get(category):
-        session.extend_scripts(scripts_map.keys())
+        turn.extend_scripts(scripts_map.keys())
     if references_map := agent.references_map.get(category):
-        session.extend_references(references_map.keys())
+        turn.extend_references(references_map.keys())
     return prompt or f"Skills for '{category}' have been loaded."
 
 
 @cast_invoker
-async def read_image_by_id(agent: CloversAgent, session: Turn, event: Event, image_id: int):
-    url = agent.current_session(session.session_id).image_url(image_id)
+async def read_image_by_id(agent: CloversAgent, turn: Turn, event: Event, image_id: int):
+    url = agent.current_session(turn.session_id).image_url(image_id)
     if not url:
         return f"Error: [image:{image_id}] is missing."
-    session.current_input.append({"type": "image_url", "image_url": {"url": url}})
+    turn.current_input.append({"type": "image_url", "image_url": {"url": url}})
     return "OK"
 
 
 @cast_invoker
-async def inject_prompt(agent: CloversAgent, session: Turn, event: Event, prompt: str):
-    agent.current_session(session.session_id).pending_prompt = prompt
+async def inject_prompt(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
+    agent.current_session(turn.session_id).pending_prompt = prompt
     return "OK"
 
 
@@ -511,7 +511,7 @@ async def decode_stream(reader: asyncio.StreamReader, tail_length: int):
 @cast_invoker
 async def execute_script(
     agent: CloversAgent,
-    session: Turn,
+    turn: Turn,
     event: Event,
     interpreter: str = "",
     path: str = "",
@@ -560,7 +560,7 @@ async def execute_script(
 
 
 @cast_invoker
-async def read_reference(agent: CloversAgent, session: Turn, event: Event, path: str):
+async def read_reference(agent: CloversAgent, turn: Turn, event: Event, path: str):
     file = Path(agent.references_map[path.split("/", 1)[0]][path])
     if not file.exists():
         return f"ERROR: File '{path}' does not exist."
