@@ -90,7 +90,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.chat_prompt = "\n".join(x for x in (style_prompt, self.base_prompt, chat_prompt) if x)
         self.chime_in_prompt = read_file(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
         self.router_prompt = read_file(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
-        self.wait_prompt = read_file(self.prompts_dir / "WAIT.md", PROMPTS.wait_prompt)
+        self.aside_prompt = read_file(self.prompts_dir / "ASIDE.md", PROMPTS.aside_prompt)
         self.summary_prompt = read_file(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
 
     def startup(self):
@@ -266,7 +266,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning("[%s][CHIME IN] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
 
-    async def handle_wait_reply(self, session: Session, event: Event, content: str, current_output: str):
+    async def call_aside(self, session: Session, event: Event, content: str, current_output: str):
         if session.cursor is None:
             return
         s = session.create_turn()
@@ -275,7 +275,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             s.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
         s.payload["tools"] = [INJECT_PROMPT_INFO]
         s.input_text(content)
-        s.unit_prompts.append(self.wait_prompt.format(current_output))
+        s.unit_prompts.append(self.aside_prompt.format(current_output))
         s.activate()
         try:
             message = await s.call_api()
@@ -284,10 +284,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 reply = None
             else:
                 reply = (message["content"] or "").strip()
-            logger.info("[%s][WAIT REPLY]", self.name)
+            logger.info("[%s][ASIDE]", self.name)
             return reply
         except Exception as e:
-            logger.warning("[%s][WAIT REPLY] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
+            logger.warning("[%s][ASIDE] session %s failed: %s: %s", self.name, s.session_id, type(e).__name__, e)
 
     def update_usage(self, usage_counter: dict):
         if not usage_counter:
@@ -308,13 +308,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         async for reply in self.iter_replies(turn, event):
             last_reply = reply
             if session.pending_prompt:
-                async with session.wait_lock:
+                async with session.aside_lock:
                     pending_prompt = session.pending_prompt
                     session.pending_prompt = None
-                    wait_reply = await self.handle_wait_reply(session, event, pending_prompt, last_reply)
-                    if wait_reply:
-                        self.send(wait_reply, event)
-                        session.record_history(ASSISTANT_TAG.format(wait_reply), timestamp)
+                    aside_reply = await self.call_aside(session, event, pending_prompt, last_reply)
+                    if aside_reply:
+                        self.send(aside_reply, event)
+                        session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
                     elif prompt := session.pending_prompt:
                         turn.payload["messages"].append({"role": "user", "content": prompt})
                 session.pending_prompt = None
@@ -342,9 +342,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.record_history(USER_TAG.format(event.nickname, f"{at}{event.message}"), timestamp)
             if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
                 return
-            if session.execute_lock.locked() or session.wait_lock.locked():
+            if session.execute_lock.locked() or session.aside_lock.locked():
                 return
-            async with session.execute_lock, session.wait_lock:
+            async with session.execute_lock, session.aside_lock:
                 turn_input = session.turn_input
                 if reply := await self.handle_chime_in(session, turn_input):
                     self.send(reply, event)
@@ -353,7 +353,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
         session.record_history(USER_TAG.format(event.nickname, message), timestamp)
         if session.execute_lock.locked():
-            if session.wait_lock.locked() or session.idle_event.is_set():
+            if session.aside_lock.locked() or session.idle_event.is_set():
                 return
             session.pending_prompt = session.turn_input
             return

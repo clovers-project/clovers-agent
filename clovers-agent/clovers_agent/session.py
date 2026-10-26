@@ -219,7 +219,7 @@ class Session(Turn):
         # 状态
         self.last_active_time = 0.0
         self.execute_lock = asyncio.Lock()
-        self.wait_lock = asyncio.Lock()
+        self.aside_lock = asyncio.Lock()
         self.idle_event = asyncio.Event()
         self.idle_event.set()
         # Wait Chat

@@ -97,7 +97,7 @@ Rules:
 - **严禁使用连词**：**严禁**使用逻辑连词，如：“无论……都……”、“只要……就……”、“不仅……还……”、“不是……而是……”、“因为……所以……”等。
 """
     """聊天提示 这里是助手参与聊天的提示"""
-    wait_prompt: str = """\
+    aside_prompt: str = """\
 The current task is running in the background (task output: {}).
 
 Based on the user's latest message and the current conversation context, choose the appropriate response strategy:
