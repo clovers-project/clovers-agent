@@ -41,12 +41,12 @@ async def enter_workspace(agent: CloversAgent, session: Turn):
                 session.extra["shell"] = shell
             await shell.activate()
             session.extra["shell"].workdir = "/workspace"
-            session.extend_tools(agent.manifest[x] for x in SUCCESS_TOOLIST)
+            session.extend_tools(agent.tool_manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append("Current system: Debian\nCurrent working directory: /workspace")
             return "\n\n".join(prompts)
         except Exception as e:
             logger.error("enter_workspace failed: %s: %s", type(e).__name__, e)
-    session.extend_tools(agent.manifest[x] for x in FALLBACK_TOOLIST)
+    session.extend_tools(agent.tool_manifest[x] for x in FALLBACK_TOOLIST)
     prompts.append("Current working directory: /workspace")
     return "\n\n".join(prompts)
 

@@ -53,7 +53,7 @@ def code_block(source: str, lang: str = "python") -> str:
 
 
 def get_tool_source(agent: CloversAgent, tool_name: str) -> str:
-    func = agent.invoker.get(tool_name)
+    func = agent.tool_invoker.get(tool_name)
     if func is None:
         return f'Tool "{tool_name}" Not Found'
     try:

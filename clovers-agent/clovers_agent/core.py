@@ -45,32 +45,37 @@ EMPTY_ITER = ()
 class AgentTools:
     name: str = ""
 
-    def __init__(
-        self,
-    ) -> None:
-        self.manifest: dict[str, FunctionToolInfo] = {}
-        self.invoker: dict[str, Invoker] = {}
+    def __init__(self) -> None:
+        # 初始化工具
         self.intro_manifest: dict[str, FunctionToolInfo] = {}
         self.intro_invoker: dict[str, Invoker] = {}
-        # 工具组
-        self.category_tools_map: dict[str, list[str]] = {}
-        self.category_desc_map: dict[str, str] = {}
+        self.intro_hooks: dict[str, Counter[Invoker]] = {}
+        # 分类工具
+        self.tool_manifest: dict[str, FunctionToolInfo] = {}
+        self.tool_invoker: dict[str, Invoker] = {}
+        self.tools_by_category: dict[str, list[str]] = {}
         self.category_hooks: dict[str, Counter[Invoker]] = {}
+        self.category_descriptions: dict[str, str] = {}
         # inner
         self._merged: set[AgentTools] = set()
 
-    def select_tools(self, category: str) -> tuple[FunctionToolInfo, ...]:
-        """选择指定工具组中的所有工具。
+    def on_intro(self, intro: str):
+        """添加工具组初始化钩子
+
         Args:
-            category (str): 选择的工具组。
+            category (str): 要绑定钩子的工具组名称。
 
         Returns:
-            tuple[FunctionToolInfo, ...]: 工具列表。
+            Callable: 用于注册工具组初始化钩子的装饰器。
         """
-        if category not in self.category_tools_map:
-            return EMPTY_ITER
-        namelist = self.category_tools_map[category]
-        return tuple(self.manifest[name] for name in namelist)
+
+        def decorator(func: Invoker):
+            if intro not in self.intro_hooks:
+                self.intro_hooks[intro] = Counter()
+            self.intro_hooks[intro][func] += 1
+            return func
+
+        return decorator
 
     def on_category(self, category: str):
         """添加工具组触发时钩子
@@ -101,9 +106,9 @@ class AgentTools:
             Callable: 用于注册分类钩子的装饰器。
         """
 
-        if category in self.category_desc_map:
+        if category in self.category_descriptions:
             raise ValueError(f"Category {category} already exists")
-        self.category_desc_map[category] = description
+        self.category_descriptions[category] = description
         return self.on_category(category)
 
     def intro_decorator(self, info: FunctionToolInfo):
@@ -140,7 +145,7 @@ class AgentTools:
 
         def decorator(func: Invoker):
             name = info["function"]["name"]
-            if name in self.invoker:
+            if name in self.tool_invoker:
                 raise ValueError(f"Tool {name} already exists.")
             if isinstance(category, str):
                 categories = (category,)
@@ -149,11 +154,11 @@ class AgentTools:
             for c in categories:
                 if not isinstance(c, str):
                     continue
-                if c not in self.category_tools_map:
-                    self.category_tools_map[c] = []
-                self.category_tools_map[c].append(name)
-            self.manifest[name] = info
-            self.invoker[name] = func
+                if c not in self.tools_by_category:
+                    self.tools_by_category[c] = []
+                self.tools_by_category[c].append(name)
+            self.tool_manifest[name] = info
+            self.tool_invoker[name] = func
             return func
 
         return decorator
@@ -192,19 +197,32 @@ class AgentTools:
         else:
             return self.intro_decorator(info)
 
+    def select_tools(self, category: str) -> tuple[FunctionToolInfo, ...]:
+        """选择指定工具组中的所有工具。
+        Args:
+            category (str): 选择的工具组。
+
+        Returns:
+            tuple[FunctionToolInfo, ...]: 工具列表。
+        """
+        if category not in self.tools_by_category:
+            return EMPTY_ITER
+        namelist = self.tools_by_category[category]
+        return tuple(self.tool_manifest[name] for name in namelist)
+
     def remove_category(self, category: str):
         """移除工具组。
 
         Args:
             category (str): 工具组名。
         """
-        if category in self.category_tools_map:
-            for name in self.category_tools_map[category]:
-                del self.manifest[name]
-                del self.invoker[name]
-            del self.category_tools_map[category]
-        if category in self.category_desc_map:
-            del self.category_desc_map[category]
+        if category in self.tools_by_category:
+            for name in self.tools_by_category[category]:
+                del self.tool_manifest[name]
+                del self.tool_invoker[name]
+            del self.tools_by_category[category]
+        if category in self.category_descriptions:
+            del self.category_descriptions[category]
         if category in self.category_hooks:
             del self.category_hooks[category]
 
@@ -216,28 +234,36 @@ class AgentTools:
         unimplemented_intros = self.intro_manifest.keys() - self.intro_invoker.keys()
         if unimplemented_intros:
             raise ValueError(f"Unimplemented intros: {unimplemented_intros}")
-        unimplemented_tools = self.manifest.keys() - self.invoker.keys()
+        for intro in tuple(self.intro_hooks):
+            intro_hooks = self.intro_hooks[intro]
+            hooks = +intro_hooks
+            if hooks:
+                intro_hooks.clear()
+                intro_hooks.update(hooks)
+            else:
+                del self.intro_hooks[intro]
+        unimplemented_tools = self.tool_manifest.keys() - self.tool_invoker.keys()
         if unimplemented_tools:
             raise ValueError(f"Unimplemented tools: {unimplemented_tools}")
         # 存在 Category Desc 一定是本实例 Create 的 Category
         # 实例可以为非自己创建的 Category 添加 Hook
         # 但是自己创建的 Category 必须要有 Hook 或者 Tools
         # 这里验证是修复而非报错
-        for category in tuple(self.category_desc_map):
-            if category in self.category_tools_map and not self.category_tools_map[category]:
-                del self.category_tools_map[category]
+        for category in tuple(self.category_descriptions):
+            if category in self.tools_by_category and not self.tools_by_category[category]:
+                del self.tools_by_category[category]
             if category in self.category_hooks:
-                self_hooks = self.category_hooks[category]
-                hooks = +self_hooks
+                category_hooks = self.category_hooks[category]
+                hooks = +category_hooks
                 if hooks:
-                    self_hooks.clear()
-                    self_hooks.update(hooks)
+                    category_hooks.clear()
+                    category_hooks.update(hooks)
                 else:
                     del self.category_hooks[category]
-            if category not in self.category_tools_map and category not in self.category_hooks:
-                del self.category_desc_map[category]
-        manifest_keys = set(self.manifest)
-        if any(not manifest_keys.issuperset(namelist) for namelist in self.category_tools_map.values()):
+            if category not in self.tools_by_category and category not in self.category_hooks:
+                del self.category_descriptions[category]
+        manifest_keys = set(self.tool_manifest)
+        if any(not manifest_keys.issuperset(namelist) for namelist in self.tools_by_category.values()):
             raise ValueError("Manifest mismatch")
 
     def merge(self, others: "AgentTools"):
@@ -253,29 +279,35 @@ class AgentTools:
         conflict_intros = others.intro_manifest.keys() & self.intro_manifest.keys()
         if conflict_intros:
             raise ValueError(f"Intro Manifest conflict: {conflict_intros}")
-        conflict_tools = others.manifest.keys() & self.manifest.keys()
+        conflict_tools = others.tool_manifest.keys() & self.tool_manifest.keys()
         if conflict_tools:
             raise ValueError(f"Tool Manifest conflict: {conflict_tools}")
-        conflict_categories = others.category_desc_map.keys() & self.category_desc_map.keys()
+        conflict_categories = others.category_descriptions.keys() & self.category_descriptions.keys()
         if conflict_categories:
             raise ValueError(f"Category conflict: {conflict_categories}")
-        # 这些是没有冲突的，可以直接添加
+        # Intro 合并
         self.intro_manifest.update(others.intro_manifest)
         self.intro_invoker.update((k, others.intro_invoker[k]) for k in others.intro_manifest)
-        self.manifest.update(others.manifest)
-        self.invoker.update((k, others.invoker[k]) for k in others.manifest)
-        self.category_desc_map.update(others.category_desc_map)
+        for intro, hooks in others.intro_hooks.items():
+            if intro in self.intro_hooks:
+                self.intro_hooks[intro].update(hooks)
+            else:
+                self.intro_hooks[intro] = hooks.copy()
+        # Tools 合并
+        self.tool_manifest.update(others.tool_manifest)
+        self.tool_invoker.update((k, others.tool_invoker[k]) for k in others.tool_manifest)
         # others 不可以创建一个已有的类，但是可以向一个已有的类添加工具。
+        for category, namelist in others.tools_by_category.items():
+            if category in self.tools_by_category:
+                self.tools_by_category[category].extend(namelist)
+            else:
+                self.tools_by_category[category] = namelist.copy()
         for category, hooks in others.category_hooks.items():
             if category in self.category_hooks:
                 self.category_hooks[category].update(hooks)
             else:
                 self.category_hooks[category] = hooks.copy()
-        for category, namelist in others.category_tools_map.items():
-            if category in self.category_tools_map:
-                self.category_tools_map[category].extend(namelist)
-            else:
-                self.category_tools_map[category] = namelist.copy()
+        self.category_descriptions.update(others.category_descriptions)
         self._merged.add(others)
 
     def detach(self, others: "AgentTools"):
@@ -289,54 +321,70 @@ class AgentTools:
             logger.warning("[%s][DETACH] %r not merged", self.name, others)
             return
         others.validate_manifest()
-        # 验证
-        for category, other_namelist in others.category_tools_map.items():
-            if not category in self.category_tools_map:
-                raise ValueError(f"Cannot detach: category '{category}' does not exist in the current instance.")
-            self_namelist = self.category_tools_map[category]
-            if set(other_namelist).difference(self_namelist):
-                raise ValueError(f"Cannot detach: category '{category}' from others are not present in the current instance.")
-        for category, other_hooks in others.category_hooks.items():
-            if not category in self.category_hooks:
-                raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
-            self_hooks = self.category_hooks[category]
-            if set(other_hooks).difference(self_hooks):
-                raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
-        for category in others.category_desc_map:
-            if not category in self.category_desc_map:
-                raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
+        # Intro 验证
         if missing_intros := others.intro_manifest.keys() - self.intro_manifest.keys():
             raise ValueError(f"Cannot detach: intro_manifest keys {missing_intros} are not present in the current instance.")
-        if missing_tools := others.manifest.keys() - self.manifest.keys():
+        for intro, others_i_hooks in others.intro_hooks.items():
+            if not intro in self.intro_hooks:
+                raise ValueError(f"Cannot detach: intro '{intro}' does not exist in the current instance.")
+            self_i_hooks = self.intro_hooks[intro]
+            if others_i_hooks - self_i_hooks:
+                raise ValueError(f"Cannot detach: intro '{intro}' from others are not present in the current instance.")
+        # Tool 验证
+        if missing_tools := others.tool_manifest.keys() - self.tool_manifest.keys():
             raise ValueError(f"Cannot detach: manifest keys {missing_tools} are not present in the current instance.")
-        # 操作
-        for category, other_namelist in others.category_tools_map.items():
-            self_namelist = self.category_tools_map[category]
-            for other_name in other_namelist:
-                self_namelist.remove(other_name)
-            if not self_namelist:
-                del self.category_tools_map[category]
-        for category, other_hooks in others.category_hooks.items():
-            self_hooks = self.category_hooks[category]
-            hooks = self_hooks - other_hooks
-            if not hooks:
-                del self.category_hooks[category]
-            else:
-                self_hooks.clear()
-                self_hooks.update(hooks)
-        # others 注册的类别可能被其他工具添加新工具，所以当前还有工具的类别不丢失 Desc
-        for category in tuple(self.category_desc_map):
-            if category in self.category_tools_map:
-                continue
-            if category in self.category_hooks:
-                continue
-            del self.category_desc_map[category]
+        for category, other_namelist in others.tools_by_category.items():
+            if not category in self.tools_by_category:
+                raise ValueError(f"Cannot detach: category '{category}' does not exist in the current instance.")
+            self_namelist = self.tools_by_category[category]
+            if set(other_namelist).difference(self_namelist):
+                raise ValueError(f"Cannot detach: category '{category}' from others are not present in the current instance.")
+        for category, other_c_hooks in others.category_hooks.items():
+            if not category in self.category_hooks:
+                raise ValueError(f"Cannot detach: hooks category '{category}' does not exist in the current instance.")
+            self_c_hooks = self.category_hooks[category]
+            if other_c_hooks - self_c_hooks:
+                raise ValueError(f"Cannot detach: hooks category '{category}' from others are not present in the current instance.")
+        for category in others.category_descriptions:
+            if not category in self.category_descriptions:
+                raise ValueError(f"Cannot detach: category description for '{category}' does not exist in the current instance.")
+        # 移除 Intro
         for name in others.intro_manifest.keys():
             del self.intro_manifest[name]
             del self.intro_invoker[name]
-        for name in others.manifest.keys():
-            del self.manifest[name]
-            del self.invoker[name]
+        for intro, others_i_hooks in others.intro_hooks.items():
+            self_i_hooks = self.intro_hooks[intro]
+            hooks = self_i_hooks - others_i_hooks
+            if not hooks:
+                del self.intro_hooks[intro]
+            else:
+                self_i_hooks.clear()
+                self_i_hooks.update(hooks)
+        # 移除 Tool
+        for name in others.tool_manifest.keys():
+            del self.tool_manifest[name]
+            del self.tool_invoker[name]
+        for category, other_namelist in others.tools_by_category.items():
+            self_namelist = self.tools_by_category[category]
+            for other_name in other_namelist:
+                self_namelist.remove(other_name)
+            if not self_namelist:
+                del self.tools_by_category[category]
+        for category, other_c_hooks in others.category_hooks.items():
+            self_c_hooks = self.category_hooks[category]
+            hooks = self_c_hooks - other_c_hooks
+            if not hooks:
+                del self.category_hooks[category]
+            else:
+                self_c_hooks.clear()
+                self_c_hooks.update(hooks)
+        # others 注册的类别可能被其他工具添加新工具，所以当前还有工具的类别不丢失 Desc
+        for category in tuple(self.category_descriptions):
+            if category in self.tools_by_category:
+                continue
+            if category in self.category_hooks:
+                continue
+            del self.category_descriptions[category]
         self._merged.remove(others)
 
 

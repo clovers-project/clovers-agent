@@ -97,8 +97,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
         self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(skill_menu)
-        self.invoker[EXECUTE_SCRIPT] = execute_script
-        self.invoker[READ_REFERENCE] = read_reference
+        self.tool_invoker[EXECUTE_SCRIPT] = execute_script
+        self.tool_invoker[READ_REFERENCE] = read_reference
         self.category_decorator(READ_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(read_image_by_id)
         self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(inject_prompt)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
@@ -135,8 +135,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         根据已注册的工具分类更新分类参数的 JSON Schema，
         包括分类描述和可选值列表。
         """
-        self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_desc_map.items())
-        self._category_schema["enum"] = list(self.category_desc_map)
+        self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_descriptions.items())
+        self._category_schema["enum"] = list(self.category_descriptions)
 
     @property
     def usage_file(self):
@@ -248,7 +248,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session = self.sessions[session_id] = Session(session_id, self.session_dir / session_id, self.sentence_model)
         return session
 
-    async def activate_category(self, name: str, turn: Turn, event: Event) -> list[str] | None:
+    async def activate_intro(self, intro: str, turn: Turn, event: Event):
         """执行指定工具分类的激活钩子。
 
         并发执行该分类下注册的所有钩子，并收集执行结果。
@@ -261,7 +261,25 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         Returns:
             list[str] | None: 钩子返回的结果列表；没有注册钩子时返回 None。
         """
-        hooks = self.category_hooks.get(name)
+        hooks = self.category_hooks.get(intro)
+        if not hooks:
+            return
+        return await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
+
+    async def activate_category(self, category: str, turn: Turn, event: Event) -> list[str] | None:
+        """执行指定工具分类的激活钩子。
+
+        并发执行该分类下注册的所有钩子，并收集执行结果。
+
+        Args:
+            name (str): 工具分类名称。
+            session (Turn): 当前轮次。
+            event (Event): 当前事件。
+
+        Returns:
+            list[str] | None: 钩子返回的结果列表；没有注册钩子时返回 None。
+        """
+        hooks = self.category_hooks.get(category)
         if not hooks:
             return
         return await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
@@ -285,14 +303,14 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         raw_args = call_info["function"]["arguments"]
         logger.info("[%s][CALL][%s]", self.name, name)
         logger.debug("[%s][CALL][%s][IN] %s", self.name, name, raw_args)
-        if name not in self.invoker:
+        if name not in self.tool_invoker:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: not found"}
         try:
             args = json.loads(raw_args)
         except json.JSONDecodeError as e:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: bad JSON args: {e}"}
         try:
-            invoker = self.invoker[name](self, turn, event, **args)
+            invoker = self.tool_invoker[name](self, turn, event, **args)
         except TypeError as e:
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}`: invalid args: {e}"}
         try:
@@ -636,8 +654,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
             try:
-                if intro_prompts := await self.activate_category(intro, session, event):
-                    session.unit_prompts.extend(intro_prompts)
+                await self.activate_intro(intro, session, event)
             except Exception as e:
                 logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")

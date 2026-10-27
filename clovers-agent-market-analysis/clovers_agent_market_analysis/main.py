@@ -106,7 +106,7 @@ async def _(agent: CloversAgent, event: Event, name: str, asset_type: str, ref_i
         user_prompt = f"请根据{datetime.now().strftime("%Y年%m月%d日")}最新信息，为 {name} 撰写一份详细新闻报告"
         api = agent.api("analyze_security")
         payload = api.build_payload(({"role": "user", "content": user_prompt},), system_prompt)
-        payload["tools"] = [agent.manifest["web_search"], agent.manifest["web_extractor"]]
+        payload["tools"] = [agent.tool_manifest["web_search"], agent.tool_manifest["web_extractor"]]
         news = await agent.iter_replies(api, payload, session.usage_counter, event)
         news_md.write_text(news, encoding="utf-8")
     if asset_type == "stock":
