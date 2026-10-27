@@ -540,7 +540,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         session = self.current_session(turn.session_id)
         if session.wakeup_context is None:
-            print("创建唤醒调用链上下文")
             if session.cursor is None:
                 raise RuntimeError("Cannot create WakeupContext when the session is inactive")
             wakeup_turn = turn.create_turn()
@@ -550,7 +549,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             wakeup_context = session.wakeup_context = WakeupContext(wakeup_turn)
             asyncio.create_task(self.run_wakeup(session, event, session.last_active_time))
         else:
-            print("唤醒调用链已存在")
             wakeup_context = session.wakeup_context
         turn.usage_counter = wakeup_context.turn.usage_counter
         wakeup_context.tasks.append(asyncio.create_task(self.resolve_turn(turn, event)))
@@ -573,9 +571,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             # 当 session.idle_event 重新 clear 时 session 仍保有 wakeup_context
             await session.idle_event.wait()
             unseen_tasks = [t for t in tasks if t not in seen]
-            seen.update(unseen_tasks)
             if not unseen_tasks:
                 break
+            seen.update(unseen_tasks)
             await asyncio.gather(*unseen_tasks)
         session.wakeup_context = None
         turn.unit_prompts.append(WAKEUP_TIP)
@@ -585,7 +583,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 recorder = session.recorder
                 turn.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
                 turn.input_text(session.turn_input)
+                session.idle_event.clear()
                 await self.execute_session(session, turn, event, time.time())
+                session.idle_event.set()
         except SessionComplete as e:
             if reply := e.data:
                 self.send(reply, event)
@@ -625,6 +625,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         session.record_history(USER_TAG.format(event.nickname, message), timestamp)
         if session.execute_lock.locked():
             if session.aside_lock.locked() or session.idle_event.is_set():
+                print(
+                    f"[INPUT] returned: "
+                    f"execute={session.execute_lock.locked()}, "
+                    f"aside={session.aside_lock.locked()}, "
+                    f"idle={session.idle_event.is_set()}"
+                )
                 return
             session.pending_prompt = session.turn_input
             return

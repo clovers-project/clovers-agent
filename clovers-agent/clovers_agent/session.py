@@ -238,7 +238,6 @@ class Session(Turn):
     def deactivate(self):
         self.idle_event.set()
         super().deactivate()
-        self.outbox = None  # type: ignore
 
     @property
     def messages(self):

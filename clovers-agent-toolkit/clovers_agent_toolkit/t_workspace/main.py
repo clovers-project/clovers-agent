@@ -40,7 +40,6 @@ if SHARED_DOCKER_CONTAINER:
         global shared_shell
         if not isinstance(shared_shell, Shell):
             shared_shell = Shell(SHARED_ID, WORKSPACE_PATH, DOCKER_IMAGE)
-            shared_shell.workdir = "/workspace"
         return shared_shell
 
 else:
@@ -57,7 +56,6 @@ else:
             shell = None
         if not isinstance(shell, Shell):
             shell = Shell(turn.session_id, WORKSPACE_PATH, DOCKER_IMAGE)
-            shell.workdir = "/workspace"
             turn.extra["shell"] = shell
         return shell
 
@@ -68,7 +66,6 @@ async def enter_workspace(agent: CloversAgent, turn: Turn):
         try:
             shell = session_shell(turn)
             await shell.activate()
-            shell.workdir = "/workspace"
             turn.extend_tools(agent.tool_manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append("Current system: Debian\nCurrent working directory: /workspace")
             return "\n\n".join(prompts)
@@ -161,7 +158,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, command: str):
         output = await shell.execute(command)
     except Exception:
         return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
-    return f"{output}\nCurrent working directory: {shell.workdir}"
+    return output
 
 
 @TOOLS.register(
