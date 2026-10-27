@@ -443,7 +443,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if session.cursor is None:
             return
         turn = session.create_turn()
-        turn.create_payload(session.api)
+        turn.create_payload(session.api, self.base_prompt)
         if session.cursor > 0:
             turn.payload["messages"].extend(session.payload["messages"][: session.cursor - 1])
         turn.payload["tools"] = [INJECT_PROMPT_INFO]
