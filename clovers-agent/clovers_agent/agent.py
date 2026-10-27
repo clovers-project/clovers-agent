@@ -491,7 +491,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         asyncio.create_task(event.send("text", text))
 
-    async def execute_session(self, session: Session, turn: Turn, event: Event, timestamp: float):
+    async def execute_session(self, session: Session, event: Event, timestamp: float):
         """会话执行出口
 
         迭代模型回复并发送给用户，处理执行期间收到的旁路输入，
@@ -506,11 +506,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         Returns:
             str | None: 本轮最后一条回复；没有回复时返回 None。
         """
-        current_input = turn.current_input.copy()
+        current_input = session.current_input.copy()
         last_reply = None
         session.pending_prompt = None
         session.last_active_time = timestamp
-        async for reply in self.iter_replies(turn, event):
+        async for reply in self.iter_replies(session, event):
             last_reply = reply
             if session.pending_prompt:
                 async with session.aside_lock:
@@ -521,7 +521,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                         self.send(aside_reply, event)
                         session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
                     elif prompt := session.pending_prompt:
-                        turn.payload["messages"].append({"role": "user", "content": prompt})
+                        session.payload["messages"].append({"role": "user", "content": prompt})
                 session.pending_prompt = None
             else:
                 if reply:
@@ -542,11 +542,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if session.wakeup_context is None:
             if session.cursor is None:
                 raise RuntimeError("Cannot create WakeupContext when the session is inactive")
-            wakeup_turn = turn.create_turn()
-            wakeup_turn.usage_counter = {}
-            wakeup_turn.api = session.api
-            wakeup_turn.payload = session.payload
-            wakeup_context = session.wakeup_context = WakeupContext(wakeup_turn)
+            wakeup_context = session.wakeup_context = WakeupContext(session.snapshot)
             asyncio.create_task(self.run_wakeup(session, event, session.last_active_time))
         else:
             wakeup_context = session.wakeup_context
@@ -563,7 +559,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         if not (wakeup_context := session.wakeup_context):
             raise RuntimeError("Cannot run wakeup without a WakeupContext")
-        turn = wakeup_context.turn
         tasks = wakeup_context.tasks
         seen = set()
         while True:
@@ -576,16 +571,15 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             seen.update(unseen_tasks)
             await asyncio.gather(*unseen_tasks)
         session.wakeup_context = None
-        turn.unit_prompts.append(WAKEUP_TIP)
-        turn.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in tasks))
         try:
             async with session.execute_lock:
                 recorder = session.recorder
-                turn.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
-                turn.input_text(session.turn_input)
-                session.idle_event.clear()
-                await self.execute_session(session, turn, event, time.time())
-                session.idle_event.set()
+                session.resume(wakeup_context.turn)
+                session.unit_prompts.append(WAKEUP_TIP)
+                session.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in tasks))
+                session.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
+                session.input_text(session.turn_input)
+                await self.execute_session(session, event, time.time())
         except SessionComplete as e:
             if reply := e.data:
                 self.send(reply, event)
@@ -625,12 +619,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         session.record_history(USER_TAG.format(event.nickname, message), timestamp)
         if session.execute_lock.locked():
             if session.aside_lock.locked() or session.idle_event.is_set():
-                print(
-                    f"[INPUT] returned: "
-                    f"execute={session.execute_lock.locked()}, "
-                    f"aside={session.aside_lock.locked()}, "
-                    f"idle={session.idle_event.is_set()}"
-                )
                 return
             session.pending_prompt = session.turn_input
             return
@@ -664,7 +652,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             except Exception as e:
                 logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
-            await self.execute_session(session, session, event, timestamp)
+            session.extend_messages()
+            await self.execute_session(session, event, timestamp)
 
     async def on_input(self, event: Event):
         """处理外部输入事件的入口。

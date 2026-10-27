@@ -226,12 +226,36 @@ class Session(Turn):
         self.pending_prompt: str | None
         self.wakeup_context: WakeupContext | None = None
 
+    def extend_messages(self):
+        self.payload["messages"].extend(iter_recoder(self.recorder))
+        if self.image_recorder:
+            self.extend_tools((READ_IMAGE_BY_ID_INFO,))
+
+    @property
+    def snapshot(self) -> Turn:
+        if self.cursor is None:
+            raise ValueError("Cannot snapshot an incomplete turn")
+        turn = self.create_turn()
+        turn.usage_counter = {}
+        turn.api = self.api
+        turn.payload = self.payload
+        turn.scripts_enum.extend(self.scripts_enum)
+        turn.references_enum.extend(self.references_enum)
+        return turn
+
+    def resume(self, snapshot: Turn):
+        if self.cursor is not None:
+            raise ValueError("Cannot resume an active session")
+        self.usage_counter.clear()
+        self.usage_counter.update(snapshot.usage_counter)
+        self.api = snapshot.api
+        self.payload = snapshot.payload
+        self.scripts_enum.extend(snapshot.scripts_enum)
+        self.references_enum.extend(snapshot.references_enum)
+
     @override
     def activate(self):
         self.idle_event.clear()
-        self.payload["messages"].extend(self.messages)
-        if self.image_recorder:
-            self.extend_tools((READ_IMAGE_BY_ID_INFO,))
         super().activate()
 
     @override
