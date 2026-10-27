@@ -143,8 +143,8 @@ class ConstantConfig(BaseModel):
     HIDDEN_CATEGORY: str = ":hidden"
     BUILTIN_CATEGORY: str = ":builtin"
     INTRINSIC_CATEGORY: str = ":intrinsic"
-    SKILL_MENU: str = "skill_menu"
-    SKILL_MENU_DESC: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能"
+    DISCOVER_TOOLS: str = "discover_tools"
+    DISCOVER_TOOLS_DESC: str = "Discover additional tools when the available tools are insufficient to complete the user's request."
     READ_IMAGE_BY_ID: str = "read_image_by_id"
     READ_IMAGE_BY_ID_DESC: str = """\
 上下文中的图片已替换成格式为 [image:image_id] 的标签

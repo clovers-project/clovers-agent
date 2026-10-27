@@ -21,8 +21,8 @@ from .constants import (
     ASSISTANT_TAG,
     ON_CHAT,
     ON_CHAT_DESC,
-    SKILL_MENU,
-    SKILL_MENU_DESC,
+    DISCOVER_TOOLS,
+    DISCOVER_TOOLS_DESC,
     BUILTIN_CATEGORY,
     INTRINSIC_CATEGORY,
     READ_IMAGE_BY_ID_INFO,
@@ -96,7 +96,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 技能初始化
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
-        self.register(SKILL_MENU, SKILL_MENU_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(skill_menu)
+        self.register(DISCOVER_TOOLS, DISCOVER_TOOLS_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(discover_tools)
         self.tool_invoker[EXECUTE_SCRIPT] = execute_script
         self.tool_invoker[READ_REFERENCE] = read_reference
         self.category_decorator(READ_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(read_image_by_id)
@@ -681,7 +681,7 @@ async def on_chat(agent: CloversAgent, turn: Turn, event: Event):
 
 
 @cast_invoker
-async def skill_menu(agent: CloversAgent, turn: Turn, event: Event, category: str):
+async def discover_tools(agent: CloversAgent, turn: Turn, event: Event, category: str):
     if prompts := await agent.activate_category(category, turn, event):
         prompt = "\n".join(x for x in prompts if x)
     else:
