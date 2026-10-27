@@ -143,8 +143,11 @@ class ConstantConfig(BaseModel):
     HIDDEN_CATEGORY: str = ":hidden"
     BUILTIN_CATEGORY: str = ":builtin"
     INTRINSIC_CATEGORY: str = ":intrinsic"
-    DISCOVER_TOOLS: str = "discover_tools"
-    DISCOVER_TOOLS_DESC: str = "Discover additional tools when the available tools are insufficient to complete the user's request."
+    LOAD_TOOLS: str = "load_tools"
+    LOAD_TOOLS_DESC: str = """\
+Dynamically inject the tools in a category into the currently available tools. \
+Use this when the available tools are insufficient to complete the task.\
+"""
     READ_IMAGE_BY_ID: str = "read_image_by_id"
     READ_IMAGE_BY_ID_DESC: str = """\
 上下文中的图片已替换成格式为 [image:image_id] 的标签

@@ -21,8 +21,8 @@ from .constants import (
     ASSISTANT_TAG,
     ON_CHAT,
     ON_CHAT_DESC,
-    DISCOVER_TOOLS,
-    DISCOVER_TOOLS_DESC,
+    LOAD_TOOLS,
+    LOAD_TOOLS_DESC,
     BUILTIN_CATEGORY,
     INTRINSIC_CATEGORY,
     READ_IMAGE_BY_ID_INFO,
@@ -96,7 +96,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         # 技能初始化
         self._category_schema: BaseJSONSchemaType = {"type": "string"}
         self.register(ON_CHAT, ON_CHAT_DESC)(on_chat)
-        self.register(DISCOVER_TOOLS, DISCOVER_TOOLS_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(discover_tools)
+        self.register(LOAD_TOOLS, LOAD_TOOLS_DESC, {"category": self._category_schema}, INTRINSIC_CATEGORY)(load_tools)
         self.tool_invoker[EXECUTE_SCRIPT] = execute_script
         self.tool_invoker[READ_REFERENCE] = read_reference
         self.category_decorator(READ_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(read_image_by_id)
@@ -681,17 +681,19 @@ async def on_chat(agent: CloversAgent, turn: Turn, event: Event):
 
 
 @cast_invoker
-async def discover_tools(agent: CloversAgent, turn: Turn, event: Event, category: str):
-    if prompts := await agent.activate_category(category, turn, event):
-        prompt = "\n".join(x for x in prompts if x)
-    else:
-        prompt = ""
-    turn.extend_tools(agent.select_tools(category))
+async def load_tools(agent: CloversAgent, turn: Turn, event: Event, category: str):
+    prompts = []
+    tools = agent.select_tools(category)
+    if tools:
+        turn.extend_tools(tools)
+        prompts.append(f"Tools injected and now available: {", ".join(x["function"]["name"] for x in tools)}")
+    if tips := await agent.activate_category(category, turn, event):
+        prompts.extend(tips)
     if scripts_map := agent.scripts_map.get(category):
         turn.extend_scripts(scripts_map.keys())
     if references_map := agent.references_map.get(category):
         turn.extend_references(references_map.keys())
-    return prompt or f"Skills for '{category}' have been loaded."
+    return "\n".join(prompts)
 
 
 @cast_invoker
