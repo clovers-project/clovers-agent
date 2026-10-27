@@ -1,6 +1,2 @@
 [tool.uv]
-workspace = { members = [
-    "clovers-agent",
-    "clovers-agent-toolkit",
-    "clovers-agent-market-analysis",
-] }
+workspace = { members = ["clovers-agent", "clovers-agent-toolkit"] }
