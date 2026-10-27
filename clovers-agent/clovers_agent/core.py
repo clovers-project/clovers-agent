@@ -402,8 +402,10 @@ class AgentSkills(AgentTools):
             return
         module = load_module_from_path(skill_md[0], skill_path / "skill.py")
         other_mds = [md for file in skill_path.glob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
-        references = [file for file in (skill_path / "references").rglob("*") if file.is_file()]
-        scripts = [file for file in (skill_path / "scripts").rglob("*") if file.is_file()]
+        script_path = skill_path / "scripts"
+        reference_path = skill_path / "references"
+        scripts = tuple(file for file in script_path.rglob("*") if file.is_file())
+        references = tuple(file for file in reference_path.rglob("*") if file.is_file())
         if not other_mds and not scripts and not references:
             intro_k = self.load_skill_md(skill_md, None, getattr(module, skill_md[0], None))
             if intro_k:
@@ -421,16 +423,16 @@ class AgentSkills(AgentTools):
             self._loaded_categories.discard(category)
             self.remove_category(category)
             raise
-        for script_path in scripts:
+        for script_file in scripts:
             if not category in self.scripts_map:
                 self.scripts_map[category] = {}
-            path = category / script_path.relative_to(skill_path)
-            self.scripts_map[category][path.as_posix()] = script_path.resolve().as_posix()
-        for reference_path in references:
+            path = category / script_file.relative_to(script_path)
+            self.scripts_map[category][path.as_posix()] = script_file.resolve().as_posix()
+        for reference_file in references:
             if not category in self.references_map:
                 self.references_map[category] = {}
-            path = category / reference_path.relative_to(skill_path)
-            self.references_map[category][path.as_posix()] = reference_path.resolve().as_posix()
+            path = category / reference_file.relative_to(reference_path)
+            self.references_map[category][path.as_posix()] = reference_file.resolve().as_posix()
         logger.info('[%s][LOAD SKILL] "Category - %s" loaded', self.name, category)
 
     @property

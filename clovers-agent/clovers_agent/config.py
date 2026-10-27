@@ -199,7 +199,6 @@ Example:
 Read a reference file from a Skill.
 
 Parameters:
-
 - path (string): Path to the reference file.
 """
     WAKEUP_TIP: str = "The following is a wakeup message."
