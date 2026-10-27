@@ -1,4 +1,4 @@
-__version__ = "0.2.18"
+__version__ = "0.3.0"
 __all__ = ["TOOLS"]
 from .base import TOOLS, CONFIG, CATEGORIES
 
