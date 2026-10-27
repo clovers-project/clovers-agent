@@ -513,6 +513,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         session.last_active_time = timestamp
         session.current_output = reply = None
         async for reply in self.iter_replies(session, event):
+            async with session.aside_lock:
+                pass  # 旁支同步，如果 aside_lock 在占用则说明 aside 可能注入修改信息
             if session.pending_prompt:
                 session.payload["messages"].append({"role": "user", "content": session.pending_prompt})
                 session.pending_prompt = None
