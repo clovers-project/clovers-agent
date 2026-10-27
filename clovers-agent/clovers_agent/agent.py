@@ -380,7 +380,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             event (Event): 当前事件。
 
         Returns:
-            str: Intro 名
+            str: Intro
         """
         if len(self.intro_manifest) < 2:
             return await on_chat(self, session, event)
@@ -391,12 +391,20 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         turn.input_text(content)
         turn.payload["tools"] = list(self.intro_manifest.values())
         turn.activate()
-        message = await turn.call_api()
-        if "tool_calls" not in message:
-            raise ValueError(f"message must contain tool_calls, but got {message}")
-        intro = message["tool_calls"][0]["function"]["name"]
-        # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
-        return await self.intro_invoker[intro](self, session, event) or intro
+        try:
+            message = await turn.call_api()
+            if "tool_calls" not in message:
+                raise ValueError(f"message must contain tool_calls, but got {message}")
+            router = message["tool_calls"][0]["function"]["name"]
+            # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
+            session.api
+            session.payload
+            intro = await self.intro_invoker[router](self, session, event)
+            logger.info("[%s][ROUTER] %s", self.name, router)
+        except Exception as e:
+            intro = await on_chat(self, session, event)
+            logger.warning("[%s][ROUTER] session %s failed: %s: %s", self.name, session.session_id, type(e).__name__, e)
+        return intro
 
     async def call_chime_in(self, session: Session, content: str):
         """执行主动插话回复。
@@ -636,14 +644,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             images = await asyncio.gather(*(map(self._api.download_url, event.image_list)))
             session.input_image(image for image in images if image)
             session.input_text(turn_input)
-            try:
-                intro = await self.route(turn_input, session, event)
-                session.api
-                session.payload
-                logger.info("[%s][ROUTER] %s", self.name, intro)
-            except Exception as e:
-                intro = await on_chat(self, session, event)
-                logger.warning("[%s][ROUTER] session %s failed: %s: %s", self.name, session.session_id, type(e).__name__, e)
+            intro = await self.route(turn_input, session, event)
             session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
             try:
