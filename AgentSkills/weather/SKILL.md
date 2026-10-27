@@ -1,6 +1,6 @@
 ---
 name: weather
-description: 包含天气相关的工具。如查询天气等。
+description: 包含天气相关的工具。如查询天气等
 ---
 
 此工具包为 Clovers Agent SKILL 模板，非生产环境使用。

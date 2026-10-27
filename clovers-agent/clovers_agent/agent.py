@@ -755,7 +755,7 @@ async def execute_script(
             decode_stream(process.stderr, EXECUTE_SCRIPT_MAX_TAIL_LEN),
             process.wait(),
         )
-        if not isinstance(timeout, int):
+        if not isinstance(timeout, float):
             timeout = EXECUTE_SCRIPT_DEFAULT_TIMEOUT
         else:
             timeout = min(timeout, EXECUTE_SCRIPT_MAX_TIMEOUT)

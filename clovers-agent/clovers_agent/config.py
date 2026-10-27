@@ -144,66 +144,63 @@ class ConstantConfig(BaseModel):
     BUILTIN_CATEGORY: str = ":builtin"
     INTRINSIC_CATEGORY: str = ":intrinsic"
     SKILL_MENU: str = "skill_menu"
-    SKILL_MENU_DESC: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能。"
+    SKILL_MENU_DESC: str = "如果助手无法独自完成用户指令，则需要调用此工具获取更多技能"
     READ_IMAGE_BY_ID: str = "read_image_by_id"
     READ_IMAGE_BY_ID_DESC: str = """\
 上下文中的图片已替换成格式为 [image:image_id] 的标签
 当用户的话题引用上述图片或助手认为自己需要查看该图片时调用此工具
-注意不要向用户透露有关图片标签的事实。"""
-    READ_IMAGE_BY_ID_IMAGE_ID_DESC: str = "image_id 只能在上下文中获取。"
+注意不要向用户透露有关图片标签的事实"""
+    READ_IMAGE_BY_ID_IMAGE_ID_DESC: str = "image_id 只能在上下文中获取"
     INJECT_PROMPT: str = "inject_prompt"
     INJECT_PROMPT_DESC: str = "为当前任务注入一条提示，用于对任务进行修正或补充说明"
     INJECT_PROMPT_PROMPT_DESC: str = "提示内容"
     # 视觉相关配置
     VISION_TAG: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
     VISION_PROMPT: str = """\
-你是一位专业的视觉分析专家。
-你的任务是观察用户提供的图像，并将其内容转化为详尽、准确且具有逻辑性的文字描述。
-这些描述将被用作后续文本模型的上下文参考，因此你的描述必须足够清晰。
+你是一位专业的视觉分析专家
+你的任务是观察用户提供的图像，并将其内容转化为详尽、准确且具有逻辑性的文字描述
+这些描述将被用作后续文本模型的上下文参考，因此你的描述必须足够清晰
 
 对于每一张图片，请考虑以下维度：
 - 图片的主体与背景，各元素的颜色、材质、形状、光影效果、元素之间的空间位置关系
-- 如果图像中包含任何文字，请准确描述。
-- 图片类型：如油画、照片、图表、截屏等。
+- 如果图像中包含任何文字，请准确描述
+- 图片类型：如油画、照片、图表、截屏等
 - 如果图片是摄影、插画、艺术作品等，则需要进行解读，如结构、风格、主题、情绪等
 
 你的输出需要遵循以下要求：
-- 如果有多张图片，则需要在描述中进行区分。
-- 描述应当足够具体。
-- **不要直接回复用户**：你的输出应仅包含对图片的描述，不含任何如引导，提问等其他内容。
+- 如果有多张图片，则需要在描述中进行区分
+- 描述应当足够具体
+- **不要直接回复用户**：你的输出应仅包含对图片的描述，不含任何如引导，提问等其他内容
 
-请现在开始分析图像并生成描述。
+请现在开始分析图像并生成描述
 """
     EXECUTE_SCRIPT: str = "execute_script"
     EXECUTE_SCRIPT_DEFAULT_TIMEOUT: int = 120
     EXECUTE_SCRIPT_MAX_TIMEOUT: int = 1800
     EXECUTE_SCRIPT_MAX_TAIL_LEN: int = 1600
     EXECUTE_SCRIPT_DESC: str = f"""\
-执行一个脚本文件，可指定解释器或直接执行。
+Execute a script file from a Skill using a specified interpreter or directly if the script is executable.
 
-**参数**：
-- `interpreter` (string)：解释器名称，例如 `"python"`、`"bash"`、`"node"` 等。若脚本自身可执行，则不传入此参数。
-- `path` (string)：脚本路径。
-- `args` (array of strings)：传递给脚本的参数列表（每个参数作为一个独立字符串）。
-- `timeout` (number)：执行超时时间，默认为 120 秒。
+Parameters:
+- `path` (string): Path to the script file.
+- `interpreter` (string, optional): Interpreter used to execute the script, such as `python`, `bash`, or `node`. Omit if the script is directly executable.
+- `args` (array[string], optional): List of command-line arguments to pass to the script.
+- `timeout` (number, optional): Execution timeout in seconds. Defaults to `{EXECUTE_SCRIPT_DEFAULT_TIMEOUT}`. The process is terminated if the timeout is exceeded.
 
-**说明**：
-- 该工具只能执行 Skill 的脚本文件，不能执行任意 shell 命令。
-- 执行超时默认为 {EXECUTE_SCRIPT_DEFAULT_TIMEOUT} 秒，超时后会终止进程。
-
-**示例**：
-- 执行 Python 脚本：`interpreter="python"`，`args=["--verbose", "data.txt"]`
-- 执行可直接运行的脚本：`interpreter="./"`，`args=["--help"]`
+Example:
+{{
+  "interpreter": "python",
+  "path": "category/script.py",
+  "args": ["--verbose", "data.txt"]
+}}
 """
     READ_REFERENCE: str = "read_reference"
     READ_REFERENCE_DESC: str = """\
-读取参考资料。
+Read a reference file from a Skill.
 
-**参数**：
-- `path` (string)：参考资料路径。
+Parameters:
 
-**说明**：
-- 该工具只能读取 Skill 的 reference/参考资料文件，不能读取普通工作区文件。
+- path (string): Path to the reference file.
 """
     WAKEUP_TIP: str = "The following is a wakeup message."
 

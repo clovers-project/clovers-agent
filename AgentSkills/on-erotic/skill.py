@@ -3,7 +3,6 @@ from clovers_agent.constants import ON_CHAT
 
 
 @cast_invoker
-async def on_erotic(agent: CloversAgent, session: Turn, event: Event, content: str):
-    session.create_payload(agent.api("on_erotic"), agent.style_prompt)
-    session.unit_prompts.append(content)
+async def on_erotic(agent: CloversAgent, turn: Turn, event: Event, content: str):
+    turn.create_payload(agent.api("on_erotic"), f"{agent.style_prompt}\n{content}")
     return ON_CHAT

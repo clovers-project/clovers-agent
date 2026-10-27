@@ -401,7 +401,7 @@ class AgentSkills(AgentTools):
         if not (md_file.exists() and (skill_md := parse_skill(md_file))):
             return
         module = load_module_from_path(skill_md[0], skill_path / "skill.py")
-        other_mds = [md for file in skill_path.rglob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
+        other_mds = [md for file in skill_path.glob("*.md") if not file.samefile(md_file) if (md := parse_skill(file))]
         references = [file for file in (skill_path / "references").rglob("*") if file.is_file()]
         scripts = [file for file in (skill_path / "scripts").rglob("*") if file.is_file()]
         if not other_mds and not scripts and not references:

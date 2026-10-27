@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 
 @cast_invoker
-async def weather_report(agent: CloversAgent, session: Turn, event: Event, content: str, city: str):
+async def weather_report(agent: CloversAgent, turn: Turn, event: Event, content: str, city: str):
     now = datetime.now()
     kwargs = {}
     kwargs["city"] = city
