@@ -60,12 +60,10 @@ else:
         return shell
 
 
-async def enter_workspace(agent: CloversAgent, turn: Turn):
+def enter_workspace(agent: CloversAgent, turn: Turn):
     prompts = ["# Workspace initialized"]
     if USE_SHELL:
         try:
-            shell = session_shell(turn)
-            await shell.activate()
             turn.extend_tools(agent.tool_manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append("Current system: Debian\nCurrent working directory: /workspace")
             return "\n\n".join(prompts)
@@ -90,13 +88,13 @@ async def on_task(agent: CloversAgent, turn: Turn, event: Event):
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
-    await enter_workspace(agent, turn)
+    turn.unit_prompts.append(enter_workspace(agent, turn))
     return ""
 
 
 @TOOLS.create_category(WORKSPACE, "Tools for workspace file and command operations.")
 async def workspace_category(agent: CloversAgent, session: Turn, event: Event):
-    return await enter_workspace(agent, session)
+    return enter_workspace(agent, session)
 
 
 @TOOLS.register(
@@ -154,11 +152,9 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event, command: str):
     try:
-        shell = session_shell(turn)
-        output = await shell.execute(command)
+        return await session_shell(turn).execute(command)
     except Exception:
         return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
-    return output
 
 
 @TOOLS.register(
@@ -183,7 +179,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
-    sub_turn.unit_prompts.append(await enter_workspace(agent, sub_turn))
+    sub_turn.unit_prompts.append(enter_workspace(agent, sub_turn))
     if tool := next((x for x in tools if x["function"]["name"] == "subagent"), None):
         sub_turn.payload["tools"].remove(tool)
     sub_turn.input_text(prompt)
