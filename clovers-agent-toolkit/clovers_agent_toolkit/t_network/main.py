@@ -120,7 +120,7 @@ async def _(
         return f"未找到关于 '{query}' 的相关搜索结果。"
     results.sort(key=lambda x: x.setdefault("rerank_score", 0.0), reverse=True)
     avg_score = sum(x["rerank_score"] for x in results) / len(results)
-    md_output = [f"### 关于 '{query}' 的搜索结果：\n"]
+    md_output = [f"**关于 '{query}' 的搜索结果：**"]
     for idx, item in enumerate(results[:6], 1):
         if idx > 3 and item["rerank_score"] < avg_score:
             break
@@ -132,7 +132,7 @@ async def _(
             meta = f"来源: {site}  | 发布: {date}"
         else:
             meta = f"来源: {site}"
-        md_output.append(f"### {title}\n{meta}\n{summary}")
+        md_output.append(f"**{title}**\n{meta}\n{summary}")
     return "\n---\n".join(md_output)
 
 
