@@ -249,22 +249,20 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         return session
 
     async def activate_intro(self, intro: str, turn: Turn, event: Event):
-        """执行指定工具分类的激活钩子。
+        """执行指定初始工具钩子。
 
         并发执行该分类下注册的所有钩子，并收集执行结果。
 
         Args:
-            name (str): 工具分类名称。
+            intro (str): 初始工具名称。
             session (Turn): 当前轮次。
             event (Event): 当前事件。
-
-        Returns:
-            list[str] | None: 钩子返回的结果列表；没有注册钩子时返回 None。
         """
         hooks = self.category_hooks.get(intro)
         if not hooks:
             return
-        return await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
+        intro_prompts = await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
+        turn.unit_prompts.extend(x for x in intro_prompts if x)
 
     async def activate_category(self, category: str, turn: Turn, event: Event) -> list[str] | None:
         """执行指定工具分类的激活钩子。
@@ -272,7 +270,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         并发执行该分类下注册的所有钩子，并收集执行结果。
 
         Args:
-            name (str): 工具分类名称。
+            category (str): 工具分类名称。
             session (Turn): 当前轮次。
             event (Event): 当前事件。
 
