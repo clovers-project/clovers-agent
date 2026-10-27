@@ -11,8 +11,9 @@ from ..base import TOOLS, CONFIG
 from .typing import UserProfile, MemoryItem, MemoryItemTuple
 
 memory_config = CONFIG.memory
-REMINDER_THRESHOLD = memory_config.reminder_threshold
-STRONG_REMINDER_THRESHOLD = memory_config.strong_reminder_threshold
+REMINDER_COOLDOWN_TURNS = memory_config.reminder_cooldown_turns
+REMINDER_TURNS = memory_config.reminder_turns
+STRONG_REMINDER_TURNS = memory_config.strong_reminder_turns
 PROFILE_MEMORY_SIZE = memory_config.profile_memory_size
 
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
@@ -39,10 +40,12 @@ async def _(agent: CloversAgent, turn: Turn, event: Event):
     if user_profile.block_until > time.time():
         turn.complete_session()
     notes.append(user_profile.to_markdown())
-    if count > STRONG_REMINDER_THRESHOLD:
-        notes.append(f"档案在 {count} 次对话前更新，请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
-    elif count > REMINDER_THRESHOLD:
-        notes.append(f"档案在 {count} 次对话前更新，请确认用户档案是否过时。")
+    if count > STRONG_REMINDER_TURNS:
+        notes.append(f"档案在 {count} 轮对话前更新。请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
+    elif count > REMINDER_TURNS:
+        notes.append(f"档案在 {count} 轮对话前更新。请确认用户档案是否过时。")
+    elif count < REMINDER_COOLDOWN_TURNS:
+        notes.append(f"档案在 {count} 轮对话前更新。除非用户提供了全新的长期重要信息，否则无需更新档案。")
     return "\n\n".join(notes)
 
 

@@ -14,7 +14,7 @@ network_config = CONFIG.network
 deepseek_search_key = network_config.deepseek_search_key
 deepseek_search_url = network_config.deepseek_search_url
 
-TOOLS.create_category("network", "包含各种联网功能，用于从互联网获取信息和资源。")
+TOOLS.create_category("network", "包含搜索和网页提取工具")
 
 
 @TOOLS.register(
