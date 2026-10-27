@@ -542,11 +542,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if session.wakeup_context is None:
             if session.cursor is None:
                 raise RuntimeError("Cannot create WakeupContext when the session is inactive")
-            turn = turn.create_turn()
-            turn.usage_counter = {}
-            turn.api = session.api
-            turn.payload = session.payload
-            wakeup_context = session.wakeup_context = WakeupContext(turn)
+            wakeup_turn = turn.create_turn()
+            wakeup_turn.usage_counter = {}
+            wakeup_turn.api = session.api
+            wakeup_turn.payload = session.payload
+            wakeup_context = session.wakeup_context = WakeupContext(wakeup_turn)
             asyncio.create_task(self.run_wakeup(session, event, session.last_active_time))
         else:
             wakeup_context = session.wakeup_context

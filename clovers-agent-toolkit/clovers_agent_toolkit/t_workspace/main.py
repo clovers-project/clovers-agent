@@ -1,18 +1,17 @@
+from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 from clovers_agent import CloversAgent, Turn, Event
 from clovers_agent.api import ALLOWED_IMAGE_SUBTYPES
-from clovers_agent.session import Session
 from clovers_agent.utils import decode_bytes, to_b64url
 from clovers_agent.config import CONFIG as AGENT_CONFIG
 from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES
 from ..utils import retry_request, format_path, format_size, md5, list_entries, render_listing
-from .constants import WORKSPACE, KEY_SUBAGENTS, KEY_SUBAGENTS, SUBAGENT_PROMPT
+from .constants import WORKSPACE, SUBAGENT_PROMPT
 
-from typing import TYPE_CHECKING, cast
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .docker import Shell
