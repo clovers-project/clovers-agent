@@ -146,7 +146,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
 
 @TOOLS.register(
     "execute_command",
-    "Run a shell command in the workspace. The shell persists between calls, so the working directory carries over — each result ends with the current working directory.",
+    "Run a shell command in the workspace.",
     {"command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."}},
     HIDDEN_CATEGORY,
 )
