@@ -397,9 +397,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 raise ValueError(f"message must contain tool_calls, but got {message}")
             router = message["tool_calls"][0]["function"]["name"]
             # 因为 router 的模型一般很轻量，这里禁止 intro_invoker 的参数防止造成不必要的 fallback
+            intro = await self.intro_invoker[router](self, session, event)
             session.api
             session.payload
-            intro = await self.intro_invoker[router](self, session, event)
             logger.info("[%s][ROUTER] %s", self.name, router)
         except Exception as e:
             intro = await on_chat(self, session, event)
