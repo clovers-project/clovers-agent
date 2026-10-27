@@ -258,7 +258,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session (Turn): 当前轮次。
             event (Event): 当前事件。
         """
-        hooks = self.category_hooks.get(intro)
+        hooks = self.intro_hooks.get(intro)
         if not hooks:
             return
         intro_prompts = await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
@@ -540,6 +540,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         session = self.current_session(turn.session_id)
         if session.wakeup_context is None:
+            print("创建唤醒调用链上下文")
             if session.cursor is None:
                 raise RuntimeError("Cannot create WakeupContext when the session is inactive")
             wakeup_turn = turn.create_turn()
@@ -549,6 +550,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             wakeup_context = session.wakeup_context = WakeupContext(wakeup_turn)
             asyncio.create_task(self.run_wakeup(session, event, session.last_active_time))
         else:
+            print("唤醒调用链已存在")
             wakeup_context = session.wakeup_context
         turn.usage_counter = wakeup_context.turn.usage_counter
         wakeup_context.tasks.append(asyncio.create_task(self.resolve_turn(turn, event)))

@@ -111,7 +111,7 @@ Never attempt to execute the current task yourself.
 """
     """中间提示 这是助手执行任务时，快速回复使用的提示"""
     summary_prompt: str = """\
-对上述所有历史对话进行详细总结
+对上述所有历史对话进行总结
 
 - 去掉冗余内容和重复讨论，不直接列举对话内容
 - 保留核心讨论内容与关键事实
