@@ -68,7 +68,7 @@ TOOLS.create_category("network", "包含各种联网功能，用于从互联网�
 )
 async def _(
     agent: CloversAgent,
-    session: Turn,
+    turn: Turn,
     event: Event,
     query: str,
     question: str | None = None,
@@ -142,7 +142,7 @@ async def _(
     {"url": {"type": "string", "description": "网页的完整 URL 地址"}},
     NETWORK,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, url: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, url: str):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     resp = await retry_request(agent.async_client.get, url, headers=headers)
     text = trafilatura.extract(

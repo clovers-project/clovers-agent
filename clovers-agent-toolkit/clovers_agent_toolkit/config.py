@@ -28,7 +28,7 @@ class NetworkConfig(BaseModel):
 
 
 class WorkspaceConfig(BaseModel):
-    use_shell: bool = True
+    use_shell: bool = False
     """是否使用shell"""
     max_subagent_count: int = 8
     """最大子代理数量"""
@@ -36,6 +36,8 @@ class WorkspaceConfig(BaseModel):
     """最大下载作为工具返回文件大小"""
     docker_image: str = "nikolaik/python-nodejs:python3.12-nodejs20"
     """docker镜像名称"""
+    shared_workspace: bool = False
+    """是否使用共享工作空间"""
 
 
 class Config(BaseConfig):

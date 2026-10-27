@@ -18,9 +18,9 @@ PROFILE_MEMORY_SIZE = memory_config.profile_memory_size
 USER_PROFILE = Path(AGENT_CONFIG.path) / "UserProfile"
 
 
-@TOOLS.on_category(ON_CHAT)
-async def _(agent: CloversAgent, session: Turn, event: Event):
-    extra = session.extra
+@TOOLS.on_intro(ON_CHAT)
+async def _(agent: CloversAgent, turn: Turn, event: Event):
+    extra = turn.extra
     if UPDATE_USER_PROFILE not in extra:
         extra[UPDATE_USER_PROFILE] = {}
     counter = extra[UPDATE_USER_PROFILE]
@@ -37,7 +37,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event):
         profile_path.unlink()
         return f"# 用户档案：{event.nickname}\n\n目前尚无该用户档案，请在**上下文足够充分**时进行使用 '{UPDATE_USER_PROFILE}' 工具进行第一次更新。"
     if user_profile.block_until > time.time():
-        session.complete_session()
+        turn.complete_session()
     notes.append(user_profile.to_markdown())
     if count > STRONG_REMINDER_THRESHOLD:
         notes.append(f"档案在 {count} 次对话前更新，请及时使用 '{UPDATE_USER_PROFILE}' 工具对档案进行更新。")
@@ -52,7 +52,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event):
     {"block_days": {"type": "number", "description": "拉黑天数，默认 7 天"}},
     category=ON_CHAT,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, block_days: int = 7):
+async def _(agent: CloversAgent, turn: Turn, event: Event, block_days: int = 7):
     user_id = event.user_id
     user_profile_json = USER_PROFILE / f"{user_id}.json"
     block_t = min(max(block_days, 1), 30) * 86400 + time.time()
@@ -70,7 +70,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, block_days: int = 
     "用于更新助手对用户的印象档案。当用户约定称呼、展现偏好、或你对该用户的印象需要修正时，应主动调用此工具",
     category=ON_CHAT,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, **kwargs):
+async def _(agent: CloversAgent, turn: Turn, event: Event, **kwargs):
     return UPDATE_USER_PROFILE_PROMPT
 
 
@@ -94,7 +94,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, **kwargs):
 )
 async def _(
     agent: CloversAgent,
-    session: Turn,
+    turn: Turn,
     event: Event,
     address_as: str = "",
     tags: str = "",

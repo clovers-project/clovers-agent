@@ -14,7 +14,7 @@ logger.warning("Debug 模式已启用，请勿将此模式用于生产环境。"
 
 
 @TOOLS.create_category(DEBUG_UTILS, "调试工具：重新加载模块、查看工具源码、查看工具失败详情")
-async def _(agent: CloversAgent, session: Turn, event: Event):
+async def _(agent: CloversAgent, turn: Turn, event: Event):
     sections = ["### Debug 模式"]
     if module_name := agent.extra.get(KEY_DEBUG_TARGET):
         sections.append(f"当前 Debug 目标: {module_name}")
@@ -31,7 +31,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event):
     "收集并编号尚未编号的工具调用失败，返回按发生时间排序的列表（格式为 `编号. 工具名 - 异常信息`）。",
     category=DEBUG_UTILS,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event):
+async def _(agent: CloversAgent, turn: Turn, event: Event):
     return list_tool_failures(agent) or "暂无工具调用失败记录。"
 
 
@@ -41,7 +41,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event):
     {"tool_name": {"type": "string", "description": "工具名称，须为已注册工具，如 `list_tool_failures`。"}},
     category=DEBUG_UTILS,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, tool_name: str) -> str:
+async def _(agent: CloversAgent, turn: Turn, event: Event, tool_name: str) -> str:
     return get_tool_source(agent, tool_name)
 
 
@@ -51,7 +51,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, tool_name: str) ->
     {"failure_id": {"type": "integer", "description": "若该失败尚未编号，请先调用 `list_tool_failures`。"}},
     category=DEBUG_UTILS,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, failure_id: int) -> str:
+async def _(agent: CloversAgent, turn: Turn, event: Event, failure_id: int) -> str:
     log = f_log(agent)
     if not log:
         listing = list_tool_failures(agent)
@@ -88,7 +88,7 @@ Traceback:
     category=DEBUG_UTILS,
     required=[],
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, module_name: str | None = None) -> str:
+async def _(agent: CloversAgent, turn: Turn, event: Event, module_name: str | None = None) -> str:
     if module_name is not None:
         agent.extra[KEY_DEBUG_TARGET] = module_name.strip().replace("-", "_")
         logger.info("调试目标模块已切换为 %s", module_name)

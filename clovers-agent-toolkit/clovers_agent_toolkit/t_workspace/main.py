@@ -9,10 +9,17 @@ from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES
 from ..utils import retry_request, format_path, format_size, md5, list_entries, render_listing
-from .turn_batch import TurnBatch
 from .constants import WORKSPACE, KEY_SUBAGENTS, KEY_SUBAGENTS, SUBAGENT_PROMPT
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
+from collections.abc import Callable
+
+if TYPE_CHECKING:
+    from .docker import Shell
+
+SUCCESS_TOOLIST = "execute_command", "subagent"
+FALLBACK_TOOLIST = "fetch_url", "ls", "read_file", "write_file"
+WORKSPACE_PATH = Path(AGENT_CONFIG.path) / "workspace"
 
 workspace_config = CONFIG.workspace
 
@@ -20,52 +27,74 @@ DOCKER_IMAGE = workspace_config.docker_image
 MAX_SUBAGENT_COUNT = workspace_config.max_subagent_count
 MAX_DOWNLOAD_RETURN_SIZE = workspace_config.max_download_return_size
 USE_SHELL = workspace_config.use_shell
+SHARED_DOCKER_CONTAINER = workspace_config.shared_workspace
+if SHARED_DOCKER_CONTAINER:
+    shared_shell = None
+    SHARED_ID = "shared"
 
-SUCCESS_TOOLIST = "execute_command", "subagent"
-FALLBACK_TOOLIST = "fetch_url", "ls", "read_file", "write_file"
-WORKSPACE_PATH = Path(AGENT_CONFIG.path) / "workspace"
+    def session_workspace(session_id: str) -> Path:
+        return WORKSPACE_PATH / SHARED_ID
+
+    def session_shell(turn: Turn) -> Shell:
+        from .docker import Shell
+
+        global shared_shell
+        if not isinstance(shared_shell, Shell):
+            shared_shell = Shell(SHARED_ID, WORKSPACE_PATH, DOCKER_IMAGE)
+            shared_shell.workdir = "/workspace"
+        return shared_shell
+
+else:
+
+    def session_workspace(session_id: str) -> Path:
+        return WORKSPACE_PATH / session_id
+
+    def session_shell(turn: Turn) -> Shell:
+        from .docker import Shell
+
+        if "shell" in turn.extra:
+            shell = turn.extra["shell"]
+        else:
+            shell = None
+        if not isinstance(shell, Shell):
+            shell = Shell(turn.session_id, WORKSPACE_PATH, DOCKER_IMAGE)
+            shell.workdir = "/workspace"
+            turn.extra["shell"] = shell
+        return shell
 
 
-async def enter_workspace(agent: CloversAgent, session: Turn):
+async def enter_workspace(agent: CloversAgent, turn: Turn):
     prompts = ["# Workspace initialized"]
     if USE_SHELL:
         try:
-            from .docker import Shell
-
-            if "shell" in session.extra:
-                shell = session.extra["shell"]
-            else:
-                shell = None
-            if not isinstance(shell, Shell):
-                shell = Shell(session.session_id, WORKSPACE_PATH, DOCKER_IMAGE)
-                session.extra["shell"] = shell
+            shell = session_shell(turn)
             await shell.activate()
-            session.extra["shell"].workdir = "/workspace"
-            session.extend_tools(agent.tool_manifest[x] for x in SUCCESS_TOOLIST)
+            shell.workdir = "/workspace"
+            turn.extend_tools(agent.tool_manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append("Current system: Debian\nCurrent working directory: /workspace")
             return "\n\n".join(prompts)
         except Exception as e:
             logger.error("enter_workspace failed: %s: %s", type(e).__name__, e)
-    session.extend_tools(agent.tool_manifest[x] for x in FALLBACK_TOOLIST)
+    turn.extend_tools(agent.tool_manifest[x] for x in FALLBACK_TOOLIST)
     prompts.append("Current working directory: /workspace")
     return "\n\n".join(prompts)
 
 
 @TOOLS.register("on_task", "Call this when the current user request is a task that requires tools.")
-async def on_task(agent: CloversAgent, session: Turn, event: Event):
-    session.create_payload(agent.api("on_task"), agent.style_prompt)
-    workspace = WORKSPACE_PATH / session.session_id
+async def on_task(agent: CloversAgent, turn: Turn, event: Event):
+    turn.create_payload(agent.api("on_task"), agent.style_prompt)
+    workspace = session_workspace(turn.session_id)
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
     if (readme := workspace / "README.md").exists():
-        session.unit_prompts.append(decode_bytes(readme.read_bytes()))
+        turn.unit_prompts.append(decode_bytes(readme.read_bytes()))
     elif (readme := WORKSPACE_PATH / "README.md").exists():
-        session.unit_prompts.append(decode_bytes(readme.read_bytes()))
-    session.payload["tools"] = [
+        turn.unit_prompts.append(decode_bytes(readme.read_bytes()))
+    turn.payload["tools"] = [
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
-    await enter_workspace(agent, session)
+    await enter_workspace(agent, turn)
     return ""
 
 
@@ -80,22 +109,22 @@ async def workspace_category(agent: CloversAgent, session: Turn, event: Event):
     {"path": {"type": "string", "description": 'Image URL (e.g. "https://example.com/a.png") or local path (e.g. "logo.png").'}},
     INTRINSIC_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, path: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
     path = path.strip()
     if not path:
         return "path must not be empty."
     if path.lower().startswith("http"):
-        b64url = await session.api.download_url(path)
+        b64url = await turn.api.download_url(path)
         if not b64url:
             return "Resource not found or unsupported format."
     else:
-        file = WORKSPACE_PATH / session.session_id / format_path(path)
-        if not file.exists() or not file.is_file():
+        file = session_workspace(turn.session_id) / format_path(path)
+        if not file.is_file():
             return f'File not found: "{path}"'
         b64url = to_b64url(file.read_bytes(), ALLOWED_IMAGE_SUBTYPES)
         if not b64url:
             return f'Not a recognized image format: "{path}"'
-    session.input_image(b64url)
+    turn.input_image(b64url)
     return "Image attached to the current user input."
 
 
@@ -105,8 +134,8 @@ async def _(agent: CloversAgent, session: Turn, event: Event, path: str):
     {"file_path": {"type": "string", "description": "Path to the file to send."}},
     WORKSPACE,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
-    workspace = WORKSPACE_PATH / session.session_id
+async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
+    workspace = session_workspace(turn.session_id)
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
         return f'Not a workspace file: "{file_path}"'
@@ -127,13 +156,12 @@ async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     {"command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
-    from .docker import Shell
-
-    extra = session.extra
-    if "shell" not in extra or not isinstance(shell := extra["shell"], Shell):
+async def _(agent: CloversAgent, turn: Turn, event: Event, command: str):
+    try:
+        shell = session_shell(turn)
+        output = await shell.execute(command)
+    except Exception:
         return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
-    output = await shell.execute(command)
     return f"{output}\nCurrent working directory: {shell.workdir}"
 
 
@@ -148,34 +176,22 @@ async def _(agent: CloversAgent, session: Turn, event: Event, command: str):
     },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
-    extra = session.extra
-    if not KEY_SUBAGENTS in extra:
-        extra[KEY_SUBAGENTS] = {}
-    batchs = cast(dict[str, TurnBatch], extra[KEY_SUBAGENTS])
-    session_id = session.session_id
-    if session_id in batchs:
-        batch = batchs[session_id]
-        if len(batch.tasklist) > MAX_SUBAGENT_COUNT:
-            return f"Subagent limit reached. Slots are released only when the current call chain ends — do not create more subagents in this chain."
-    else:
-        if not isinstance(session, Session):
-            return "Subagents can only be created from the main session."
-        batch = batchs[session_id] = TurnBatch(agent, session, event)
-        batch.start().add_done_callback(lambda _: batchs.pop(session_id, None))
-
-    s = session.create_turn()
-    s.create_payload(session.api, SUBAGENT_PROMPT)
-    tools = s.payload["tools"] = [
+async def _(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
+    session = agent.current_session(turn.session_id)
+    if session.wakeup_context and len(session.wakeup_context.tasks) > MAX_SUBAGENT_COUNT:
+        return f"Subagent limit reached. Slots are released only when the current call chain ends — do not create more subagents in this chain."
+    sub_turn = turn.create_turn()
+    sub_turn.create_payload(turn.api, SUBAGENT_PROMPT)
+    tools = sub_turn.payload["tools"] = [
         *agent.select_tools(INTRINSIC_CATEGORY),
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
-    s.unit_prompts.append(await enter_workspace(agent, s))
+    sub_turn.unit_prompts.append(await enter_workspace(agent, sub_turn))
     if tool := next((x for x in tools if x["function"]["name"] == "subagent"), None):
-        s.payload["tools"].remove(tool)
-    s.input_text(prompt)
-    batch.submit(s, event)
+        sub_turn.payload["tools"].remove(tool)
+    sub_turn.input_text(prompt)
+    agent.submit_turn_for_wakeup(sub_turn, event)
     return "OK"
 
 
@@ -194,7 +210,7 @@ async def _(agent: CloversAgent, session: Turn, event: Event, prompt: str):
 )
 async def _(
     agent: CloversAgent,
-    session: Turn,
+    turn: Turn,
     event: Event,
     method: str,
     url: str,
@@ -213,14 +229,14 @@ async def _(
     s_size = format_size(r_size)
     # 指定了保存路径：写入工作区
     if file_path:
-        file = WORKSPACE_PATH / session.session_id / format_path(file_path)
+        file = session_workspace(turn.session_id) / format_path(file_path)
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_bytes(content)
         return f'Saved to "{file_path}" ({s_size}, HTTP {resp.status_code}).'
     # 未指定保存路径，但内容过大：拦截并落盘
     if r_size > MAX_DOWNLOAD_RETURN_SIZE:
         saved_name = f"{md5(content)}.bin"
-        file = WORKSPACE_PATH / session.session_id / saved_name
+        file = session_workspace(turn.session_id) / saved_name
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_bytes(content)
         return f'Response too large to return ({s_size}); saved to the workspace as "{saved_name}".'
@@ -237,8 +253,8 @@ async def _(
     HIDDEN_CATEGORY,
     [],
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./", depth: int = 1):
-    workspace = WORKSPACE_PATH / session.session_id
+async def _(agent: CloversAgent, turn: Turn, event: Event, path: str = "./", depth: int = 1):
+    workspace = session_workspace(turn.session_id)
     relative = format_path(path)
     folder = workspace / relative
     if not folder.is_relative_to(workspace):
@@ -261,8 +277,8 @@ async def _(agent: CloversAgent, session: Turn, event: Event, path: str = "./", 
     {"file_path": {"type": "string"}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
-    workspace = WORKSPACE_PATH / session.session_id
+async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
+    workspace = session_workspace(turn.session_id)
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
         return f'Not a workspace file: "{file_path}"'
@@ -283,8 +299,8 @@ async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str):
     },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, session: Turn, event: Event, file_path: str, content: str):
-    workspace = WORKSPACE_PATH / session.session_id
+async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str, content: str):
+    workspace = session_workspace(turn.session_id)
     file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
         file_name = f"{file.name}.{uuid4().hex}"
