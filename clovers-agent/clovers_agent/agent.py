@@ -366,10 +366,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         Returns:
             str | None: 最后一条回复；没有产出回复时返回 None。
         """
-        last_reply = None
+        reply = None
         async for reply in self.iter_replies(turn, event):
-            last_reply = reply
-        return last_reply
+            pass
+        return reply
 
     async def route(self, content: str, session: Session, event: Event):
         """根据用户输入选择对应的 Intro 工具。
@@ -424,7 +424,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning("[%s][CHIME IN] session %s failed: %s: %s", self.name, turn.session_id, type(e).__name__, e)
 
-    async def call_aside(self, session: Session, event: Event, content: str, current_output: str):
+    async def call_aside(self, session: Session, event: Event, content: str, current_output: str | None):
         """处理主任务执行期间的旁路交互。
 
         基于当前轮次的执行上下文创建独立轮次，并使用旁路提示词处理输入。
@@ -508,24 +508,17 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         current_input = session.current_input.copy()
         last_reply = None
+
         session.pending_prompt = None
         session.last_active_time = timestamp
+        session.current_output = reply = None
         async for reply in self.iter_replies(session, event):
-            last_reply = reply
             if session.pending_prompt:
-                async with session.aside_lock:
-                    pending_prompt = session.pending_prompt
-                    session.pending_prompt = None
-                    aside_reply = await self.call_aside(session, event, pending_prompt, last_reply)
-                    if aside_reply:
-                        self.send(aside_reply, event)
-                        session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
-                    elif prompt := session.pending_prompt:
-                        session.payload["messages"].append({"role": "user", "content": prompt})
+                session.payload["messages"].append({"role": "user", "content": session.pending_prompt})
                 session.pending_prompt = None
-            else:
-                if reply:
-                    self.send(reply, event)
+            elif reply:
+                session.current_output = reply
+                self.send(reply, event)
         if reply:
             current_input[-1] = {"type": "text", "text": session.turn_input}
             session.record_turn(current_input, reply)
@@ -620,7 +613,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if session.execute_lock.locked():
             if session.aside_lock.locked() or session.idle_event.is_set():
                 return
-            session.pending_prompt = session.turn_input
+            async with session.aside_lock:
+                aside_reply = await self.call_aside(session, event, session.turn_input, session.current_output)
+                if aside_reply:
+                    self.send(aside_reply, event)
+                    session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
             return
         async with session.execute_lock:
             if session.should_summarize(message, timestamp) and (summary := await self.summarize_context(session)):

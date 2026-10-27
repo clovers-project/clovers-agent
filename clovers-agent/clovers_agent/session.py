@@ -223,8 +223,9 @@ class Session(Turn):
         self.aside_lock = asyncio.Lock()
         self.idle_event = asyncio.Event()
         self.idle_event.set()
-        self.pending_prompt: str | None
         self.wakeup_context: WakeupContext | None = None
+        self.pending_prompt: str | None
+        self.current_output: str | None
 
     def extend_messages(self):
         self.payload["messages"].extend(iter_recoder(self.recorder))
