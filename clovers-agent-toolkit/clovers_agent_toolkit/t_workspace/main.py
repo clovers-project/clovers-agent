@@ -166,7 +166,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, command: str):
 
 @TOOLS.register(
     "subagent",
-    f"Delegate a self-contained task to a subagent (a separate agent that executes in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. The result is delivered after the current call chain ends, waking you to continue. You can run up to {MAX_SUBAGENT_COUNT} subagents per call chain.",
+    f"Delegate a self-contained task to a subagent (a separate agent that executes in its own context) to offload focused, independent work — research, a scoped implementation, or analysis — without consuming this conversation's context. After the current call chain ends, the subagent's result is delivered through a wakeup message. You can run up to {MAX_SUBAGENT_COUNT} subagents per call chain.",
     {
         "prompt": {
             "type": "string",
