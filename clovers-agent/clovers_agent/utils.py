@@ -171,13 +171,11 @@ def deep_add(total: dict, detail: dict):
     return total
 
 
-def read_file(file: Path, default_text: str):
+def read_file(file: Path):
     if file.exists():
         return file.read_text(encoding="utf-8")
     else:
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(default_text, encoding="utf-8")
-        return default_text
+        return None
 
 
 def load_json(file: Path):

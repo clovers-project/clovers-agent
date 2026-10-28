@@ -106,15 +106,15 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
     def reload_prompts(self):
         """重新加载提示词"""
         # Prompts
-        self.base_prompt = read_file(self.prompts_dir / "BASE.md", PROMPTS.base_prompt)
-        style_prompt = read_file(self.prompts_dir / "STYLE.md", PROMPTS.style_prompt)
+        self.base_prompt = read_file(self.prompts_dir / "BASE.md") or PROMPTS.base_prompt
+        style_prompt = read_file(self.prompts_dir / "STYLE.md") or PROMPTS.style_prompt
         self.style_prompt = "\n".join(x for x in (style_prompt, self.base_prompt) if x)
-        chat_prompt = read_file(self.prompts_dir / "CHAT.md", PROMPTS.chat_prompt)
+        chat_prompt = read_file(self.prompts_dir / "CHAT.md") or PROMPTS.chat_prompt
         self.chat_prompt = "\n".join(x for x in (style_prompt, self.base_prompt, chat_prompt) if x)
-        self.chime_in_prompt = read_file(self.prompts_dir / "CHIME_IN.md", PROMPTS.chime_in_prompt)
-        self.router_prompt = read_file(self.prompts_dir / "ROUTER.md", PROMPTS.router_prompt)
-        self.aside_prompt = read_file(self.prompts_dir / "ASIDE.md", PROMPTS.aside_prompt)
-        self.summary_prompt = read_file(self.prompts_dir / "SUMMARY.md", PROMPTS.summary_prompt)
+        self.chime_in_prompt = read_file(self.prompts_dir / "CHIME_IN.md") or PROMPTS.chime_in_prompt
+        self.router_prompt = read_file(self.prompts_dir / "ROUTER.md") or PROMPTS.router_prompt
+        self.aside_prompt = read_file(self.prompts_dir / "ASIDE.md") or PROMPTS.aside_prompt
+        self.summary_prompt = read_file(self.prompts_dir / "SUMMARY.md") or PROMPTS.summary_prompt
 
     def startup(self):
         """执行 Agent 的启动初始化。"""
