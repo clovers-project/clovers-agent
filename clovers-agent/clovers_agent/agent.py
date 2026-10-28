@@ -344,11 +344,15 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     messages = await asyncio.gather(*(self.invoke_tool(x, turn, event) for x in tool_calls))
                     turn.payload["messages"].extend(messages)
                     yield content
+                    if turn.pending_content:
+                        turn.payload["messages"].append({"role": "user", "content": turn.pending_content})
+                        turn.pending_content = []
                     continue
                 else:
                     turn.deactivate()
                     yield content
                     return
+
             raise TimeoutError(f"Maximum tool call chain length exceeded")
         except Exception as e:
             logger.exception("[%s][CALL TURN] session %s failed", self.name, turn.session_id)
@@ -516,17 +520,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         current_input = session.current_input.copy()
         last_reply = None
-
-        session.pending_prompt = None
         session.last_active_time = timestamp
         session.current_output = reply = None
         async for reply in self.iter_replies(session, event):
             async with session.aside_lock:
                 pass  # 旁支同步，如果 aside_lock 在占用则说明 aside 可能注入修改信息
-            if session.pending_prompt:
-                session.payload["messages"].append({"role": "user", "content": session.pending_prompt})
-                session.pending_prompt = None
-            elif reply:
+            if reply:
                 session.current_output = reply
                 self.send(reply, event)
         if reply:
@@ -696,13 +695,13 @@ async def read_image_by_id(agent: CloversAgent, turn: Turn, event: Event, image_
     url = agent.current_session(turn.session_id).image_url(image_id)
     if not url:
         return f"Error: [image:{image_id}] is missing."
-    turn.current_input.append({"type": "image_url", "image_url": {"url": url}})
+    turn.pending_content.append({"type": "image_url", "image_url": {"url": url}})
     return "OK"
 
 
 @cast_invoker
 async def inject_prompt(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
-    agent.current_session(turn.session_id).pending_prompt = prompt
+    agent.current_session(turn.session_id).pending_content.append({"type": "text", "text": prompt})
     return "OK"
 
 

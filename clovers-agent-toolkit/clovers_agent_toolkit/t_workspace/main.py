@@ -60,10 +60,11 @@ else:
         return shell
 
 
-def enter_workspace(agent: CloversAgent, turn: Turn):
+async def enter_workspace(agent: CloversAgent, turn: Turn):
     prompts = ["# Workspace initialized"]
     if USE_SHELL:
         try:
+            await session_shell(turn).activate()
             turn.extend_tools(agent.tool_manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append("Current system: Debian\nCurrent working directory: /workspace")
             return "\n\n".join(prompts)
@@ -88,12 +89,12 @@ async def on_task(agent: CloversAgent, turn: Turn, event: Event):
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
-    turn.unit_prompts.append(enter_workspace(agent, turn))
+    turn.unit_prompts.append(await enter_workspace(agent, turn))
     return ""
 
 
 @TOOLS.create_category(WORKSPACE, "Tools for workspace file and command operations.")
-async def workspace_category(agent: CloversAgent, session: Turn, event: Event):
+def workspace_category(agent: CloversAgent, session: Turn, event: Event):
     return enter_workspace(agent, session)
 
 
@@ -118,8 +119,8 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
         b64url = to_b64url(file.read_bytes(), ALLOWED_IMAGE_SUBTYPES)
         if not b64url:
             return f'Not a recognized image format: "{path}"'
-    turn.input_image(b64url)
-    return "Image attached to the current user input."
+    turn.pending_content.append({"type": "image_url", "image_url": {"url": b64url}})
+    return "OK"
 
 
 @TOOLS.register(

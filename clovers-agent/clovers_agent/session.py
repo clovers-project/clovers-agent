@@ -48,6 +48,7 @@ class Turn:
         self.scripts_enum: list[str] = []
         self.references_enum: list[str] = []
         self.cursor: int | None = None
+        self.pending_content: MultimodalContent
 
     def create_payload(self, api: OpenAIAPI, system_prompt: str | None = None):
         if self.cursor is not None:
@@ -75,6 +76,7 @@ class Turn:
         return x
 
     def activate(self):
+        self.pending_content = []
         self.cursor = len(self.payload["messages"])
         if self.unit_prompts:
             unit_prompt = SYSTEM_TAG.format("\n".join(x for x in self.unit_prompts if x)) + "\n"
@@ -93,8 +95,10 @@ class Turn:
         self.current_input = []
         self.api = None  # type: ignore
         self.payload = None  # type: ignore
+        self.pending_content = None  # type: ignore
         del self.api
         del self.payload
+        del self.pending_content
         self.cursor = None
         self.scripts_enum.clear()
         self.references_enum.clear()
@@ -224,7 +228,6 @@ class Session(Turn):
         self.idle_event = asyncio.Event()
         self.idle_event.set()
         self.wakeup_context: WakeupContext | None = None
-        self.pending_prompt: str | None
         self.current_output: str | None
 
     def extend_messages(self):

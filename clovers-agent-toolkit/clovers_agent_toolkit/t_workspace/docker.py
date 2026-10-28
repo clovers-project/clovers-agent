@@ -17,7 +17,7 @@ class Shell:
         self.client = DOCKER_CLIENT
         self._activate_lock = asyncio.Lock()
 
-    async def _activate(self):
+    async def activate(self):
         async with self._activate_lock:
             if self.container is not None:
                 return
@@ -41,7 +41,7 @@ class Shell:
             self.container = container
 
     async def execute(self, command: str):
-        await self._activate()
+        await self.activate()
         wrapped_command = f"bash -c {shlex.quote(command)} < /dev/null"
         return await asyncio.to_thread(self.execute_reload_thread, wrapped_command)
 
