@@ -180,7 +180,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
         *agent.select_tools(CATEGORIES.WORKSPACE),
         *agent.select_tools(CATEGORIES.NETWORK),
     ]
-    sub_turn.unit_prompts.append(enter_workspace(agent, sub_turn))
+    sub_turn.unit_prompts.append(await enter_workspace(agent, sub_turn))
     if tool := next((x for x in tools if x["function"]["name"] == "subagent"), None):
         sub_turn.payload["tools"].remove(tool)
     sub_turn.input_text(prompt)
