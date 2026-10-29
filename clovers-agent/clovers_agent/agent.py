@@ -29,8 +29,8 @@ from .constants import (
     INTRINSIC_CATEGORY,
     READ_IMAGE_BY_ID_INFO,
     INJECT_PROMPT_INFO,
-    COMPACT_CONTEXT,
     COMPACT_CONTEXT_INFO,
+    COMPACT_CONTEXT_PROMPT,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
     EXECUTE_SCRIPT_MAX_TIMEOUT,
@@ -477,9 +477,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         turn.create_payload(self.api("summary"), self.base_prompt)
         turn.payload["messages"].extend(session.messages)
         turn.payload["tools"] = [COMPACT_CONTEXT_INFO]
-        turn.payload["tool_choice"] = {"type": "function", "function": {"name": COMPACT_CONTEXT}}
+        turn.unit_prompts.append(COMPACT_CONTEXT_PROMPT)
         turn.activate()
-
         try:
             message = await turn.call_api()
             tool_calls = message.get("tool_calls")

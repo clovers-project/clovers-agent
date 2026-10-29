@@ -156,9 +156,7 @@ Use this when the available tools are insufficient to complete the task.\
 Create a concise but sufficiently detailed summary of the conversation for seamless continuation.
 Remove redundancy and trivial details while preserving all information necessary to understand the context.
 """
-
-    COMPACT_CONTEXT_MAX_TOKENS: int = 1024
-
+    COMPACT_CONTEXT_PROMPT = f"Call `{COMPACT_CONTEXT}` now.Respond only with the tool call, no text."
     # 视觉相关配置
     VISION_TAG: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
     VISION_PROMPT: str = """\
