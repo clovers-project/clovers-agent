@@ -4,11 +4,11 @@ import stat
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from clovers_agent.utils import retry_httpx, httpx_request
+from clovers_agent.utils import retry_httpx
 
 from typing import NamedTuple
 
-retry_request = retry_httpx(5)(httpx_request)
+retry_request = retry_httpx(5)
 
 
 def fmt_datetime(timestamp: float) -> str:

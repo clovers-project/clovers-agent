@@ -1,21 +1,19 @@
 import json
+import httpx
 import trafilatura
 from clovers_agent import CloversAgent, Turn, Event
 from ..base import TOOLS, CONFIG
 from ..config import CATEGORIES
 from ..utils import retry_request
-from .utils import safe_resp
 
 
 from typing import cast
-from .typing import SearchResult, FetchResult
+from .typing import SearchResult
 
 NETWORK = CATEGORIES.NETWORK
 network_config = CONFIG.network
 deepseek_search_key = network_config.deepseek_search_key
 deepseek_search_url = network_config.deepseek_search_url
-deepseek_fetch_key = network_config.deepseek_fetch_key or deepseek_search_key
-deepseek_fetch_url = network_config.deepseek_fetch_url
 
 TOOLS.create_category("network", "包含搜索和网页提取工具")
 
@@ -105,11 +103,12 @@ async def _(
         "ori_question": question or event.message,
         "need_content": True,
     }
-    response = await safe_resp(retry_request(agent.async_client.post, deepseek_search_url, headers=headers, json=payload, timeout=30.0))
-    if isinstance(response, str):
-        return response
+    response = await retry_request(agent.async_client.post(deepseek_search_url, headers=headers, json=payload, timeout=30.0))
     try:
-        results = cast(list[SearchResult], response.json()["results"])
+        results = cast(list[SearchResult], response.raise_for_status().json()["results"])
+    except httpx.HTTPStatusError as e:
+        resp = e.response
+        return f"请求失败（HTTP {resp.status_code}）"
     except (json.JSONDecodeError, KeyError, TypeError):
         return "服务器未返回合法数据"
     if not results:
@@ -139,40 +138,16 @@ async def _(
     NETWORK,
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event, url: str):
-    page_resp = await safe_resp(
-        retry_request(
-            agent.async_client.get,
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-            timeout=30.0,
-        )
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    response = await retry_request(agent.async_client.get(url, headers=headers, timeout=30.0))
+    text = trafilatura.extract(
+        response.content,
+        url=url,
+        include_comments=True,
+        include_images=True,
+        include_links=True,
+        include_formatting=False,
+        favor_precision=True,
+        output_format="markdown",
     )
-    if not isinstance(page_resp, str):
-        text = trafilatura.extract(
-            page_resp.content,
-            url=url,
-            include_comments=True,
-            include_images=True,
-            include_links=True,
-            include_formatting=False,
-            favor_precision=True,
-            output_format="markdown",
-        )
-        if text:
-            return text
-    fetch_resp = await safe_resp(
-        retry_request(
-            agent.async_client.post,
-            deepseek_fetch_url,
-            headers={"Authorization": f"Bearer {deepseek_fetch_key}"},
-            json={"url": url},
-            timeout=30.0,
-        )
-    )
-    if isinstance(fetch_resp, str):
-        return fetch_resp
-    try:
-        results = cast(FetchResult, fetch_resp.json())
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return "服务器未返回合法数据"
-    return f"**{results["title"]}**\n{results["content"]}"
+    return text or "none"

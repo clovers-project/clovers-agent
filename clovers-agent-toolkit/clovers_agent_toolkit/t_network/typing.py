@@ -14,6 +14,6 @@ class SearchResult(TypedDict):
     authority: int
 
 
-class FetchResult(TypedDict):
-    title: str
-    content: str
+# class FetchResult(TypedDict):
+#     title: str
+#     content: str

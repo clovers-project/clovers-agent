@@ -1,6 +1,6 @@
 import httpx
 from clovers.logger import logger
-from .utils import to_b64url, parse_b64uri, read_file_url, deep_add, retry_httpx, httpx_request
+from .utils import to_b64url, parse_b64uri, read_file_url, deep_add, retry_httpx
 from .config import OpenAIConfig, HybridOpenAIConfig
 from .constants import VISION_TAG, VISION_PROMPT
 
@@ -8,7 +8,7 @@ from typing import override
 from .typing import AssistantMessage, Payload
 from .typing.message import MultimodalContent
 
-retry_request = retry_httpx(3)(httpx_request)
+retry_request = retry_httpx(3)
 ALLOWED_IMAGE_SUBTYPES = ("png", "jpeg", "webp", "gif")
 
 
@@ -27,12 +27,12 @@ class OpenAIAPI:
         return {"model": self.model, "messages": messages, **self.extra_body}  # type: ignore 这里允许额外请求体
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        resp = await retry_request(self.async_client.post, self.url, headers=self.headers, json=payload)
-        data = resp.json()
+        response = await retry_request(self.async_client.post(self.url, headers=self.headers, json=payload))
+        data = response.raise_for_status().json()
         deep_add(usage_counter, {payload["model"]: data.get("usage")})
         message = data["choices"][0]["message"]
         if "content" not in message and "tool_calls" not in message:
-            raise ValueError(f"API returned an invalid response: {resp.text}")
+            raise ValueError(f"API returned an invalid response: {response.text}")
         return message
 
     async def download_url(
@@ -48,8 +48,8 @@ class OpenAIAPI:
                     return
                 return url
             if url.startswith(("https://", "http://")):
-                resp = await retry_request(self.async_client.get, url, timeout=60)
-                data = resp.content
+                response = await retry_request(self.async_client.get(url, timeout=60))
+                data = response.raise_for_status().content
             elif url.startswith("file://"):
                 data = read_file_url(url)
             else:

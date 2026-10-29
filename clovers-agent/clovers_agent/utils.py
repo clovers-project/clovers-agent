@@ -11,10 +11,7 @@ import chardet
 import puremagic
 from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_random_exponential
 
-from collections.abc import Callable, Coroutine
-from typing import Any
-
-type AsyncFunction[**P, T] = Callable[P, Coroutine[Any, Any, T]]
+from collections.abc import Awaitable
 
 B64_PATTERN = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
 
@@ -228,12 +225,18 @@ def decode_bytes(btext: bytes | bytearray):
 
 
 def is_retryable_httpx_exc(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code == 429 or exc.response.status_code >= 500
-    return isinstance(exc, httpx.RequestError)
+    return isinstance(exc, (httpx.RequestError, httpx.HTTPStatusError))
 
 
-def retry_httpx(retries: int = 5, max_delay: float = 8.0):
+async def httpx_request(request: Awaitable[httpx.Response]):
+    response = await request
+    status_code = response.status_code
+    if status_code == 429 or status_code >= 500:
+        response.raise_for_status()
+    return response
+
+
+def retry_httpx(max_attempts: int = 5, max_delay: float = 8.0):
     backoff = wait_random_exponential(multiplier=1, max=max_delay)
 
     def wait(state: RetryCallState) -> float:
@@ -246,10 +249,9 @@ def retry_httpx(retries: int = 5, max_delay: float = 8.0):
                 return min(float(x), max_delay)
         return backoff(state)
 
-    return retry(stop=stop_after_attempt(retries), wait=wait, retry=retry_if_exception(is_retryable_httpx_exc), reraise=True)
-
-
-async def httpx_request(method: AsyncFunction[[str], httpx.Response], url: str, **kwargs):
-    resp = await method(url, **kwargs)
-    resp.raise_for_status()
-    return resp
+    return retry(
+        stop=stop_after_attempt(max_attempts),
+        wait=wait,
+        retry=retry_if_exception(is_retryable_httpx_exc),
+        reraise=True,
+    )(httpx_request)
