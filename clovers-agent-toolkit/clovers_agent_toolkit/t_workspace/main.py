@@ -41,6 +41,19 @@ if SHARED_DOCKER_CONTAINER:
         global shared_shell
         if not isinstance(shared_shell, Shell):
             shared_shell = Shell(SHARED_ID, WORKSPACE_PATH, DOCKER_IMAGE)
+            extra = session.extra
+
+            async def cleanup():
+                global shared_shell
+                assert shared_shell
+                logger.info("Cleaning up shared workspace...")
+                await shared_shell.cleanup()
+                shared_shell = None
+
+            if "cleanup" not in extra:
+                extra["cleanup"] = [cleanup()]
+            else:
+                extra["cleanup"].append(cleanup())
         return shared_shell
 
 else:
