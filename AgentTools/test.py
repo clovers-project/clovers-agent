@@ -2,7 +2,7 @@ if not __package__:
     raise RuntimeError("插件路径只能作为模块导入。")
 
 from clovers_agent import CloversAgent, Turn, Event, AgentTools
-from clovers_agent.constants import INTRINSIC_CATEGORY, COMPACT_CONTEXT
+from clovers_agent.constants import INTRINSIC_CATEGORY
 
 TOOLS = AgentTools()
 
