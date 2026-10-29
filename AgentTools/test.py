@@ -25,7 +25,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
     category=INTRINSIC_CATEGORY,
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
-    return await agent.intro_invoker[COMPACT_CONTEXT](agent, turn, event)
+    return await agent.tool_invoker[COMPACT_CONTEXT](agent, turn, event)
 
 
 @TOOLS.register(
