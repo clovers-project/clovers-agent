@@ -5,7 +5,6 @@ from clovers_client import Config as BaseConfig
 
 
 class CATEGORIES(str, Enum):
-    MEMORY = "memory"
     WORKSPACE = "workspace"
     NETWORK = "network"
     DEBUG_UTILS = "debug_utils"
@@ -44,7 +43,6 @@ class WorkspaceConfig(BaseModel):
 
 class Config(BaseConfig):
     use_categories: list[str] = [
-        CATEGORIES.MEMORY,
         CATEGORIES.WORKSPACE,
         CATEGORIES.NETWORK,
     ]

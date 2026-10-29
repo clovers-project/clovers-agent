@@ -4,8 +4,6 @@ from .base import TOOLS, CONFIG, CATEGORIES
 
 USE_CATEGORIES = CONFIG.use_categories
 
-if CATEGORIES.MEMORY in USE_CATEGORIES:
-    from . import t_memory as _
 if CATEGORIES.NETWORK in USE_CATEGORIES:
     from . import t_network as _
 if CATEGORIES.WORKSPACE in USE_CATEGORIES:
