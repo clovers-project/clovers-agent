@@ -737,7 +737,7 @@ async def compact_context(
     timestamp = session.compact_history(summary)
     session.history_dir.mkdir(parents=True, exist_ok=True)
     file = session.history_dir / f"{datetime.fromtimestamp(timestamp).strftime('%Y%m%d-%H%M%S')} {secrets.token_hex(4)}.md"
-    post = frontmatter.Post(summary, timestamp=timestamp, overview=overview, keywords=keywords)
+    post = frontmatter.Post(summary, overview=overview, keywords=keywords, timestamp=timestamp)
     with file.open("w", encoding="utf-8") as f:
         frontmatter.dump(post, f)
     return "OK"
