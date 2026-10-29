@@ -129,7 +129,7 @@ class ConstantConfig(BaseModel):
     # 历史总结标签
     HISTORY_TAG: str = "<history-summary>\n{}\n</history-summary>"
     # 调用工具提示词
-    TOOLCALL_PROMPT: str = "Call `{}` now. Respond only with the tool call, no text."
+    TOOLCALL_PROMPT: str = "You must call the `{}` tool now. Output only the tool call."
     # 内置工具
     ON_CHAT: str = "on_chat"
     ON_CHAT_DESC: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
