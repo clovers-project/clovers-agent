@@ -1,5 +1,6 @@
 import httpx
 from collections.abc import Awaitable
+from clovers.logger import logger
 
 
 async def safe_resp[T](coro: Awaitable[T]) -> T | str:
@@ -12,4 +13,5 @@ async def safe_resp[T](coro: Awaitable[T]) -> T | str:
         except Exception:
             return f"请求失败（HTTP {resp.status_code}）"
     except Exception:
+        logger.exception("请求失败")
         return "请求失败"

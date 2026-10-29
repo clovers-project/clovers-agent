@@ -163,7 +163,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, url: str):
     fetch_resp = await safe_resp(
         retry_request(
             agent.async_client.post,
-            deepseek_fetch_key,
+            deepseek_fetch_url,
             headers={"Authorization": f"Bearer {deepseek_fetch_key}"},
             json={"url": url},
             timeout=30.0,
