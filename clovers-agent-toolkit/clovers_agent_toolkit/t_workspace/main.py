@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 from clovers_agent import CloversAgent, Turn, Event
+from clovers_agent.session import Session
 from clovers_agent.api import ALLOWED_IMAGE_SUBTYPES
 from clovers_agent.utils import decode_bytes, to_b64url
 from clovers_agent.config import CONFIG as AGENT_CONFIG
@@ -34,7 +35,7 @@ if SHARED_DOCKER_CONTAINER:
     def session_workspace(session_id: str) -> Path:
         return WORKSPACE_PATH / SHARED_ID
 
-    def session_shell(turn: Turn) -> Shell:
+    def session_shell(session: Session) -> Shell:
         from .docker import Shell
 
         global shared_shell
@@ -47,16 +48,21 @@ else:
     def session_workspace(session_id: str) -> Path:
         return WORKSPACE_PATH / session_id
 
-    def session_shell(turn: Turn) -> Shell:
+    def session_shell(session: Session) -> Shell:
         from .docker import Shell
 
-        if "shell" in turn.extra:
-            shell = turn.extra["shell"]
+        if "shell" in session.extra:
+            shell = session.extra["shell"]
         else:
             shell = None
         if not isinstance(shell, Shell):
-            shell = Shell(turn.session_id, WORKSPACE_PATH, DOCKER_IMAGE)
-            turn.extra["shell"] = shell
+            shell = Shell(session.session_id, WORKSPACE_PATH, DOCKER_IMAGE)
+            extra = session.extra
+            extra["shell"] = shell
+            if "cleanup" not in extra:
+                extra["cleanup"] = [shell.cleanup()]
+            else:
+                extra["cleanup"].append(shell.cleanup())
         return shell
 
 
@@ -64,7 +70,7 @@ async def enter_workspace(agent: CloversAgent, turn: Turn):
     prompts = ["# Workspace initialized"]
     if USE_SHELL:
         try:
-            await session_shell(turn).activate()
+            await session_shell(agent.current_session(turn.session_id)).activate()
             turn.extend_tools(agent.tool_manifest[x] for x in SUCCESS_TOOLIST)
             prompts.append("Current system: Debian\nCurrent working directory: /workspace")
             return "\n\n".join(prompts)
@@ -153,7 +159,8 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event, command: str):
     try:
-        return await session_shell(turn).execute(command)
+
+        return await session_shell(agent.current_session(turn.session_id)).execute(command)
     except Exception:
         return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
 

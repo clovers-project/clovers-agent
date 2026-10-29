@@ -198,7 +198,7 @@ class Session(Turn):
         silence_timeout: int = SESSION_CONFIG.silence_timeout,
         decoupler_alpha: float = SESSION_CONFIG.decoupler_alpha,
     ) -> None:
-        self.extra: dict[str, SessionExtraItems]
+        self.extra: SessionExtra
         super().__init__(session_id, {}, {})
         self.recorder_file = session_dir / "recorder.jsonl"
         self.history_dir = session_dir / "history"
@@ -343,7 +343,7 @@ class Session(Turn):
                 for task in self.wakeup_context.tasks:
                     task.cancel()
             self.recorder_file.unlink(missing_ok=True)
-        return tuple(coro for item in self.extra.values() if (coro := item.get("cleanup")))
+        return self.extra.get("cleanup")
 
 
 class WakeupContext:
@@ -352,5 +352,5 @@ class WakeupContext:
         self.tasks: list[asyncio.Task[str | None]] = []
 
 
-class SessionExtraItems(TypedDict, extra_items=object):
-    cleanup: NotRequired[Coroutine]
+class SessionExtra(TypedDict, extra_items=object):
+    cleanup: NotRequired[list[Coroutine]]

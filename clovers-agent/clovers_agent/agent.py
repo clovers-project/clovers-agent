@@ -39,7 +39,7 @@ from .constants import (
     WAKEUP_TIP,
 )
 
-from typing import override, TypedDict
+from typing import cast, override, TypedDict
 from .typing import ToolMessage, ToolCallInfo
 from .typing.json_schema import BaseJSONSchemaType
 
@@ -188,7 +188,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         expired_session_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
         cleanup_tasks = []
         for session_id in expired_session_ids:
-            cleanup_tasks.extend(self.sessions[session_id].cleanup())
+            coros = self.sessions[session_id].cleanup()
+            if coros:
+                cleanup_tasks.extend(coros)
             del self.sessions[session_id]
         logger.info("[%s][SESSIONS CLEAR]", self.name)
         usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
@@ -613,7 +615,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         now = datetime.fromtimestamp(timestamp)
         if "nicknames" not in session.extra:
             session.extra["nicknames"] = {}
-        nicknames = session.extra["nicknames"]
+        nicknames = cast(dict[str, str], session.extra["nicknames"])
         nicknames[event.user_id] = event.nickname
         mention_prefix = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
         if "extra_context" in event.properties:
