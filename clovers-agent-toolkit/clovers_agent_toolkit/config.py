@@ -15,9 +15,10 @@ class NetworkConfig(BaseModel):
     """DeepSeek Search API Key"""
     deepseek_search_url: str = "https://api.deepseek.com/v1/tools/search"
     """DeepSeek Search API URL"""
-    deepseek_fetch_key: str = "sk-xxx"
+    deepseek_fetch_key: str = ""
     """DeepSeek Fetch API Key"""
     deepseek_fetch_url: str = "https://api.deepseek.com/v1/tools/fetch"
+    """DeepSeek Fetch API URL"""
 
 
 class WorkspaceConfig(BaseModel):

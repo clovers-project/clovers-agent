@@ -1,5 +1,4 @@
 import json
-import httpx
 import trafilatura
 from clovers_agent import CloversAgent, Turn, Event
 from ..base import TOOLS, CONFIG
@@ -15,7 +14,7 @@ NETWORK = CATEGORIES.NETWORK
 network_config = CONFIG.network
 deepseek_search_key = network_config.deepseek_search_key
 deepseek_search_url = network_config.deepseek_search_url
-deepseek_fetch_key = network_config.deepseek_fetch_key
+deepseek_fetch_key = network_config.deepseek_fetch_key or deepseek_search_key
 deepseek_fetch_url = network_config.deepseek_fetch_url
 
 TOOLS.create_category("network", "包含搜索和网页提取工具")
