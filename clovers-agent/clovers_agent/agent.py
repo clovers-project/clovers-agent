@@ -645,10 +645,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
             return
         async with session.execute_lock:
-            cc_task = None
+            compact_task = None
+            turn_input = session.turn_input
             if session.should_summarize(message, timestamp):
-                cc_task = asyncio.create_task(self.compact_context(session, event))
-            intro = await self.route(session.turn_input, session, event)
+                compact_task = asyncio.create_task(self.compact_context(session, event))
+            intro = await self.route(turn_input, session, event)
             session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
             if (call := event.call("flat_context")) and (flat_context := await call):
@@ -661,14 +662,14 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.input_text("\n</quote>")
             images = await asyncio.gather(*(map(self._api.download_url, event.image_list)))
             session.input_image(image for image in images if image)
-            if cc_task:
-                await cc_task
-            session.input_text(session.turn_input)
             try:
                 await self.activate_intro(intro, session, event)
             except Exception as e:
                 logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
+            if compact_task:
+                await compact_task
+            session.input_text(session.turn_input)
             session.extend_messages()
             await self.execute_session(session, event, timestamp)
 
