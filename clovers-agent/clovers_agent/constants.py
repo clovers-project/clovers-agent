@@ -5,7 +5,7 @@ from .config import CONSTANT
 SYSTEM_TAG = CONSTANT.SYSTEM_TAG
 USER_TAG = CONSTANT.USER_TAG
 ASSISTANT_TAG = CONSTANT.ASSISTANT_TAG
-SUMMARY_TAG = CONSTANT.SUMMARY_TAG
+HISTORY_TAG = CONSTANT.HISTORY_TAG
 ON_CHAT = CONSTANT.ON_CHAT
 ON_CHAT_DESC = CONSTANT.ON_CHAT_DESC
 HIDDEN_CATEGORY = CONSTANT.HIDDEN_CATEGORY
@@ -39,6 +39,24 @@ INJECT_PROMPT_INFO: FunctionToolInfo = {
         },
     },
 }
+COMPACT_CONTEXT = CONSTANT.COMPACT_CONTEXT
+COMPACT_CONTEXT_INFO: FunctionToolInfo = {
+    "type": "function",
+    "function": {
+        "name": COMPACT_CONTEXT,
+        "description": CONSTANT.COMPACT_CONTEXT_DESC,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "overview": {"type": "string", "description": CONSTANT.COMPACT_CONTEXT_OVERVIEW_DESC},
+                "keywords": {"type": "array", "description": CONSTANT.COMPACT_CONTEXT_KEYWORDS_DESC, "items": {"type": "string"}},
+                "summary": {"type": "string", "description": CONSTANT.COMPACT_CONTEXT_SUMMARY_DESC},
+            },
+            "required": ["overview", "keywords", "summary"],
+        },
+    },
+}
+
 VISION_TAG = CONSTANT.VISION_TAG
 VISION_PROMPT = CONSTANT.VISION_PROMPT
 EXECUTE_SCRIPT = CONSTANT.EXECUTE_SCRIPT

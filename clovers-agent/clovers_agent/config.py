@@ -110,14 +110,6 @@ Based on the user's latest message and the current conversation context, choose 
 Never attempt to execute the current task yourself.
 """
     """中间提示 这是助手执行任务时，快速回复使用的提示"""
-    summary_prompt: str = """\
-对上述所有历史对话进行总结
-
-- 去掉冗余内容和重复讨论，不直接列举对话内容
-- 保留核心讨论内容与关键事实
-- 禁止输出除总结外的任何内容
-"""
-    """总结提示 这是总结上下文的用户提示词"""
     chime_in_prompt: str = """\
 请自然地参与当前群聊
 
@@ -134,12 +126,11 @@ class ConstantConfig(BaseModel):
     USER_TAG: str = '<user name="{}">\n{}\n</user>'
     # 助手标签
     ASSISTANT_TAG: str = "<assistant>\n{}\n</assistant>"
-    # 总结标签
-    SUMMARY_TAG: str = "<summary>\n{}\n</summary>"
-    # 内置路由路由指令
+    # 历史总结标签
+    HISTORY_TAG: str = "<history-summary>\n{}\n</history-summary>"
+    # 内置工具
     ON_CHAT: str = "on_chat"
     ON_CHAT_DESC: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
-    # 内置工具
     HIDDEN_CATEGORY: str = ":hidden"
     BUILTIN_CATEGORY: str = ":builtin"
     INTRINSIC_CATEGORY: str = ":intrinsic"
@@ -157,6 +148,17 @@ Use this when the available tools are insufficient to complete the task.\
     INJECT_PROMPT: str = "inject_prompt"
     INJECT_PROMPT_DESC: str = "为当前任务注入一条提示，用于对任务进行修正或补充说明"
     INJECT_PROMPT_PROMPT_DESC: str = "提示内容"
+    COMPACT_CONTEXT: str = "compact_context"
+    COMPACT_CONTEXT_DESC: str = "Compress the conversation history for continued conversation."
+    COMPACT_CONTEXT_OVERVIEW_DESC: str = "A one-sentence overview of the conversation."
+    COMPACT_CONTEXT_KEYWORDS_DESC: str = "Key topics, entities, and concepts discussed in the conversation."
+    COMPACT_CONTEXT_SUMMARY_DESC: str = """\
+Create a concise but sufficiently detailed summary of the conversation for seamless continuation.
+Remove redundancy and trivial details while preserving all information necessary to understand the context.
+"""
+
+    COMPACT_CONTEXT_MAX_TOKENS: int = 1024
+
     # 视觉相关配置
     VISION_TAG: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
     VISION_PROMPT: str = """\

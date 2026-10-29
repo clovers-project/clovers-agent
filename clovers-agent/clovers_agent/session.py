@@ -9,7 +9,7 @@ from .utils import load_jsonl, save_jsonl
 from .config import SESSION as SESSION_CONFIG
 from .constants import (
     SYSTEM_TAG,
-    SUMMARY_TAG,
+    HISTORY_TAG,
     READ_IMAGE_BY_ID_INFO,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DESC,
@@ -17,8 +17,8 @@ from .constants import (
     READ_REFERENCE_DESC,
 )
 
-from typing import TYPE_CHECKING, cast, override, overload, Never
-from collections.abc import Iterable
+from typing import TYPE_CHECKING, cast, override, overload, TypedDict, Never, NotRequired
+from collections.abc import Iterable, Coroutine
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextSegment, ImageSegment, TextUserMessage
 
@@ -198,9 +198,10 @@ class Session(Turn):
         silence_timeout: int = SESSION_CONFIG.silence_timeout,
         decoupler_alpha: float = SESSION_CONFIG.decoupler_alpha,
     ) -> None:
-
+        self.extra: dict[str, SessionExtraItems]
         super().__init__(session_id, {}, {})
         self.recorder_file = session_dir / "recorder.jsonl"
+        self.history_dir = session_dir / "history"
         # 主题分离
         from .embedding import TopicDecoupler
 
@@ -222,6 +223,7 @@ class Session(Turn):
         self.message_history: deque[tuple[str, float]] = deque(maxlen=silence_size)
         self.silence_timeout = silence_timeout
         # 状态
+        self.cleanup_tasks: list[asyncio.Task] = []
         self.last_active_time = 0.0
         self.execute_lock = asyncio.Lock()
         self.aside_lock = asyncio.Lock()
@@ -300,12 +302,12 @@ class Session(Turn):
         self.router_recorder.clear()
         self.decouple_count = 0
         self.recorder_file.unlink(missing_ok=True)
-        summary = SUMMARY_TAG.format(content)
         if self.message_history:
             timestamp = self.message_history[0][1]
         else:
             timestamp = time.time()
-        self.message_history.appendleft((summary, timestamp))
+        self.message_history.appendleft((HISTORY_TAG.format(content), timestamp))
+        return timestamp
 
     @property
     def turn_input(self):
@@ -341,9 +343,14 @@ class Session(Turn):
                 for task in self.wakeup_context.tasks:
                     task.cancel()
             self.recorder_file.unlink(missing_ok=True)
+        return tuple(coro for item in self.extra.values() if (coro := item.get("cleanup")))
 
 
 class WakeupContext:
     def __init__(self, turn: Turn) -> None:
         self.turn = turn
         self.tasks: list[asyncio.Task[str | None]] = []
+
+
+class SessionExtraItems(TypedDict, extra_items=object):
+    cleanup: NotRequired[Coroutine]

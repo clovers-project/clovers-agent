@@ -4,7 +4,9 @@ import contextlib
 import time
 import json
 import asyncio
+import secrets
 import httpx
+import frontmatter
 from pathlib import Path
 from datetime import datetime
 from collections import deque
@@ -27,6 +29,8 @@ from .constants import (
     INTRINSIC_CATEGORY,
     READ_IMAGE_BY_ID_INFO,
     INJECT_PROMPT_INFO,
+    COMPACT_CONTEXT,
+    COMPACT_CONTEXT_INFO,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
     EXECUTE_SCRIPT_MAX_TIMEOUT,
@@ -101,6 +105,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.tool_invoker[READ_REFERENCE] = read_reference
         self.category_decorator(READ_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(read_image_by_id)
         self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(inject_prompt)
+        self.category_decorator(COMPACT_CONTEXT_INFO, BUILTIN_CATEGORY)(compact_context)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
 
     def reload_prompts(self):
@@ -114,7 +119,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.chime_in_prompt = read_file(self.prompts_dir / "CHIME_IN.md") or PROMPTS.chime_in_prompt
         self.router_prompt = read_file(self.prompts_dir / "ROUTER.md") or PROMPTS.router_prompt
         self.aside_prompt = read_file(self.prompts_dir / "ASIDE.md") or PROMPTS.aside_prompt
-        self.summary_prompt = read_file(self.prompts_dir / "SUMMARY.md") or PROMPTS.summary_prompt
 
     def startup(self):
         """执行 Agent 的启动初始化。"""
@@ -174,7 +178,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         return self._apis.get(key, self._api)
 
-    def daily_tasks(self):
+    async def daily_tasks(self):
         """执行每日维护任务。
 
         清理超过记忆超时时间的会话，记录当日 Token 用量，
@@ -182,40 +186,26 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         timestamp = time.time()
         expired_session_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
+        cleanup_tasks = []
         for session_id in expired_session_ids:
-            self.sessions[session_id].cleanup()
+            cleanup_tasks.extend(self.sessions[session_id].cleanup())
             del self.sessions[session_id]
         logger.info("[%s][SESSIONS CLEAR]", self.name)
         usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
         logger.info("[%s][USAGE TODAY] %s", self.name, usage)
         self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
         self.usage_counter.clear()
-
-    async def summarize_context(self, session: Session):
-        """根据会话消息生成上下文摘要。
-
-        使用总结专用的 API 配置和提示词生成摘要，并记录执行日志。
-
-        Args:
-            session (Session): 待总结的会话。
-
-        Returns:
-            str | None: 生成的摘要文本；生成失败时返回 None。
-        """
-        turn = session.create_turn()
-        turn.create_payload(self.api("summary"), self.base_prompt)
-        turn.payload["messages"].extend(session.messages)
-        turn.unit_prompts.append(self.summary_prompt)
-        turn.activate()
         try:
-            message = await turn.call_api()
-            summary = (message["content"] or "").strip()
-            logger.info("[%s][SUMMARY]", self.name)
-            logger.debug(summary)
-            return summary
+            exceptions = await asyncio.wait_for(asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("[%s][CLEANUP TIMEOUT]", self.name)
         except Exception as e:
-            logger.warning("[%s][SUMMARY] failed: %s", self.name, e)
-            return
+            logger.exception("[%s][CLEANUP FAILED]", self.name)
+        else:
+            for e in exceptions:
+                if not isinstance(e, Exception):
+                    continue
+                logger.warning("[%s][CLEANUP EXCEPTION] %s: %s", self.name, type(e).__name__, e)
 
     @staticmethod
     def session_id(event: Event) -> str:
@@ -356,7 +346,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             raise TimeoutError(f"Maximum tool call chain length exceeded")
         except Exception as e:
             logger.exception("[%s][CALL TURN] session %s failed", self.name, turn.session_id)
-            file = f"payload_{turn.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {id(turn.payload)}.json"
+            file = f"payload_{turn.session_id} {datetime.now().strftime('%Y%m%d-%H%M%S')} {secrets.token_hex(4)}.json"
             save_json(self.session_dir / turn.session_id / file, turn.payload)
             turn.deactivate()
 
@@ -420,7 +410,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             content (str): 用于生成插话回复的输入内容。
 
         Returns:
-            str | None: 生成的回复文本；执行失败时返回 None。
+            str | None: 回复文本
         """
         turn = session.create_turn()
         turn.create_payload(self.api("chime_in"), self.chat_prompt)
@@ -474,6 +464,32 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning("[%s][ASIDE] session %s failed: %s: %s", self.name, turn.session_id, type(e).__name__, e)
 
+    async def summarize_context(self, session: Session, event: Event):
+        """根据会话消息生成上下文摘要。
+
+        使用总结专用的 API 配置和提示词生成摘要，并记录执行日志。
+
+        Args:
+            session (Session): 待总结的会话。
+        """
+        turn = session.create_turn()
+        turn.create_payload(self.api("summary"), self.base_prompt)
+        turn.payload["messages"].extend(session.messages)
+        turn.payload["tools"] = [COMPACT_CONTEXT_INFO]
+        turn.payload["tool_choice"] = {"type": "function", "function": {"name": COMPACT_CONTEXT}}
+        turn.activate()
+
+        try:
+            message = await turn.call_api()
+            tool_calls = message.get("tool_calls")
+            if not tool_calls:
+                raise ValueError(f"Expected tool_calls, got {message}")
+            await self.invoke_tool(tool_calls[0], turn, event)
+            logger.info("[%s][SUMMARY]", self.name)
+        except Exception as e:
+            logger.warning("[%s][SUMMARY] failed: %s", self.name, e)
+            return
+
     def update_usage(self, usage_counter: dict):
         """合并并持久化 Token 用量统计。
 
@@ -519,7 +535,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             str | None: 本轮最后一条回复；没有回复时返回 None。
         """
         current_input = session.current_input.copy()
-        last_reply = None
         session.last_active_time = timestamp
         session.current_output = reply = None
         async for reply in self.iter_replies(session, event):
@@ -531,7 +546,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         if reply:
             current_input[-1] = {"type": "text", "text": session.turn_input}
             session.record_turn(current_input, reply)
-        return last_reply
+        return reply
 
     def submit_turn_for_wakeup(self, turn: Turn, event: Event):
         """提交一轮唤醒调用链。
@@ -629,9 +644,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
             return
         async with session.execute_lock:
-            if session.should_summarize(message, timestamp) and (summary := await self.summarize_context(session)):
-                session.compact_history(summary)
-            turn_input = session.turn_input
+            summarize = None
+            if session.should_summarize(message, timestamp):
+                summarize = asyncio.create_task(self.summarize_context(session, event))
+            intro = await self.route(session.turn_input, session, event)
+            session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
+            session.extend_tools(self.select_tools(intro))
             if (call := event.call("flat_context")) and (flat_context := await call):
                 session.input_text("<quote>\n")
                 for unit in flat_context:
@@ -642,10 +660,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.input_text("\n</quote>")
             images = await asyncio.gather(*(map(self._api.download_url, event.image_list)))
             session.input_image(image for image in images if image)
-            session.input_text(turn_input)
-            intro = await self.route(turn_input, session, event)
-            session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
-            session.extend_tools(self.select_tools(intro))
+            if summarize and (summary := await summarize):
+                session.compact_history(summary)
+            session.input_text(session.turn_input)
             try:
                 await self.activate_intro(intro, session, event)
             except Exception as e:
@@ -702,6 +719,25 @@ async def read_image_by_id(agent: CloversAgent, turn: Turn, event: Event, image_
 @cast_invoker
 async def inject_prompt(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
     agent.current_session(turn.session_id).pending_content.append({"type": "text", "text": prompt})
+    return "OK"
+
+
+@cast_invoker
+async def compact_context(
+    agent: CloversAgent,
+    turn: Turn,
+    event: Event,
+    overview: str,
+    keywords: list[str],
+    summary: str,
+):
+    session = agent.current_session(turn.session_id)
+    timestamp = session.compact_history(summary)
+    session.history_dir.mkdir(parents=True, exist_ok=True)
+    file = session.history_dir / f"{datetime.fromtimestamp(timestamp).strftime('%Y%m%d-%H%M%S')} {secrets.token_hex(4)}.md"
+    post = frontmatter.Post(summary, timestamp=timestamp, overview=overview, keywords=keywords)
+    with file.open("w", encoding="utf-8") as f:
+        frontmatter.dump(post, f)
     return "OK"
 
 
