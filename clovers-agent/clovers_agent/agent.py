@@ -466,13 +466,12 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning("[%s][ASIDE] session %s failed: %s: %s", self.name, turn.session_id, type(e).__name__, e)
 
-    async def summarize_context(self, session: Session, event: Event):
-        """根据会话消息生成上下文摘要。
-
-        使用总结专用的 API 配置和提示词生成摘要，并记录执行日志。
+    async def compact_context(self, session: Session, event: Event):
+        """压缩上下文
 
         Args:
-            session (Session): 待总结的会话。
+            session (Session): 当前会话。
+            event (Event): 当前事件。
         """
         turn = session.create_turn()
         turn.create_payload(self.api("summary"), self.base_prompt)
@@ -646,9 +645,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
             return
         async with session.execute_lock:
-            summarize = None
+            cc_task = None
             if session.should_summarize(message, timestamp):
-                summarize = asyncio.create_task(self.summarize_context(session, event))
+                cc_task = asyncio.create_task(self.compact_context(session, event))
             intro = await self.route(session.turn_input, session, event)
             session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
@@ -662,8 +661,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.input_text("\n</quote>")
             images = await asyncio.gather(*(map(self._api.download_url, event.image_list)))
             session.input_image(image for image in images if image)
-            if summarize and (summary := await summarize):
-                session.compact_history(summary)
+            if cc_task:
+                await cc_task
             session.input_text(session.turn_input)
             try:
                 await self.activate_intro(intro, session, event)

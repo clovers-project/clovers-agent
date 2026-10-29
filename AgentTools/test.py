@@ -25,7 +25,8 @@ async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
     category=INTRINSIC_CATEGORY,
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
-    return await agent.tool_invoker[COMPACT_CONTEXT](agent, turn, event)
+    await agent.compact_context(agent.current_session(turn.session_id), event)
+    return "下一轮生效"
 
 
 @TOOLS.register(
