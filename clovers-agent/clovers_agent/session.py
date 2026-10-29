@@ -17,7 +17,8 @@ from .constants import (
     READ_REFERENCE_DESC,
 )
 
-from typing import TYPE_CHECKING, cast, override, overload, TypedDict, Never, NotRequired
+from typing import TYPE_CHECKING, cast, override, overload, Never, NotRequired
+from typing_extensions import TypedDict
 from collections.abc import Iterable, Coroutine
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
 from .typing.message import MultimodalContent, TextSegment, ImageSegment, TextUserMessage

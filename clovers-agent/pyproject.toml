@@ -6,6 +6,7 @@ authors = [{ name = "KarisAya", email = "karisaya@foxmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<4.0.0"
 dependencies = [
+    "typing-extensions>=4.16.0",
     "clovers>=0.5.1",
     "clovers-client>=0.3.2",
     "clovers-apscheduler>=0.3.0",
