@@ -4,11 +4,6 @@ from .message import Message
 from .json_schema import JSONSchemaType
 
 
-class ToolChoice(TypedDict):
-    type: Literal["function"]
-    function: dict[Literal["name"], str]
-
-
 class FunctionToolDefinition(TypedDict):
     name: str
     """工具名称`"""
@@ -43,5 +38,4 @@ class Payload(TypedDict, extra_items=object):
     model: str
     messages: list[Message]
     tools: NotRequired[list[FunctionToolInfo]]
-    tool_choice: ToolChoice
     response_format: NotRequired[ResponseFormat]
