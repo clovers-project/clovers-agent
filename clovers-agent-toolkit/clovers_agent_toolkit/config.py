@@ -12,9 +12,12 @@ class CATEGORIES(str, Enum):
 
 class NetworkConfig(BaseModel):
     deepseek_search_key: str = "sk-xxx"
-    """DeepSeek API Key"""
+    """DeepSeek Search API Key"""
     deepseek_search_url: str = "https://api.deepseek.com/v1/tools/search"
     """DeepSeek Search API URL"""
+    deepseek_fetch_key: str = "sk-xxx"
+    """DeepSeek Fetch API Key"""
+    deepseek_fetch_url: str = "https://api.deepseek.com/v1/tools/fetch"
 
 
 class WorkspaceConfig(BaseModel):

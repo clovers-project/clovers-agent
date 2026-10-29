@@ -12,3 +12,8 @@ class SearchResult(TypedDict):
     site_icon: str
     date: str
     authority: int
+
+
+class FetchResult(TypedDict):
+    title: str
+    content: str
