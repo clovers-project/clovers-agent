@@ -21,6 +21,7 @@ from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
     USER_TAG,
     ASSISTANT_TAG,
+    TOOLCALL_PROMPT,
     ON_CHAT,
     ON_CHAT_DESC,
     LOAD_TOOLS,
@@ -29,8 +30,8 @@ from .constants import (
     INTRINSIC_CATEGORY,
     READ_IMAGE_BY_ID_INFO,
     INJECT_PROMPT_INFO,
+    COMPACT_CONTEXT,
     COMPACT_CONTEXT_INFO,
-    COMPACT_CONTEXT_PROMPT,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DEFAULT_TIMEOUT,
     EXECUTE_SCRIPT_MAX_TIMEOUT,
@@ -477,7 +478,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         turn.create_payload(self.api("summary"), self.base_prompt)
         turn.payload["messages"].extend(session.messages)
         turn.payload["tools"] = [COMPACT_CONTEXT_INFO]
-        turn.unit_prompts.append(COMPACT_CONTEXT_PROMPT)
+        turn.unit_prompts.append(TOOLCALL_PROMPT.format(COMPACT_CONTEXT))
         turn.activate()
         try:
             message = await turn.call_api()
