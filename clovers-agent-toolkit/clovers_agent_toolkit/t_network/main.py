@@ -147,20 +147,19 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, url: str):
             timeout=30.0,
         )
     )
-    if isinstance(page_resp, str):
-        return page_resp
-    text = trafilatura.extract(
-        page_resp.content,
-        url=url,
-        include_comments=True,
-        include_images=True,
-        include_links=True,
-        include_formatting=False,
-        favor_precision=True,
-        output_format="markdown",
-    )
-    if text:
-        return text
+    if not isinstance(page_resp, str):
+        text = trafilatura.extract(
+            page_resp.content,
+            url=url,
+            include_comments=True,
+            include_images=True,
+            include_links=True,
+            include_formatting=False,
+            favor_precision=True,
+            output_format="markdown",
+        )
+        if text:
+            return text
     fetch_resp = await safe_resp(
         retry_request(
             agent.async_client.post,
