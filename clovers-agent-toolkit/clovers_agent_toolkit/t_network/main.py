@@ -2,6 +2,7 @@ import json
 import httpx
 import trafilatura
 from clovers_agent import CloversAgent, Turn, Event
+from clovers_agent.constants import INTRINSIC_CATEGORY
 from ..base import TOOLS, CONFIG
 from ..config import CATEGORIES
 from ..utils import retry_request
@@ -10,12 +11,10 @@ from ..utils import retry_request
 from typing import cast
 from .typing import SearchResult
 
-NETWORK = CATEGORIES.NETWORK
+# NETWORK = CATEGORIES.NETWORK
 network_config = CONFIG.network
 deepseek_search_key = network_config.deepseek_search_key
 deepseek_search_url = network_config.deepseek_search_url
-
-TOOLS.create_category("network", "包含搜索和网页提取工具")
 
 
 @TOOLS.register(
@@ -64,7 +63,7 @@ TOOLS.create_category("network", "包含搜索和网页提取工具")
             "description": "Only include webpages published before this date. Same format as `after`.",
         },
     },
-    NETWORK,
+    INTRINSIC_CATEGORY,
     required=["query"],
 )
 async def _(
@@ -133,9 +132,9 @@ async def _(
 
 @TOOLS.register(
     "web_extractor",
-    "获取指定网页 url 的纯文本内容。",
-    {"url": {"type": "string", "description": "网页的完整 URL 地址"}},
-    NETWORK,
+    "Extract the content from a webpage",
+    {"url": {"type": "string", "description": "HTTP(S) URL"}},
+    INTRINSIC_CATEGORY,
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event, url: str):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}

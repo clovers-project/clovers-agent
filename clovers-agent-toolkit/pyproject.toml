@@ -5,7 +5,7 @@ description = ""
 authors = [{ name = "KarisAya", email = "karisaya@foxmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<4.0.0"
-dependencies = ["clovers-agent>=0.3.0", "docker>=7.1.0", "trafilatura>=2.2.0"]
+dependencies = ["clovers-agent>=0.3.2", "docker>=7.1.0", "trafilatura>=2.2.0"]
 
 [build-system]
 requires = ["hatchling"]

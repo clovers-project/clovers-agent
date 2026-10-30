@@ -15,12 +15,10 @@ from clovers.logger import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
 from .core import cast_invoker, AgentTools, AgentSkills, Event
-from .session import iter_recoder, Turn, Session, SessionComplete, WakeupContext
+from .session import iter_recoder, Turn, Session, InputTag, SessionComplete, WakeupContext
 from .utils import deep_add, read_file, load_json, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
 from .constants import (
-    USER_TAG,
-    ASSISTANT_TAG,
     TOOLCALL_PROMPT,
     ON_CHAT,
     ON_CHAT_DESC,
@@ -403,7 +401,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             logger.warning("[%s][ROUTER] session %s failed: %s: %s", self.name, session.session_id, type(e).__name__, e)
         return intro
 
-    async def call_chime_in(self, session: Session, content: str):
+    async def call_chime_in(self, session: Session, event: Event, content: str):
         """执行主动插话回复。
 
         使用插话专用的 API 配置和提示词，根据当前会话历史及输入内容生成回复。
@@ -419,6 +417,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         turn.create_payload(self.api("chime_in"), self.chat_prompt)
         turn.payload["messages"].extend(session.messages)
         turn.unit_prompts.append(self.chime_in_prompt)
+        if "extra_context" in event.properties:
+            session.unit_prompts.extend(event.extra_context)
         turn.input_text(content)
         turn.activate()
         try:
@@ -617,24 +617,25 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         nicknames = cast(dict[str, str], session.extra["nicknames"])
         nicknames[event.user_id] = event.nickname
         mention_prefix = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
-        if "extra_context" in event.properties:
-            message = f"@ME {mention_prefix}{event.message}\n{"\n".join(event.extra_context)}"
-        elif event.to_me:
+        if event.to_me or "extra_context" in event.properties:
             message = f"@ME {mention_prefix}{event.message}"
+        elif "extra_context" in event.properties:
+            message = f"{mention_prefix}{event.message}"
         else:
-            session.record_history(USER_TAG.format(event.nickname, f"{mention_prefix}{event.message}"), timestamp)
+            message = f"{mention_prefix}{event.message}"
+            session.record_history(event.nickname, message, timestamp)
             if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
                 return
             if session.execute_lock.locked() or session.aside_lock.locked():
                 return
             async with session.execute_lock, session.aside_lock:
                 turn_input = session.turn_input
-                if chime_in_reply := await self.call_chime_in(session, turn_input):
+                if chime_in_reply := await self.call_chime_in(session, event, turn_input):
                     self.send(chime_in_reply, event)
                     session.last_active_time = timestamp
                     session.record_turn(turn_input, chime_in_reply)
                 return
-        session.record_history(USER_TAG.format(event.nickname, message), timestamp)
+        session.record_history(event.nickname, message, timestamp)
         if session.execute_lock.locked():
             if session.aside_lock.locked() or session.idle_event.is_set():
                 return
@@ -642,7 +643,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 aside_reply = await self.call_aside(session, event, session.turn_input, session.current_output)
                 if aside_reply:
                     self.send(aside_reply, event)
-                    session.record_history(ASSISTANT_TAG.format(aside_reply), timestamp)
+                    session.record_history(InputTag.ASSISTANT, aside_reply, timestamp)
             return
         async with session.execute_lock:
             compact_task = None
@@ -666,6 +667,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 await self.activate_intro(intro, session, event)
             except Exception as e:
                 logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
+            if "extra_context" in event.properties:
+                session.unit_prompts.extend(event.extra_context)
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             if compact_task:
                 await compact_task
@@ -737,7 +740,7 @@ async def compact_context(
     timestamp = session.compact_history(summary)
     session.history_dir.mkdir(parents=True, exist_ok=True)
     file = session.history_dir / f"{datetime.fromtimestamp(timestamp).strftime('%Y%m%d-%H%M%S')} {secrets.token_hex(4)}.md"
-    post = frontmatter.Post(summary, overview=overview, keywords=keywords, timestamp=timestamp)
+    post = frontmatter.Post(summary, overview=overview, keywords=[k for x in keywords if (k := x.strip())], timestamp=timestamp)
     with file.open("w", encoding="utf-8") as f:
         frontmatter.dump(post, f)
     return "OK"

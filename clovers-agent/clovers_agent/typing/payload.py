@@ -1,4 +1,4 @@
-from typing import Literal, NotRequired
+from typing import Literal, NotRequired, Any
 from typing_extensions import TypedDict
 from .message import Message
 from .json_schema import JSONSchemaType
@@ -34,7 +34,7 @@ type ResponseFormatJsonObject = dict[Literal["type"], Literal["json_object"]]
 type ResponseFormat = ResponseFormatJsonSchema | ResponseFormatJsonObject
 
 
-class Payload(TypedDict, extra_items=object):
+class Payload(TypedDict, extra_items=Any):
     model: str
     messages: list[Message]
     tools: NotRequired[list[FunctionToolInfo]]

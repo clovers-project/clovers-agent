@@ -132,7 +132,11 @@ class ConstantConfig(BaseModel):
     TOOLCALL_PROMPT: str = "You must call the `{}` tool now. Output only the tool call."
     # 内置工具
     ON_CHAT: str = "on_chat"
-    ON_CHAT_DESC: str = f"当前对话为闲聊、讨论、提问、涉及简单工具调用任务的聊天、或无法分配至其他工具时，调用此工具"
+    ON_CHAT_DESC: str = """\
+Use this tool for general-purpose interactions, including casual conversation, \
+open-ended discussions, information-seeking, lightweight tool-assisted requests, \
+and any requests that do not clearly fit another tool.\
+"""
     HIDDEN_CATEGORY: str = ":hidden"
     BUILTIN_CATEGORY: str = ":builtin"
     INTRINSIC_CATEGORY: str = ":intrinsic"

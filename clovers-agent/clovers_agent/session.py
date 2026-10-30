@@ -5,10 +5,13 @@ import contextlib
 from pathlib import Path
 from itertools import count
 from collections import deque
+from enum import Enum
 from .utils import load_jsonl, save_jsonl
 from .config import SESSION as SESSION_CONFIG
 from .constants import (
     SYSTEM_TAG,
+    USER_TAG,
+    ASSISTANT_TAG,
     HISTORY_TAG,
     READ_IMAGE_BY_ID_INFO,
     EXECUTE_SCRIPT,
@@ -17,7 +20,7 @@ from .constants import (
     READ_REFERENCE_DESC,
 )
 
-from typing import TYPE_CHECKING, cast, override, overload, Never, NotRequired
+from typing import TYPE_CHECKING, cast, override, overload, Never, NotRequired, Any
 from typing_extensions import TypedDict
 from collections.abc import Iterable, Coroutine
 from .typing import Payload, AssistantMessage, SystemMessage, FunctionToolInfo
@@ -186,6 +189,29 @@ def iter_recoder(recorder: Iterable[Record]):
         yield b.copy()
 
 
+class InputTag(Enum):
+    SYSTEM = 0
+    USER = 1
+    ASSISTANT = 2
+    HISTORY = 3
+
+
+def format_input(tag: InputTag | str, content: str):
+    match tag:
+        case InputTag.SYSTEM:
+            raise ValueError("System tag is not allowed")
+        case InputTag.USER:
+            raise ValueError("User tag is not allowed")
+        case InputTag.ASSISTANT:
+            return ASSISTANT_TAG.format(content)
+        case InputTag.HISTORY:
+            return HISTORY_TAG.format(content)
+        case str() as tag:
+            return USER_TAG.format(tag, content)
+        case _:
+            raise ValueError("Invalid tag")
+
+
 class Session(Turn):
     def __init__(
         self,
@@ -201,6 +227,7 @@ class Session(Turn):
     ) -> None:
         self.extra: SessionExtra
         super().__init__(session_id, {}, {})
+        self.session_dir = session_dir
         self.recorder_file = session_dir / "recorder.jsonl"
         self.history_dir = session_dir / "history"
         # 主题分离
@@ -221,7 +248,7 @@ class Session(Turn):
         self.memory_timeout = memory_timeout
         self.image_recorder: deque[tuple[int, str, float]] = deque()
         self.image_id = count()
-        self.message_history: deque[tuple[str, float]] = deque(maxlen=silence_size)
+        self.message_history: deque[tuple[str | InputTag, str, float]] = deque(maxlen=silence_size)
         self.silence_timeout = silence_timeout
         # 状态
         self.cleanup_tasks: list[asyncio.Task] = []
@@ -274,14 +301,14 @@ class Session(Turn):
     def messages(self):
         return tuple(iter_recoder(self.recorder))
 
-    def record_history(self, content: str, timestamp: float):
+    def record_history(self, tag: str | InputTag, content: str, timestamp: float):
         timeout = timestamp - self.memory_timeout
         while self.image_recorder and (self.image_recorder[0][2] <= timeout):
             self.image_recorder.popleft()
         timeout = timestamp - self.silence_timeout
-        while self.message_history and (self.message_history[0][1] <= timeout):
+        while self.message_history and (self.message_history[0][2] <= timeout):
             self.message_history.popleft()
-        self.message_history.append((content, timestamp))
+        self.message_history.append((tag, content, timestamp))
 
     def should_summarize(self, message: str, timestamp: float):
         if not self.recorder:
@@ -304,15 +331,15 @@ class Session(Turn):
         self.decouple_count = 0
         self.recorder_file.unlink(missing_ok=True)
         if self.message_history:
-            timestamp = self.message_history[0][1]
+            timestamp = self.message_history[0][2]
         else:
             timestamp = time.time()
-        self.message_history.appendleft((HISTORY_TAG.format(content), timestamp))
+        self.message_history.appendleft((InputTag.HISTORY, content, timestamp))
         return timestamp
 
     @property
     def turn_input(self):
-        return "\n".join(x for x, _ in self.message_history)
+        return "\n".join(format_input(tag, content) for tag, content, _ in self.message_history)
 
     def record_turn(self, turn_input: str | MultimodalContent, turn_output: str):
         timestamp = self.last_active_time
@@ -353,5 +380,5 @@ class WakeupContext:
         self.tasks: list[asyncio.Task[str | None]] = []
 
 
-class SessionExtra(TypedDict, extra_items=object):
+class SessionExtra(TypedDict, extra_items=Any):
     cleanup: NotRequired[list[Coroutine]]
