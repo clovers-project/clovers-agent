@@ -27,7 +27,7 @@ class OpenAIAPI:
         return {"model": self.model, "messages": messages, **self.extra_body}  # type: ignore 这里允许额外请求体
 
     async def call_api(self, payload: Payload, usage_counter: dict) -> AssistantMessage:
-        response = await retry_request(self.async_client.post(self.url, headers=self.headers, json=payload))
+        response = await retry_request(self.async_client.post, self.url, headers=self.headers, json=payload)
         data = response.raise_for_status().json()
         deep_add(usage_counter, {payload["model"]: data.get("usage")})
         message = data["choices"][0]["message"]
@@ -48,7 +48,7 @@ class OpenAIAPI:
                     return
                 return url
             if url.startswith(("https://", "http://")):
-                response = await retry_request(self.async_client.get(url, timeout=60))
+                response = await retry_request(self.async_client.get, url, timeout=60)
                 data = response.raise_for_status().content
             elif url.startswith("file://"):
                 data = read_file_url(url)

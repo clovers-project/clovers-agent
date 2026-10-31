@@ -232,9 +232,9 @@ async def _(
     file_path: str | None = None,
 ):
     if method.upper() == "POST":
-        resp = await retry_request(agent.async_client.post(url, json=data, headers=headers))
+        resp = await retry_request(agent.async_client.post, url, json=data, headers=headers)
     else:
-        resp = await retry_request(agent.async_client.get(url, params=data, headers=headers))
+        resp = await retry_request(agent.async_client.get, url, params=data, headers=headers)
     content = resp.content
     if not content:
         return f"Request succeeded (HTTP {resp.status_code}), but the response body was empty."

@@ -102,7 +102,7 @@ async def _(
         "ori_question": question or event.message,
         "need_content": True,
     }
-    response = await retry_request(agent.async_client.post(deepseek_search_url, headers=headers, json=payload, timeout=30.0))
+    response = await retry_request(agent.async_client.post, deepseek_search_url, headers=headers, json=payload, timeout=30.0)
     try:
         results = cast(list[SearchResult], response.raise_for_status().json()["results"])
     except httpx.HTTPStatusError as e:
@@ -138,7 +138,7 @@ async def _(
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event, url: str):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    response = await retry_request(agent.async_client.get(url, headers=headers, timeout=30.0))
+    response = await retry_request(agent.async_client.get, url, headers=headers, timeout=30.0)
     text = trafilatura.extract(
         response.content,
         url=url,

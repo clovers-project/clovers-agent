@@ -11,7 +11,11 @@ import chardet
 import puremagic
 from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_random_exponential
 
-from collections.abc import Awaitable
+from collections.abc import Callable, Coroutine
+from typing import Any
+
+type AsyncFunction[**P, T] = Callable[P, Coroutine[Any, Any, T]]
+
 
 B64_PATTERN = re.compile(r"^[A-Za-z0-9+/]*={0,2}$")
 
@@ -228,8 +232,8 @@ def is_retryable_httpx_exc(exc: BaseException) -> bool:
     return isinstance(exc, (httpx.RequestError, httpx.HTTPStatusError))
 
 
-async def httpx_request(request: Awaitable[httpx.Response]):
-    response = await request
+async def httpx_request(method: AsyncFunction[..., httpx.Response], url: str, **kwargs):
+    response = await method(url, **kwargs)
     status_code = response.status_code
     if status_code == 429 or status_code >= 500:
         response.raise_for_status()
