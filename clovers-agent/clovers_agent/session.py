@@ -196,7 +196,7 @@ class InputTag(Enum):
     HISTORY = 3
 
 
-def format_input(tag: InputTag | str, content: str):
+def format_message(tag: InputTag | str, content: str):
     match tag:
         case InputTag.SYSTEM:
             raise ValueError("System tag is not allowed")
@@ -209,7 +209,8 @@ def format_input(tag: InputTag | str, content: str):
         case str() as tag:
             return USER_TAG.format(tag, content)
         case _:
-            raise ValueError("Invalid tag")
+            # raise ValueError("Invalid tag")
+            return ""
 
 
 class Session(Turn):
@@ -338,8 +339,8 @@ class Session(Turn):
         return timestamp
 
     @property
-    def turn_input(self):
-        return "\n".join(format_input(tag, content) for tag, content, _ in self.message_history)
+    def prompt_text(self):
+        return "\n".join(format_message(tag, content) for tag, content, _ in self.message_history)
 
     def record_turn(self, turn_input: str | MultimodalContent, turn_output: str):
         timestamp = self.last_active_time

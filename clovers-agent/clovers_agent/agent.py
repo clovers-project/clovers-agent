@@ -545,7 +545,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.current_output = reply
                 self.send(reply, event)
         if reply:
-            current_input[-1] = {"type": "text", "text": session.turn_input}
+            current_input[-1] = {"type": "text", "text": session.prompt_text}
             session.record_turn(current_input, reply)
         return reply
 
@@ -596,7 +596,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.unit_prompts.append(WAKEUP_TIP)
                 session.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in tasks))
                 session.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
-                session.input_text(session.turn_input)
+                session.input_text(session.prompt_text)
                 await self.execute_session(session, event, time.time())
         except SessionComplete as e:
             if reply := e.data:
@@ -617,7 +617,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         nicknames = cast(dict[str, str], session.extra["nicknames"])
         nicknames[event.user_id] = event.nickname
         mention_prefix = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
-        if event.to_me or "extra_context" in event.properties:
+        if event.to_me:
             message = f"@ME {mention_prefix}{event.message}"
         elif "extra_context" in event.properties:
             message = f"{mention_prefix}{event.message}"
@@ -629,28 +629,28 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             if session.execute_lock.locked() or session.aside_lock.locked():
                 return
             async with session.execute_lock, session.aside_lock:
-                turn_input = session.turn_input
-                if chime_in_reply := await self.call_chime_in(session, event, turn_input):
+                prompt_text = session.prompt_text
+                if chime_in_reply := await self.call_chime_in(session, event, prompt_text):
                     self.send(chime_in_reply, event)
                     session.last_active_time = timestamp
-                    session.record_turn(turn_input, chime_in_reply)
+                    session.record_turn(prompt_text, chime_in_reply)
                 return
         session.record_history(event.nickname, message, timestamp)
         if session.execute_lock.locked():
             if session.aside_lock.locked() or session.idle_event.is_set():
                 return
             async with session.aside_lock:
-                aside_reply = await self.call_aside(session, event, session.turn_input, session.current_output)
+                aside_reply = await self.call_aside(session, event, session.prompt_text, session.current_output)
                 if aside_reply:
                     self.send(aside_reply, event)
                     session.record_history(InputTag.ASSISTANT, aside_reply, timestamp)
             return
         async with session.execute_lock:
             compact_task = None
-            turn_input = session.turn_input
+            prompt_text = session.prompt_text
             if session.should_summarize(message, timestamp):
                 compact_task = asyncio.create_task(self.compact_context(session, event))
-            intro = await self.route(turn_input, session, event)
+            intro = await self.route(prompt_text, session, event)
             session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
             if (call := event.call("flat_context")) and (flat_context := await call):
@@ -672,7 +672,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.unit_prompts.append(f"Now:{self.today} {now.strftime("%I:%M %p")}")
             if compact_task:
                 await compact_task
-            session.input_text(session.turn_input)
+            session.input_text(session.prompt_text)
             session.extend_messages()
             await self.execute_session(session, event, timestamp)
 
