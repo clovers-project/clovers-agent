@@ -229,7 +229,7 @@ class Session(Turn):
         super().__init__(session_id, {}, {})
         self.session_dir = session_dir
         self.recorder_file = session_dir / "recorder.jsonl"
-        self.history_dir = session_dir / "history"
+        self.history_dir = session_dir / "histories"
         # 主题分离
         from .embedding import TopicDecoupler
 

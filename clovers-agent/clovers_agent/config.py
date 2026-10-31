@@ -135,16 +135,14 @@ class ConstantConfig(BaseModel):
     ON_CHAT_DESC: str = """\
 Use this tool for general-purpose interactions, including casual conversation, \
 open-ended discussions, information-seeking, lightweight tool-assisted requests, \
-and any requests that do not clearly fit another tool.\
-"""
+and any requests that do not clearly fit another tool."""
     HIDDEN_CATEGORY: str = ":hidden"
     BUILTIN_CATEGORY: str = ":builtin"
     INTRINSIC_CATEGORY: str = ":intrinsic"
     LOAD_TOOLS: str = "load_tools"
     LOAD_TOOLS_DESC: str = """\
-Dynamically inject the tools in a category into the currently available tools. \
-Use this when the available tools are insufficient to complete the task.\
-"""
+Dynamically inject the tools in a category into the currently available tools.
+Use this when the available tools are insufficient to complete the task."""
     READ_IMAGE_BY_ID: str = "read_image_by_id"
     READ_IMAGE_BY_ID_DESC: str = """\
 上下文中的图片已替换成格式为 [image:image_id] 的标签
@@ -157,11 +155,12 @@ Use this when the available tools are insufficient to complete the task.\
     COMPACT_CONTEXT: str = "compact_context"
     COMPACT_CONTEXT_DESC: str = "Compress the conversation history for continued conversation."
     COMPACT_CONTEXT_OVERVIEW_DESC: str = "A one-sentence overview of the conversation."
-    COMPACT_CONTEXT_KEYWORDS_DESC: str = "Key topics, entities, and concepts discussed in the conversation."
+    COMPACT_CONTEXT_KEYWORDS_DESC: str = """\
+Key topics, entities, and concepts, expressed as individual words only.
+Never use phrases or multi-word terms."""
     COMPACT_CONTEXT_SUMMARY_DESC: str = """\
 Create a concise but sufficiently detailed summary of the conversation for seamless continuation.
-Remove redundancy and trivial details while preserving all information necessary to understand the context.
-"""
+Remove redundancy and trivial details while preserving all information necessary to understand the context."""
     # 视觉相关配置
     VISION_TAG: str = '<vision desc="此消息为增强视觉信息，非用户直接发出">\n{}\n</vision>'
     VISION_PROMPT: str = """\
