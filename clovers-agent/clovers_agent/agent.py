@@ -14,7 +14,7 @@ from clovers.core import ModuleLoader
 from clovers.logger import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .api import OpenAIAPI, HybridOpenAIAPI
-from .core import cast_invoker, AgentTools, AgentSkills, Event
+from .core import cast_invoker, AgentTools, AgentSkills, Event, AgentTask
 from .session import iter_recoder, Turn, Session, InputTag, SessionComplete, WakeupContext
 from .utils import deep_add, read_file, load_json, save_json, decode_bytes
 from .config import HybridOpenAIConfig, CONFIG, PROMPTS
@@ -105,9 +105,10 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.category_decorator(READ_IMAGE_BY_ID_INFO, BUILTIN_CATEGORY)(read_image_by_id)
         self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(inject_prompt)
         self.category_decorator(COMPACT_CONTEXT_INFO, BUILTIN_CATEGORY)(compact_context)
-        self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
+        self.scheduler.add_job(self._daily_task, trigger="cron", hour=2, misfire_grace_time=3600)
         # 任务
         self._startup_tasks: set[asyncio.Task] = set()
+        self.daily_tasks: list[AgentTask] = []
 
     def reload_prompts(self):
         """重新加载提示词"""
@@ -190,37 +191,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         return self._apis.get(key, self._api)
 
-    async def daily_tasks(self):
-        """执行每日维护任务。
-
-        清理超过记忆超时时间的会话，记录当日 Token 用量，
-        更新当前日期，并重置用量统计计数器。
-        """
-        timestamp = time.time()
-        expired_session_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
-        cleanup_tasks = []
-        for session_id in expired_session_ids:
-            coros = self.sessions[session_id].cleanup()
-            if coros:
-                cleanup_tasks.extend(coros)
-            del self.sessions[session_id]
-        logger.info("[%s][SESSIONS CLEAR]", self.name)
-        usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
-        logger.info("[%s][USAGE TODAY] %s", self.name, usage)
-        self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
-        self.usage_counter.clear()
-        try:
-            exceptions = await asyncio.wait_for(asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=30)
-        except asyncio.TimeoutError:
-            logger.warning("[%s][CLEANUP TIMEOUT]", self.name)
-        except Exception as e:
-            logger.exception("[%s][CLEANUP FAILED]", self.name)
-        else:
-            for e in exceptions:
-                if not isinstance(e, Exception):
-                    continue
-                logger.warning("[%s][CLEANUP EXCEPTION] %s: %s", self.name, type(e).__name__, e)
-
     @staticmethod
     def session_id(event: Event) -> str:
         """根据事件生成会话标识。
@@ -251,40 +221,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         else:
             session = self.sessions[session_id] = Session(session_id, self.session_dir / session_id, self.sentence_model)
         return session
-
-    async def activate_intro(self, intro: str, turn: Turn, event: Event):
-        """执行指定初始工具钩子。
-
-        并发执行该分类下注册的所有钩子，并收集执行结果。
-
-        Args:
-            intro (str): 初始工具名称。
-            session (Turn): 当前轮次。
-            event (Event): 当前事件。
-        """
-        hooks = self.intro_hooks.get(intro)
-        if not hooks:
-            return
-        intro_prompts = await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
-        turn.unit_prompts.extend(x for x in intro_prompts if x)
-
-    async def activate_category(self, category: str, turn: Turn, event: Event) -> list[str] | None:
-        """执行指定工具分类的激活钩子。
-
-        并发执行该分类下注册的所有钩子，并收集执行结果。
-
-        Args:
-            category (str): 工具分类名称。
-            session (Turn): 当前轮次。
-            event (Event): 当前事件。
-
-        Returns:
-            list[str] | None: 钩子返回的结果列表；没有注册钩子时返回 None。
-        """
-        hooks = self.category_hooks.get(category)
-        if not hooks:
-            return
-        return await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
 
     async def invoke_tool(self, call_info: ToolCallInfo, turn: Turn, event: Event) -> ToolMessage:
         """执行模型发起的工具调用。
@@ -379,7 +315,76 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             pass
         return reply
 
-    async def route(self, content: str, session: Session, event: Event):
+    async def _daily_task(self):
+        """执行每日维护任务。
+
+        清理超过记忆超时时间的会话，记录当日 Token 用量，
+        更新当前日期，并重置用量统计计数器。
+        """
+        timestamp = time.time()
+        expired_session_ids = tuple(s_id for s_id, s in self.sessions.items() if s.last_active_time < timestamp - s.memory_timeout)
+        cleanup_tasks = []
+        for session_id in expired_session_ids:
+            coros = self.sessions[session_id].cleanup()
+            if coros:
+                cleanup_tasks.extend(coros)
+            del self.sessions[session_id]
+        logger.info("[%s][SESSIONS CLEAR]", self.name)
+        usage = {k: v.get("total_tokens") for k, v in self.usage_counter.items()}
+        logger.info("[%s][USAGE TODAY] %s", self.name, usage)
+        self.today = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+        self.usage_counter.clear()
+        try:
+            exceptions = await asyncio.wait_for(asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("[%s][CLEANUP TIMEOUT]", self.name)
+        except Exception as e:
+            logger.exception("[%s][CLEANUP FAILED]", self.name)
+        else:
+            for e in exceptions:
+                if not isinstance(e, Exception):
+                    continue
+                logger.warning("[%s][CLEANUP EXCEPTION] %s: %s", self.name, type(e).__name__, e)
+        if self.daily_tasks:
+            task = asyncio.gather(*(coro(self) for coro in self.daily_tasks), return_exceptions=True)
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(task, timeout=30)
+
+    async def _activate_intro(self, intro: str, turn: Turn, event: Event):
+        """执行指定初始工具钩子。
+
+        并发执行该分类下注册的所有钩子，并收集执行结果。
+
+        Args:
+            intro (str): 初始工具名称。
+            session (Turn): 当前轮次。
+            event (Event): 当前事件。
+        """
+        hooks = self.intro_hooks.get(intro)
+        if not hooks:
+            return
+        intro_prompts = await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
+        turn.unit_prompts.extend(x for x in intro_prompts if x)
+
+    async def _activate_category(self, category: str, turn: Turn, event: Event) -> list[str] | None:
+        """执行指定工具分类的激活钩子。
+
+        并发执行该分类下注册的所有钩子，并收集执行结果。
+
+        Args:
+            category (str): 工具分类名称。
+            session (Turn): 当前轮次。
+            event (Event): 当前事件。
+
+        Returns:
+            list[str] | None: 钩子返回的结果列表；没有注册钩子时返回 None。
+        """
+        hooks = self.category_hooks.get(category)
+        if not hooks:
+            return
+        return await asyncio.gather(*(hook(self, turn, event) for hook in hooks))
+
+    async def _route(self, content: str, session: Session, event: Event):
         """根据用户输入选择对应的 Intro 工具。
 
         Args:
@@ -414,7 +419,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             logger.warning("[%s][ROUTER] session %s failed: %s: %s", self.name, session.session_id, type(e).__name__, e)
         return intro
 
-    async def call_chime_in(self, session: Session, event: Event, content: str):
+    async def _call_chime_in(self, session: Session, event: Event, content: str):
         """执行主动插话回复。
 
         使用插话专用的 API 配置和提示词，根据当前会话历史及输入内容生成回复。
@@ -442,7 +447,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning("[%s][CHIME IN] session %s failed: %s: %s", self.name, turn.session_id, type(e).__name__, e)
 
-    async def call_aside(self, session: Session, event: Event, content: str, current_output: str | None):
+    async def _call_aside(self, session: Session, event: Event, content: str, current_output: str | None):
         """处理主任务执行期间的旁路交互。
 
         基于当前轮次的执行上下文创建独立轮次，并使用旁路提示词处理输入。
@@ -480,7 +485,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         except Exception as e:
             logger.warning("[%s][ASIDE] session %s failed: %s: %s", self.name, turn.session_id, type(e).__name__, e)
 
-    async def compact_context(self, session: Session, event: Event):
+    async def _compact_context(self, session: Session, event: Event):
         """压缩上下文
 
         Args:
@@ -533,7 +538,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         """
         asyncio.create_task(event.send("text", text))
 
-    async def execute_session(self, session: Session, event: Event, timestamp: float):
+    async def _execute_session(self, session: Session, event: Event, timestamp: float):
         """会话执行出口
 
         迭代模型回复并发送给用户，处理执行期间收到的旁路输入，
@@ -574,13 +579,13 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             if session.cursor is None:
                 raise RuntimeError("Cannot create WakeupContext when the session is inactive")
             wakeup_context = session.wakeup_context = WakeupContext(session.snapshot)
-            asyncio.create_task(self.run_wakeup(session, event, session.last_active_time))
+            asyncio.create_task(self._run_wakeup(session, event, session.last_active_time))
         else:
             wakeup_context = session.wakeup_context
         turn.usage_counter = wakeup_context.turn.usage_counter
         wakeup_context.tasks.append(asyncio.create_task(self.resolve_turn(turn, event)))
 
-    async def run_wakeup(self, session: Session, event: Event, action_time: float):
+    async def _run_wakeup(self, session: Session, event: Event, action_time: float):
         """执行唤醒
 
         Args:
@@ -610,13 +615,27 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.unit_prompts.extend("\n---\n".join(task.result() or "None" for task in tasks))
                 session.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
                 session.input_text(session.prompt_text)
-                await self.execute_session(session, event, time.time())
+                await self._execute_session(session, event, time.time())
         except SessionComplete as e:
             if reply := e.data:
                 self.send(reply, event)
         self.update_usage(session.usage_counter)
 
-    async def handle_input(self, session: Session, event: Event):
+    async def on_input(self, event: Event):
+        """处理外部输入事件的入口。
+
+        Args:
+            event (Event): 当前事件。
+        """
+        session = self.current_session(self.session_id(event))
+        try:
+            await self._handle_input(session, event)
+        except SessionComplete as e:
+            if reply := e.data:
+                self.send(reply, event)
+        self.update_usage(session.usage_counter)
+
+    async def _handle_input(self, session: Session, event: Event):
         """处理会话中的输入事件。
 
         Args:
@@ -643,7 +662,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 return
             async with session.execute_lock, session.aside_lock:
                 prompt_text = session.prompt_text
-                if chime_in_reply := await self.call_chime_in(session, event, prompt_text):
+                if chime_in_reply := await self._call_chime_in(session, event, prompt_text):
                     self.send(chime_in_reply, event)
                     session.last_active_time = timestamp
                     session.record_turn(prompt_text, chime_in_reply)
@@ -653,7 +672,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             if session.aside_lock.locked() or session.idle_event.is_set():
                 return
             async with session.aside_lock:
-                aside_reply = await self.call_aside(session, event, session.prompt_text, session.current_output)
+                aside_reply = await self._call_aside(session, event, session.prompt_text, session.current_output)
                 if aside_reply:
                     self.send(aside_reply, event)
                     session.record_history(InputTag.ASSISTANT, aside_reply, timestamp)
@@ -662,8 +681,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             compact_task = None
             prompt_text = session.prompt_text
             if session.should_summarize(message, timestamp):
-                compact_task = asyncio.create_task(self.compact_context(session, event))
-            intro = await self.route(prompt_text, session, event)
+                compact_task = asyncio.create_task(self._compact_context(session, event))
+            intro = await self._route(prompt_text, session, event)
             session.extend_tools(self.select_tools(INTRINSIC_CATEGORY))
             session.extend_tools(self.select_tools(intro))
             if (call := event.call("flat_context")) and (flat_context := await call):
@@ -678,7 +697,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 images = await asyncio.gather(*(map(self._api.download_url, image_list)))
                 session.input_image(image for image in images if image)
             try:
-                await self.activate_intro(intro, session, event)
+                await self._activate_intro(intro, session, event)
             except Exception as e:
                 logger.warning("[%s][INTRO HOOK][%s] session %s failed: %s: %s", self.name, intro, session.session_id, type(e).__name__, e)
             if "extra_context" in event.properties:
@@ -688,21 +707,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 await compact_task
             session.input_text(session.prompt_text)
             session.extend_messages()
-            await self.execute_session(session, event, timestamp)
-
-    async def on_input(self, event: Event):
-        """处理外部输入事件的入口。
-
-        Args:
-            event (Event): 当前事件。
-        """
-        session = self.current_session(self.session_id(event))
-        try:
-            await self.handle_input(session, event)
-        except SessionComplete as e:
-            if reply := e.data:
-                self.send(reply, event)
-        self.update_usage(session.usage_counter)
+            await self._execute_session(session, event, timestamp)
 
 
 async def on_chat(agent: CloversAgent, turn: Turn, event: Event):
@@ -717,7 +722,7 @@ async def load_tools(agent: CloversAgent, turn: Turn, event: Event, category: st
     if tools:
         turn.extend_tools(tools)
         prompts.append(f"Tools injected and now available: {", ".join(x["function"]["name"] for x in tools)}")
-    if tips := await agent.activate_category(category, turn, event):
+    if tips := await agent._activate_category(category, turn, event):
         prompts.extend(tips)
     if scripts_map := agent.scripts_map.get(category):
         turn.extend_scripts(scripts_map.keys())
