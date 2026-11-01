@@ -155,6 +155,17 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self._category_schema["description"] = "\n".join(f"{category}: {desc}" for category, desc in self.category_descriptions.items())
         self._category_schema["enum"] = list(self.category_descriptions)
 
+    def send(self, text: str, event: Event):
+        """异步发送文本消息。
+
+        创建异步任务，通过当前事件发送指定文本。
+
+        Args:
+            text (str): 待发送的文本。
+            event (Event): 当前事件。
+        """
+        asyncio.create_task(event.send("text", text))
+
     @property
     def usage_file(self):
         """获取当前日期对应的用量统计文件路径。
@@ -163,6 +174,24 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             Path: 当前日期的用量统计文件路径。
         """
         return self.usage_dir / f"{self.today}.json"
+
+    def update_usage(self, usage_counter: dict):
+        """合并并持久化 Token 用量统计。
+
+        将传入的用量计数器累加到 Agent 的总计数器中，
+        记录本次用量，并将更新后的统计数据写入文件。
+        处理完成后清空传入的计数器。
+
+        Args:
+            usage_counter (dict): 待合并的用量统计。
+        """
+        if not usage_counter:
+            return
+        deep_add(self.usage_counter, usage_counter)
+        usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
+        usage_counter.clear()
+        logger.info("[%s][USAGE] %s", self.name, usage)
+        save_json(self.usage_file, self.usage_counter)
 
     def create_api(self, config: HybridOpenAIConfig):
         """根据配置创建 API 客户端。
@@ -509,35 +538,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             logger.warning("[%s][SUMMARY] failed: %s", self.name, e)
             return
 
-    def update_usage(self, usage_counter: dict):
-        """合并并持久化 Token 用量统计。
-
-        将传入的用量计数器累加到 Agent 的总计数器中，
-        记录本次用量，并将更新后的统计数据写入文件。
-        处理完成后清空传入的计数器。
-
-        Args:
-            usage_counter (dict): 待合并的用量统计。
-        """
-        if not usage_counter:
-            return
-        deep_add(self.usage_counter, usage_counter)
-        usage = {k: v.get("total_tokens") for k, v in usage_counter.items()}
-        usage_counter.clear()
-        logger.info("[%s][USAGE] %s", self.name, usage)
-        save_json(self.usage_file, self.usage_counter)
-
-    def send(self, text: str, event: Event):
-        """异步发送文本消息。
-
-        创建异步任务，通过当前事件发送指定文本。
-
-        Args:
-            text (str): 待发送的文本。
-            event (Event): 当前事件。
-        """
-        asyncio.create_task(event.send("text", text))
-
     async def _execute_session(self, session: Session, event: Event, timestamp: float):
         """会话执行出口
 
@@ -566,24 +566,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             current_input[-1] = {"type": "text", "text": session.prompt_text}
             session.record_turn(current_input, reply)
         return reply
-
-    def submit_turn_for_wakeup(self, turn: Turn, event: Event):
-        """提交一轮唤醒调用链。
-
-        Args:
-            turn (Turn): 待提交的调用链执行轮次。
-            event (Event): 用于执行调用链和唤醒的事件。
-        """
-        session = self.current_session(turn.session_id)
-        if session.wakeup_context is None:
-            if session.cursor is None:
-                raise RuntimeError("Cannot create WakeupContext when the session is inactive")
-            wakeup_context = session.wakeup_context = WakeupContext(session.snapshot)
-            asyncio.create_task(self._run_wakeup(session, event, session.last_active_time))
-        else:
-            wakeup_context = session.wakeup_context
-        turn.usage_counter = wakeup_context.turn.usage_counter
-        wakeup_context.tasks.append(asyncio.create_task(self.resolve_turn(turn, event)))
 
     async def _run_wakeup(self, session: Session, event: Event, action_time: float):
         """执行唤醒
@@ -616,20 +598,6 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 session.payload["messages"].extend(iter_recoder(reversed(tuple(x for x in reversed(recorder) if x[2] > action_time))))
                 session.input_text(session.prompt_text)
                 await self._execute_session(session, event, time.time())
-        except SessionComplete as e:
-            if reply := e.data:
-                self.send(reply, event)
-        self.update_usage(session.usage_counter)
-
-    async def on_input(self, event: Event):
-        """处理外部输入事件的入口。
-
-        Args:
-            event (Event): 当前事件。
-        """
-        session = self.current_session(self.session_id(event))
-        try:
-            await self._handle_input(session, event)
         except SessionComplete as e:
             if reply := e.data:
                 self.send(reply, event)
@@ -708,6 +676,38 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.input_text(session.prompt_text)
             session.extend_messages()
             await self._execute_session(session, event, timestamp)
+
+    def submit_turn_for_wakeup(self, turn: Turn, event: Event):
+        """提交一轮唤醒调用链。
+
+        Args:
+            turn (Turn): 待提交的调用链执行轮次。
+            event (Event): 用于执行调用链和唤醒的事件。
+        """
+        session = self.current_session(turn.session_id)
+        if session.wakeup_context is None:
+            if session.cursor is None:
+                raise RuntimeError("Cannot create WakeupContext when the session is inactive")
+            wakeup_context = session.wakeup_context = WakeupContext(session.snapshot)
+            asyncio.create_task(self._run_wakeup(session, event, session.last_active_time))
+        else:
+            wakeup_context = session.wakeup_context
+        turn.usage_counter = wakeup_context.turn.usage_counter
+        wakeup_context.tasks.append(asyncio.create_task(self.resolve_turn(turn, event)))
+
+    async def on_input(self, event: Event):
+        """处理外部输入事件的入口。
+
+        Args:
+            event (Event): 当前事件。
+        """
+        session = self.current_session(self.session_id(event))
+        try:
+            await self._handle_input(session, event)
+        except SessionComplete as e:
+            if reply := e.data:
+                self.send(reply, event)
+        self.update_usage(session.usage_counter)
 
 
 async def on_chat(agent: CloversAgent, turn: Turn, event: Event):
