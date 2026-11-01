@@ -1,5 +1,3 @@
-__version__ = "0.3.0"
-__all__ = ["TOOLS"]
 from .base import TOOLS, CONFIG, CATEGORIES
 
 USE_CATEGORIES = CONFIG.use_categories
@@ -10,3 +8,6 @@ if CATEGORIES.WORKSPACE in USE_CATEGORIES:
     from . import t_workspace as _
 if CATEGORIES.DEBUG_UTILS in USE_CATEGORIES:
     from . import t_debug as _
+
+__version__ = "0.3.4"
+__all__ = ["TOOLS"]
