@@ -445,8 +445,15 @@ class AgentSkills(AgentTools):
         """
 
         name, desc, parameters, required, content = skill
-        if f := md_wrapper(content, func, None if category else name):
+        if category:
+            intro = None
+            loaded = self._loaded_categories
+        else:
+            intro = name
+            loaded = self._loaded_intros
+        if f := md_wrapper(content, func, intro):
             self.register(name, desc, parameters, category, required)(f)
+            loaded.add(name)
             return category, name
 
     def load_skill(self, skill_path: Path):

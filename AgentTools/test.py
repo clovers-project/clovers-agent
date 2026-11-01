@@ -1,6 +1,6 @@
 if not __package__:
     raise RuntimeError("插件路径只能作为模块导入。")
-
+import json
 from clovers_agent import CloversAgent, Turn, Event, AgentTools
 from clovers_agent.constants import INTRINSIC_CATEGORY
 
@@ -36,3 +36,21 @@ async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
     return "helloworld" + 1  # type: ignore[operator]
+
+
+@TOOLS.register(
+    "test_reload_skill",
+    description="测试重新加载技能",
+    category=INTRINSIC_CATEGORY,
+)
+async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
+    print("=" * 10, "BEFORE RELOAD", "=" * 10)
+    print(agent.intro_manifest.keys())
+    print(agent.tool_manifest.keys())
+    print(json.dumps(agent.tools_by_category, indent=2, ensure_ascii=False))
+    agent.reload_skills()
+    print("=" * 10, "AFTER RELOAD", "=" * 10)
+    print(agent.intro_manifest.keys())
+    print(agent.tool_manifest.keys())
+    print(json.dumps(agent.tools_by_category, indent=2, ensure_ascii=False))
+    return "OK"
