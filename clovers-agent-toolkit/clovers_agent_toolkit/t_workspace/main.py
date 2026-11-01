@@ -94,7 +94,7 @@ async def enter_workspace(agent: CloversAgent, turn: Turn):
     return "\n\n".join(prompts)
 
 
-@TOOLS.register("on_task", "Call this when the current user request is a task that requires tools.")
+@TOOLS.register("on_task", "Call this only when the user explicitly requests a concrete task that requires tool execution.")
 async def on_task(agent: CloversAgent, turn: Turn, event: Event):
     turn.create_payload(agent.api("on_task"), agent.style_prompt)
     workspace = session_workspace(turn.session_id)

@@ -106,6 +106,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.category_decorator(INJECT_PROMPT_INFO, BUILTIN_CATEGORY)(inject_prompt)
         self.category_decorator(COMPACT_CONTEXT_INFO, BUILTIN_CATEGORY)(compact_context)
         self.scheduler.add_job(self.daily_tasks, trigger="cron", hour=2, misfire_grace_time=3600)
+        # 任务
+        self._startup_tasks: set[asyncio.Task] = set()
 
     def reload_prompts(self):
         """重新加载提示词"""
@@ -119,7 +121,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.router_prompt = read_file(self.prompts_dir / "ROUTER.md") or PROMPTS.router_prompt
         self.aside_prompt = read_file(self.prompts_dir / "ASIDE.md") or PROMPTS.aside_prompt
 
-    def startup(self):
+    async def startup(self):
         """执行 Agent 的启动初始化。"""
 
         from .embedding import SentenceTransformer
@@ -131,6 +133,17 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.reload_skills()
         self.sync_menu()
         self.validate_manifest()
+        for coro in self.startup_tasks:
+            task = asyncio.create_task(coro(self))
+            self._startup_tasks.add(task)
+            task.add_done_callback(self._startup_tasks.discard)
+
+    async def shutdown(self):
+        """执行 Agent 的关闭清理。"""
+        for task in self._startup_tasks:
+            task.cancel()
+        self._startup_tasks.clear()
+        await asyncio.wait_for(asyncio.gather(*(coro(self) for coro in self.shutdown_tasks), return_exceptions=True), timeout=30)
 
     def sync_menu(self):
         """同步工具分类菜单。
@@ -661,8 +674,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                     if unit["images"]:
                         session.input_image(unit["images"])
                 session.input_text("\n</quote>")
-            images = await asyncio.gather(*(map(self._api.download_url, event.image_list)))
-            session.input_image(image for image in images if image)
+            if image_list := event.image_list:
+                images = await asyncio.gather(*(map(self._api.download_url, image_list)))
+                session.input_image(image for image in images if image)
             try:
                 await self.activate_intro(intro, session, event)
             except Exception as e:

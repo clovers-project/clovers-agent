@@ -35,12 +35,9 @@ async def chat_send(lock: asyncio.Lock, result: str, event: Event):
             await asyncio.sleep(min(0.12 * len(text), 8))
 
 
-AGENT = ChatAgent("CLOVERS_AGENT", httpx.AsyncClient(timeout=300), scheduler)
-PLUGIN = Plugin[Event](priority=100)
-PLUGIN.protocol = EventProtocol
-
-PLUGIN.startup(AGENT.startup)
-PLUGIN.shutdown(AGENT.async_client.aclose)
+ASYNC_CLIENT = httpx.AsyncClient(timeout=30)
+AGENT = ChatAgent("CLOVERS_AGENT", ASYNC_CLIENT, scheduler)
+AGENT.on_shutdown(lambda agent: ASYNC_CLIENT.aclose())
 
 
 def check(e: Event) -> bool: ...
@@ -62,4 +59,8 @@ else:
     logger.info("[%s] 已关闭", AGENT.name)
     check = lambda e: False
 
+PLUGIN = Plugin[Event](priority=100)
+PLUGIN.protocol = EventProtocol
+PLUGIN.startup(AGENT.startup)
+PLUGIN.shutdown(AGENT.shutdown)
 PLUGIN.handle(None, ["user_id", "group_id", "nickname", "to_me", "image_list", "at"], rule=check, priority=2, block=False)(AGENT.on_input)

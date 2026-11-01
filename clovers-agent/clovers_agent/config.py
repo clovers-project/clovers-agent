@@ -154,7 +154,10 @@ Use this when the available tools are insufficient to complete the task."""
     INJECT_PROMPT_PROMPT_DESC: str = "提示内容"
     COMPACT_CONTEXT: str = "compact_context"
     COMPACT_CONTEXT_DESC: str = "Compress the conversation history for continued conversation."
-    COMPACT_CONTEXT_OVERVIEW_DESC: str = "A one-sentence overview of the conversation."
+    COMPACT_CONTEXT_OVERVIEW_DESC: str = """\
+Summarize the conversation's main subject and most distinctive focus in one short sentence.
+Prioritize specific, distinguishing information over generic descriptions.
+Avoid details and secondary topics."""
     COMPACT_CONTEXT_KEYWORDS_DESC: str = """\
 Key topics, entities, and concepts, expressed as individual words only.
 Never use phrases or multi-word terms."""

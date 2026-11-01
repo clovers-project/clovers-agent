@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from .agent import CloversAgent
 
 
+class AgentTask(Protocol):
+    async def __call__(self, agent: CloversAgent): ...
 class SyncInvoker[**P](Protocol):
     def __call__(self, agent: CloversAgent, turn: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
 class Invoker[**P](Protocol):
@@ -46,6 +48,8 @@ class AgentTools:
     name: str = ""
 
     def __init__(self) -> None:
+        self.startup_tasks: set[AgentTask] = set()
+        self.shutdown_tasks: set[AgentTask] = set()
         # 初始化工具
         self.intro_manifest: dict[str, FunctionToolInfo] = {}
         self.intro_invoker: dict[str, Invoker] = {}
@@ -58,6 +62,30 @@ class AgentTools:
         self.category_descriptions: dict[str, str] = {}
         # inner
         self._merged: set[AgentTools] = set()
+
+    def on_startup(self, func: AgentTask):
+        """添加启动任务
+
+        Args:
+            func (AgentTask): 启动任务函数。
+
+        Returns:
+            AgentTask: 返回原始函数。
+        """
+        self.startup_tasks.add(func)
+        return func
+
+    def on_shutdown(self, func: AgentTask):
+        """添加关闭任务
+
+        Args:
+            func (AgentTask): 关闭任务函数。
+
+        Returns:
+            AgentTask: 返回原始函数。
+        """
+        self.shutdown_tasks.add(func)
+        return func
 
     def on_intro(self, intro: str):
         """添加工具组初始化钩子
@@ -276,6 +304,8 @@ class AgentTools:
             logger.warning("[%s][MERGE] %r already merged", self.name, others)
             return
         others.validate_manifest()
+        self.startup_tasks.update(others.startup_tasks)
+        self.shutdown_tasks.update(others.shutdown_tasks)
         conflict_intros = others.intro_manifest.keys() & self.intro_manifest.keys()
         if conflict_intros:
             raise ValueError(f"Intro Manifest conflict: {conflict_intros}")
