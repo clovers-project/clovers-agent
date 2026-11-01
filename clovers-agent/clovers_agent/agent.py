@@ -296,6 +296,8 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             logger.exception("[%s][CALL][%s][%s] failed", self.name, name, tc_id)
             self.tool_failures.append({"name": name, "args": args, "traceback": traceback.format_exception(e)})
             return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}` failed"}
+        if not isinstance(content, str):
+            return {"role": "tool", "tool_call_id": tc_id, "content": f"`{name}` returned bad result"}
         return {"role": "tool", "tool_call_id": tc_id, "content": content}
 
     async def iter_replies(self, turn: Turn, event: Event):
