@@ -15,7 +15,7 @@ TOOLS = AgentTools()
 async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
     session = agent.current_session(turn.session_id)
     session.last_active_time = 0
-    await agent.daily_tasks()
+    await agent._daily_task()
     return "OK"
 
 
@@ -25,7 +25,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
     category=INTRINSIC_CATEGORY,
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
-    await agent.compact_context(agent.current_session(turn.session_id), event)
+    await agent._compact_context(agent.current_session(turn.session_id), event)
     return "下一轮生效"
 
 
