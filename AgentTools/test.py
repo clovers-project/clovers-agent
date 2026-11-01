@@ -49,6 +49,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event) -> str:
     print(agent.tool_manifest.keys())
     print(json.dumps(agent.tools_by_category, indent=2, ensure_ascii=False))
     agent.reload_skills()
+    agent.sync_menu()
     print("=" * 10, "AFTER RELOAD", "=" * 10)
     print(agent.intro_manifest.keys())
     print(agent.tool_manifest.keys())
