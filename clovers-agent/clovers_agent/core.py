@@ -7,7 +7,7 @@ from functools import wraps
 from clovers.logger import logger
 from collections import Counter
 
-from typing import TYPE_CHECKING, overload, Protocol
+from typing import TYPE_CHECKING, overload, Protocol, Any
 from collections.abc import Iterable
 from clovers_client import Event as BaseEvent
 from .typing import FunctionToolInfo
@@ -19,7 +19,12 @@ if TYPE_CHECKING:
 
 
 class AgentTask(Protocol):
-    async def __call__(self, agent: CloversAgent): ...
+    @overload
+    def __call__(self, agent: CloversAgent) -> Any: ...
+    @overload
+    async def __call__(self, agent: CloversAgent) -> Any: ...
+
+
 class SyncInvoker[**P](Protocol):
     def __call__(self, agent: CloversAgent, turn: Turn, event: Event, /, *args: P.args, **kwargs: P.kwargs) -> str: ...
 class Invoker[**P](Protocol):

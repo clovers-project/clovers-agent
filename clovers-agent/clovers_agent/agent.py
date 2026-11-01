@@ -3,6 +3,7 @@ import traceback
 import contextlib
 import time
 import json
+import inspect
 import asyncio
 import secrets
 import httpx
@@ -134,17 +135,25 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         self.reload_skills()
         self.sync_menu()
         self.validate_manifest()
-        for coro in self.startup_tasks:
-            task = asyncio.create_task(coro(self))
-            self._startup_tasks.add(task)
-            task.add_done_callback(self._startup_tasks.discard)
+        for func in self.startup_tasks:
+            with contextlib.suppress(Exception):
+                coro = func(self)
+                if not inspect.iscoroutine(coro):
+                    continue
+                task = asyncio.create_task(coro)
+                self._startup_tasks.add(task)
+                task.add_done_callback(self._startup_tasks.discard)
 
     async def shutdown(self):
         """执行 Agent 的关闭清理。"""
         for task in self._startup_tasks:
             task.cancel()
-        self._startup_tasks.clear()
-        await asyncio.wait_for(asyncio.gather(*(coro(self) for coro in self.shutdown_tasks), return_exceptions=True), timeout=30)
+        shutdown_tasks = [*self._startup_tasks]
+        with contextlib.suppress(Exception):
+            shutdown_tasks.extend(asyncio.create_task(coro) for func in self.shutdown_tasks if inspect.iscoroutine((coro := func(self))))
+            if not shutdown_tasks:
+                return
+            await asyncio.wait_for(asyncio.gather(*shutdown_tasks, return_exceptions=True), timeout=30)
 
     def sync_menu(self):
         """同步工具分类菜单。
@@ -374,10 +383,11 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 if not isinstance(e, Exception):
                     continue
                 logger.warning("[%s][CLEANUP EXCEPTION] %s: %s", self.name, type(e).__name__, e)
-        if self.daily_tasks:
-            task = asyncio.gather(*(coro(self) for coro in self.daily_tasks), return_exceptions=True)
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(task, timeout=30)
+        if not self.daily_tasks:
+            return
+        with contextlib.suppress(Exception):
+            tasks = tuple(coro for func in self.daily_tasks if inspect.iscoroutine((coro := func(self))))
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
 
     async def _activate_intro(self, intro: str, turn: Turn, event: Event):
         """执行指定初始工具钩子。
