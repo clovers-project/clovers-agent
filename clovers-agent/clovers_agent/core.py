@@ -8,7 +8,7 @@ from clovers.logger import logger
 from collections import Counter
 
 from typing import TYPE_CHECKING, overload, Protocol, Any
-from collections.abc import Iterable
+from collections.abc import Iterable, Callable, Coroutine
 from clovers_client import Event as BaseEvent
 from .typing import FunctionToolInfo
 from .typing.json_schema import JSONSchemaType
@@ -17,12 +17,7 @@ if TYPE_CHECKING:
     from .session import Turn
     from .agent import CloversAgent
 
-
-class AgentTask(Protocol):
-    @overload
-    def __call__(self, agent: CloversAgent) -> Any: ...
-    @overload
-    async def __call__(self, agent: CloversAgent) -> Any: ...
+type AgentTask = Callable[[CloversAgent], Coroutine[Any, Any, Any] | Any]
 
 
 class SyncInvoker[**P](Protocol):
