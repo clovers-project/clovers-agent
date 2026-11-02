@@ -10,13 +10,7 @@ from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES
 from ..utils import retry_request, format_path, format_size, md5, list_entries, render_listing
-from .constants import (
-    WORKSPACE,
-    SUBAGENT_PROMPT,
-    EXEC_DEFAULT_TIMEOUT,
-    EXEC_MAX_TIMEOUT,
-    EXEC_MAX_OUTPUT,
-)
+from .constants import WORKSPACE, SUBAGENT_PROMPT
 
 from typing import TYPE_CHECKING
 
@@ -34,6 +28,10 @@ MAX_SUBAGENT_COUNT = workspace_config.max_subagent_count
 MAX_DOWNLOAD_RETURN_SIZE = workspace_config.max_download_return_size
 USE_SHELL = workspace_config.use_shell
 SHARED_DOCKER_CONTAINER = workspace_config.shared_workspace
+EXEC_DEFAULT_TIMEOUT = workspace_config.exec_default_timeout
+EXEC_MAX_TIMEOUT = workspace_config.exec_max_timeout
+EXEC_MAX_OUTPUT = workspace_config.exec_max_output
+
 if SHARED_DOCKER_CONTAINER:
     shared_shell = None
     SHARED_ID = "shared"

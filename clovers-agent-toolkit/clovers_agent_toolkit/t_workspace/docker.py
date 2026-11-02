@@ -71,6 +71,7 @@ class Shell:
 
     @staticmethod
     def stdout(output_gen: Iterable[bytes], max_output: int) -> str:
+        max_output = max_output + 2
         outputs = deque[str](maxlen=max_output)
         buffer = bytearray()
         for chunk in output_gen:
@@ -85,5 +86,8 @@ class Shell:
         if buffer:
             outputs.extend(buffer.decode("utf-8", errors="replace"))
         if len(outputs) == max_output:
-            outputs.append("\n[Output truncated]")
+            outputs.popleft()
+            outputs.popleft()
+            outputs.popleft()
+            outputs.appendleft("...")
         return "".join(outputs)
