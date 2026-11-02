@@ -43,10 +43,10 @@ class Shell:
                     await asyncio.to_thread(container.start)
             self.container = container
 
-    async def execute(self, command: str, timeout: int, max_output: int) -> str:
+    async def execute(self, command: str, timeout: int) -> str:
         await self.activate()
         wrapped = f"timeout -k 5 {timeout} bash -c {shlex.quote(command)} < /dev/null"
-        return await asyncio.to_thread(self.execute_thread, wrapped, max_output)
+        return await asyncio.to_thread(self.execute_thread, wrapped)
 
     async def cleanup(self):
         async with self._activate_lock:
@@ -55,7 +55,7 @@ class Shell:
             await asyncio.to_thread(self.container.remove, force=True)
             self.container = None
 
-    def execute_thread(self, command: str, max_output: int) -> str:
+    def execute_thread(self, command: str) -> str:
         if self.container is None or (container_id := self.container.id) is None:
             raise RuntimeError("Container not initialized")
         try:
@@ -67,12 +67,11 @@ class Shell:
                 self.container.start()
             exec_id = self.client.api.exec_create(container_id, command, workdir="/workspace")["Id"]
             exec_stream = self.client.api.exec_start(exec_id, stream=True)
-        return self.stdout(exec_stream, max_output)
+        return self.stdout(exec_stream)
 
     @staticmethod
-    def stdout(output_gen: Iterable[bytes], max_output: int) -> str:
-        max_output = max_output + 2
-        outputs = deque[str](maxlen=max_output)
+    def stdout(output_gen: Iterable[bytes]) -> str:
+        outputs = list[str]()
         buffer = bytearray()
         for chunk in output_gen:
             for byte in chunk:
@@ -85,9 +84,4 @@ class Shell:
                         buffer.clear()
         if buffer:
             outputs.extend(buffer.decode("utf-8", errors="replace"))
-        if len(outputs) == max_output:
-            outputs.popleft()
-            outputs.popleft()
-            outputs.popleft()
-            outputs.appendleft("...")
         return "".join(outputs)
