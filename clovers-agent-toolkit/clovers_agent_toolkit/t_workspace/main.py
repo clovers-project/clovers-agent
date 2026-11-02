@@ -179,6 +179,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
         "timeout": {"type": "number", "description": f"Timeout in seconds. Defaults to {EXEC_DEFAULT_TIMEOUT}."},
     },
     HIDDEN_CATEGORY,
+    required=["command"],
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event, command: str, timeout: int = EXEC_DEFAULT_TIMEOUT):
     try:
