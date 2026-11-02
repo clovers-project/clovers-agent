@@ -10,7 +10,7 @@ from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES
 from ..utils import retry_request, format_path, format_size, md5, list_entries, render_listing
-from .constants import WORKSPACE, SUBAGENT_PROMPT
+from .constants import WORKSPACE, KEY_SHELL, SUBAGENT_PROMPT
 
 from typing import TYPE_CHECKING
 
@@ -68,14 +68,14 @@ else:
     def session_shell(session: Session) -> Shell:
         from .docker import Shell
 
-        if "shell" in session.extra:
-            shell = session.extra["shell"]
+        if KEY_SHELL in session.extra:
+            shell = session.extra[KEY_SHELL]
         else:
             shell = None
         if not isinstance(shell, Shell):
             shell = Shell(session.session_id, WORKSPACE_PATH, DOCKER_IMAGE)
             extra = session.extra
-            extra["shell"] = shell
+            extra[KEY_SHELL] = shell
             if "cleanup" not in extra:
                 extra["cleanup"] = [shell.cleanup()]
             else:

@@ -2,7 +2,6 @@ import asyncio
 import docker
 import shlex
 from pathlib import Path
-from collections import deque
 from docker.models.containers import Container
 from docker.errors import APIError, NotFound
 
