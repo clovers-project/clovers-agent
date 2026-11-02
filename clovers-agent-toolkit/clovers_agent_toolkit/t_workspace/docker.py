@@ -1,11 +1,12 @@
 import asyncio
 import docker
 import shlex
+from pathlib import Path
 from collections import deque
 from docker.models.containers import Container
-from docker.types import CancellableStream
 from docker.errors import APIError, NotFound
-from pathlib import Path
+
+from collections.abc import Iterable
 
 DOCKER_CLIENT: docker.DockerClient = docker.from_env()
 
@@ -69,7 +70,7 @@ class Shell:
         return self.stdout(exec_stream, max_output)
 
     @staticmethod
-    def stdout(output_gen: CancellableStream[bytes], max_output: int) -> str:
+    def stdout(output_gen: Iterable[bytes], max_output: int) -> str:
         outputs = deque[str](maxlen=max_output)
         buffer = bytearray()
         for chunk in output_gen:
