@@ -152,16 +152,16 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
 @TOOLS.register(
     "upload_file",
     "Send a file to the user. The user may not be able to see the workspace, so a path in your reply is not enough — call this to hand over the file itself.",
-    {"path": {"type": "string", "description": "Path to the file to send."}},
+    {"file_path": {"type": "string", "description": "Path to the file to send."}},
     WORKSPACE,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
     workspace = session_workspace(turn.session_id)
-    file = workspace / format_path(path)
+    file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
-        return f'Not a workspace file: "{path}"'
+        return f'Not a workspace file: "{file_path}"'
     if not file.is_file():
-        return f'File not found: "{path}"'
+        return f'File not found: "{file_path}"'
     if (coro := event.send("file", file)) is None:
         return "File upload is not available in this environment."
     try:
@@ -308,19 +308,19 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str = "./", dep
 @TOOLS.register(
     "read_file",
     "Read a text file from the workspace.",
-    {"path": {"type": "string"}},
+    {"file_path": {"type": "string"}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
     workspace = session_workspace(turn.session_id)
-    file = workspace / format_path(path)
+    file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
-        return f'Not a workspace file: "{path}"'
+        return f'Not a workspace file: "{file_path}"'
     if not file.exists():
-        return f'File not found: "{path}"'
+        return f'File not found: "{file_path}"'
     content = file.read_bytes()
     if b"\x00" in content or not (text := decode_bytes(content)):
-        return f'Unsupported file type: "{path}"'
+        return f'Unsupported file type: "{file_path}"'
     return text
 
 
@@ -328,14 +328,14 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
     "write_file",
     "Write text to a file",
     {
-        "path": {"type": "string"},
+        "file_path": {"type": "string"},
         "content": {"type": "string", "description": "Full content to write"},
     },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, path: str, content: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str, content: str):
     workspace = session_workspace(turn.session_id)
-    file = workspace / format_path(path)
+    file = workspace / format_path(file_path)
     if not file.is_relative_to(workspace):
         saved_name = f"{file.name}.{uuid4().hex}"
         file = workspace / saved_name
