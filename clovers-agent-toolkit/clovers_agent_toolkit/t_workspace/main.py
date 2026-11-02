@@ -10,7 +10,13 @@ from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES
 from ..utils import retry_request, format_path, format_size, md5, list_entries, render_listing
-from .constants import WORKSPACE, MAX_EXECUTION_TIME, SUBAGENT_PROMPT
+from .constants import (
+    WORKSPACE,
+    SUBAGENT_PROMPT,
+    EXEC_DEFAULT_TIMEOUT,
+    EXEC_MAX_TIMEOUT,
+    EXEC_MAX_OUTPUT,
+)
 
 from typing import TYPE_CHECKING
 
@@ -172,17 +178,17 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
     "Run a shell command in the workspace.",
     {
         "command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."},
-        "timeout": {"type": "number", "description": "Timeout in seconds. Defaults to 60."},
+        "timeout": {"type": "number", "description": f"Timeout in seconds. Defaults to {EXEC_DEFAULT_TIMEOUT}."},
     },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, command: str, timeout: int = 60):
+async def _(agent: CloversAgent, turn: Turn, event: Event, command: str, timeout: int = EXEC_DEFAULT_TIMEOUT):
     try:
-        timeout = max(min(int(timeout), MAX_EXECUTION_TIME), 5)
+        timeout = max(min(int(timeout), EXEC_MAX_TIMEOUT), 5)
     except ValueError:
-        timeout = 60
+        timeout = EXEC_DEFAULT_TIMEOUT
     try:
-        return await session_shell(agent.current_session(turn.session_id)).execute(command, timeout)
+        return await session_shell(agent.current_session(turn.session_id)).execute(command, timeout, EXEC_MAX_OUTPUT)
     except Exception:
         return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
 

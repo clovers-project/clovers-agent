@@ -1,7 +1,9 @@
 import asyncio
 import docker
 import shlex
+from collections import deque
 from docker.models.containers import Container
+from docker.types import CancellableStream
 from docker.errors import APIError, NotFound
 from pathlib import Path
 
@@ -40,10 +42,10 @@ class Shell:
                     await asyncio.to_thread(container.start)
             self.container = container
 
-    async def execute(self, command: str, timeout: int) -> str:
+    async def execute(self, command: str, timeout: int, max_output: int) -> str:
         await self.activate()
-        wrapped_command = f"bash -c {shlex.quote(command)} < /dev/null"
-        return await asyncio.to_thread(self.execute_reload_thread, wrapped_command, timeout)
+        wrapped = f"timeout -k 5 {timeout} bash -c {shlex.quote(command)} < /dev/null"
+        return await asyncio.to_thread(self.execute_thread, wrapped, max_output)
 
     async def cleanup(self):
         async with self._activate_lock:
@@ -52,25 +54,23 @@ class Shell:
             await asyncio.to_thread(self.container.remove, force=True)
             self.container = None
 
-    def execute_reload_thread(self, command: str, timeout: int):
-        if self.container is None:
+    def execute_thread(self, command: str, max_output: int) -> str:
+        if self.container is None or (container_id := self.container.id) is None:
             raise RuntimeError("Container not initialized")
-
         try:
-            return self.execute_thread(command, timeout)
+            exec_id = self.client.api.exec_create(container_id, command, workdir="/workspace")["Id"]
+            exec_stream = self.client.api.exec_start(exec_id, stream=True)
         except APIError:
             self.container.reload()
             if self.container.status != "running":
                 self.container.start()
-            return self.execute_thread(command, timeout)
+            exec_id = self.client.api.exec_create(container_id, command, workdir="/workspace")["Id"]
+            exec_stream = self.client.api.exec_start(exec_id, stream=True)
+        return self.stdout(exec_stream, max_output)
 
-    def execute_thread(self, command: str, timeout: int) -> str:
-        """运行命令，不输出被回车覆盖的行。"""
-        if self.container is None:
-            raise RuntimeError("Container not initialized")
-        exec_id = self.client.api.exec_create(self.container.id, command, workdir="/workspace")
-        output_gen = self.client.api.exec_start(exec_id["Id"], stream=True)
-        outputs: list[str] = []
+    @staticmethod
+    def stdout(output_gen: CancellableStream[bytes], max_output: int) -> str:
+        outputs = deque[str](maxlen=max_output)
         buffer = bytearray()
         for chunk in output_gen:
             for byte in chunk:
@@ -79,8 +79,10 @@ class Shell:
                 else:
                     buffer.append(byte)
                     if byte == 10:
-                        outputs.append(buffer.decode("utf-8", errors="replace"))
+                        outputs.extend(buffer.decode("utf-8", errors="replace"))
                         buffer.clear()
         if buffer:
-            outputs.append(buffer.decode("utf-8", errors="replace"))
+            outputs.extend(buffer.decode("utf-8", errors="replace"))
+        if len(outputs) == max_output:
+            outputs.append("\n[Output truncated]")
         return "".join(outputs)
