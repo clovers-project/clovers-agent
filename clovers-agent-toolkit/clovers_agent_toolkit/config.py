@@ -36,8 +36,8 @@ class WorkspaceConfig(BaseModel):
     """execute_command 默认超时时间"""
     exec_max_timeout: int = 1800
     """execute_command 最大超时时间"""
-    exec_max_output: int = 1600
-    """execute_command 最大输出长度"""
+    # exec_max_output: int = 1600
+    # """execute_command 最大输出长度"""
 
 
 class Config(BaseConfig):

@@ -30,7 +30,7 @@ USE_SHELL = workspace_config.use_shell
 SHARED_DOCKER_CONTAINER = workspace_config.shared_workspace
 EXEC_DEFAULT_TIMEOUT = workspace_config.exec_default_timeout
 EXEC_MAX_TIMEOUT = workspace_config.exec_max_timeout
-EXEC_MAX_OUTPUT = workspace_config.exec_max_output
+# EXEC_MAX_OUTPUT = workspace_config.exec_max_output
 
 if SHARED_DOCKER_CONTAINER:
     shared_shell = None
@@ -187,7 +187,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, command: str, timeout
     except ValueError:
         timeout = EXEC_DEFAULT_TIMEOUT
     try:
-        return await session_shell(agent.current_session(turn.session_id)).execute(command, timeout, EXEC_MAX_OUTPUT)
+        return await session_shell(agent.current_session(turn.session_id)).execute(command, timeout)
     except Exception:
         return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
 
