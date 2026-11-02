@@ -502,6 +502,7 @@ class AgentSkills(AgentTools):
         # 加载的 skill 必须独占一个工具组
         register = self.create_category(category, desc)
         if f := md_wrapper(content, getattr(module, category, None)):
+            self._loaded_categories.add(category)
             register(f)
         try:
             for md in other_mds:

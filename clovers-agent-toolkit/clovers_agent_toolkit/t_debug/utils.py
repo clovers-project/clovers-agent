@@ -27,8 +27,6 @@ def list_tool_failures(agent: CloversAgent):
     log = f_log(agent)
     next_id = log[-1][0] + 1 if log else 1
     log.extend((i, f_summarize(failure), failure) for i, failure in enumerate(agent.tool_failures, next_id))
-    print(log)
-    print(agent.tool_failures)
     agent.tool_failures.clear()
     if not log:
         return

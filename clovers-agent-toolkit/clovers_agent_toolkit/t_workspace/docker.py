@@ -40,10 +40,10 @@ class Shell:
                     await asyncio.to_thread(container.start)
             self.container = container
 
-    async def execute(self, command: str):
+    async def execute(self, command: str, timeout: int) -> str:
         await self.activate()
         wrapped_command = f"bash -c {shlex.quote(command)} < /dev/null"
-        return await asyncio.to_thread(self.execute_reload_thread, wrapped_command)
+        return await asyncio.to_thread(self.execute_reload_thread, wrapped_command, timeout)
 
     async def cleanup(self):
         async with self._activate_lock:
@@ -52,18 +52,19 @@ class Shell:
             await asyncio.to_thread(self.container.remove, force=True)
             self.container = None
 
-    def execute_reload_thread(self, command: str):
+    def execute_reload_thread(self, command: str, timeout: int):
         if self.container is None:
             raise RuntimeError("Container not initialized")
+
         try:
-            return self.execute_thread(command)
+            return self.execute_thread(command, timeout)
         except APIError:
             self.container.reload()
             if self.container.status != "running":
                 self.container.start()
-            return self.execute_thread(command)
+            return self.execute_thread(command, timeout)
 
-    def execute_thread(self, command: str):
+    def execute_thread(self, command: str, timeout: int) -> str:
         """运行命令，不输出被回车覆盖的行。"""
         if self.container is None:
             raise RuntimeError("Container not initialized")

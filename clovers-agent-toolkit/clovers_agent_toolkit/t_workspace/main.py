@@ -10,7 +10,7 @@ from clovers_agent.constants import HIDDEN_CATEGORY, INTRINSIC_CATEGORY
 from clovers.logger import logger
 from ..base import TOOLS, CONFIG, CATEGORIES
 from ..utils import retry_request, format_path, format_size, md5, list_entries, render_listing
-from .constants import WORKSPACE, SUBAGENT_PROMPT
+from .constants import WORKSPACE, MAX_EXECUTION_TIME, SUBAGENT_PROMPT
 
 from typing import TYPE_CHECKING
 
@@ -132,7 +132,10 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
         if not b64url:
             return "Resource not found or unsupported format."
     else:
-        file = session_workspace(turn.session_id) / format_path(path)
+        workspace = session_workspace(turn.session_id)
+        file = workspace / format_path(path)
+        if not file.is_relative_to(workspace):
+            return f'Not a workspace file: "{path}"'
         if not file.is_file():
             return f'File not found: "{path}"'
         b64url = to_b64url(file.read_bytes(), ALLOWED_IMAGE_SUBTYPES)
@@ -145,16 +148,16 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
 @TOOLS.register(
     "upload_file",
     "Send a file to the user. The user may not be able to see the workspace, so a path in your reply is not enough — call this to hand over the file itself.",
-    {"file_path": {"type": "string", "description": "Path to the file to send."}},
+    {"path": {"type": "string", "description": "Path to the file to send."}},
     WORKSPACE,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
     workspace = session_workspace(turn.session_id)
-    file = workspace / format_path(file_path)
+    file = workspace / format_path(path)
     if not file.is_relative_to(workspace):
-        return f'Not a workspace file: "{file_path}"'
-    if not file.exists():
-        return f'File not found: "{file_path}"'
+        return f'Not a workspace file: "{path}"'
+    if not file.is_file():
+        return f'File not found: "{path}"'
     if (coro := event.send("file", file)) is None:
         return "File upload is not available in this environment."
     try:
@@ -167,13 +170,19 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
 @TOOLS.register(
     "execute_command",
     "Run a shell command in the workspace.",
-    {"command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."}},
+    {
+        "command": {"type": "string", "description": "Command to run. Chain multiple commands with `&&` or `;`."},
+        "timeout": {"type": "number", "description": "Timeout in seconds. Defaults to 60."},
+    },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, command: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, command: str, timeout: int = 60):
     try:
-
-        return await session_shell(agent.current_session(turn.session_id)).execute(command)
+        timeout = max(min(int(timeout), MAX_EXECUTION_TIME), 5)
+    except ValueError:
+        timeout = 60
+    try:
+        return await session_shell(agent.current_session(turn.session_id)).execute(command, timeout)
     except Exception:
         return "Error: shell initialization failed. Report this to the user; do not call this tool again until it is resolved."
 
@@ -191,7 +200,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, command: str):
 )
 async def _(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
     session = agent.current_session(turn.session_id)
-    if session.wakeup_context and len(session.wakeup_context.tasks) > MAX_SUBAGENT_COUNT:
+    if session.wakeup_context and len(session.wakeup_context.tasks) >= MAX_SUBAGENT_COUNT:
         return f"Subagent limit reached. Slots are released only when the current call chain ends — do not create more subagents in this chain."
     sub_turn = turn.create_turn()
     sub_turn.create_payload(turn.api, SUBAGENT_PROMPT)
@@ -216,7 +225,7 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, prompt: str):
         "url": {"type": "string", "description": "Absolute HTTP or HTTPS URL, e.g. https://example.com/path."},
         "headers": {"type": "object", "description": 'Custom request headers, e.g. {"Authorization": "Bearer xxx"}. Usually omitted.'},
         "data": {"type": "object", "description": "Request data: query parameters for get, JSON body for post."},
-        "file_path": {"type": "string", "description": 'Path to save the response to, e.g. "logo.png".'},
+        "save_path": {"type": "string", "description": 'Path to save the response to, e.g. "logo.png".'},
     },
     HIDDEN_CATEGORY,
     required=["method", "url"],
@@ -229,7 +238,7 @@ async def _(
     url: str,
     headers: dict | None = None,
     data: dict | None = None,
-    file_path: str | None = None,
+    save_path: str | None = None,
 ):
     if method.upper() == "POST":
         resp = await retry_request(agent.async_client.post, url, json=data, headers=headers)
@@ -241,11 +250,18 @@ async def _(
     r_size = len(content)
     s_size = format_size(r_size)
     # 指定了保存路径：写入工作区
-    if file_path:
-        file = session_workspace(turn.session_id) / format_path(file_path)
+    if save_path:
+        workspace = session_workspace(turn.session_id)
+        file = workspace / format_path(save_path)
+        if file.is_relative_to(workspace):
+            result = f'Saved to "{save_path}" ({s_size}, HTTP {resp.status_code}).'
+        else:
+            saved_name = f"{file.name}.{uuid4().hex}"
+            file = workspace / saved_name
+            result = f'Saved to the workspace as "{saved_name}" ({s_size}, HTTP {resp.status_code}) — the requested path is outside the workspace.'
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_bytes(content)
-        return f'Saved to "{file_path}" ({s_size}, HTTP {resp.status_code}).'
+        return result
     # 未指定保存路径，但内容过大：拦截并落盘
     if r_size > MAX_DOWNLOAD_RETURN_SIZE:
         saved_name = f"{md5(content)}.bin"
@@ -287,19 +303,19 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, path: str = "./", dep
 @TOOLS.register(
     "read_file",
     "Read a text file from the workspace.",
-    {"file_path": {"type": "string"}},
+    {"path": {"type": "string"}},
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, path: str):
     workspace = session_workspace(turn.session_id)
-    file = workspace / format_path(file_path)
+    file = workspace / format_path(path)
     if not file.is_relative_to(workspace):
-        return f'Not a workspace file: "{file_path}"'
+        return f'Not a workspace file: "{path}"'
     if not file.exists():
-        return f'File not found: "{file_path}"'
+        return f'File not found: "{path}"'
     content = file.read_bytes()
     if b"\x00" in content or not (text := decode_bytes(content)):
-        return f'Unsupported file type: "{file_path}"'
+        return f'Unsupported file type: "{path}"'
     return text
 
 
@@ -307,19 +323,19 @@ async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str):
     "write_file",
     "Write text to a file",
     {
-        "file_path": {"type": "string"},
+        "path": {"type": "string"},
         "content": {"type": "string", "description": "Full content to write"},
     },
     HIDDEN_CATEGORY,
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, file_path: str, content: str):
+async def _(agent: CloversAgent, turn: Turn, event: Event, path: str, content: str):
     workspace = session_workspace(turn.session_id)
-    file = workspace / format_path(file_path)
+    file = workspace / format_path(path)
     if not file.is_relative_to(workspace):
-        file_name = f"{file.name}.{uuid4().hex}"
-        file = workspace / file_name
+        saved_name = f"{file.name}.{uuid4().hex}"
+        file = workspace / saved_name
         workspace.mkdir(parents=True, exist_ok=True)
-        tip = f'File written to the workspace as "{file_name}" — the requested path is outside the workspace.'
+        tip = f'File written to the workspace as "{saved_name}" — the requested path is outside the workspace.'
     else:
         file.parent.mkdir(parents=True, exist_ok=True)
         tip = "File written."
