@@ -257,6 +257,8 @@ class Config(BaseConfig):
     """常量"""
     check: CheckConfig = CheckConfig()
     """插件本体检查规则"""
+    httpx_timeout: int = 300
+    """httpx 超时时间"""
 
 
 CONFIG = Config.sync_config(__package__)

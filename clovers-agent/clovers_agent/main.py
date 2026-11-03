@@ -5,10 +5,11 @@ from clovers.logger import logger
 from clovers_client import Event as EventProtocol
 from clovers_apscheduler import scheduler
 from .agent import Event, CloversAgent
-from .config import CHECK
+from .config import CHECK, CONFIG
 
 from typing import override
 
+HTTPX_TIMEOUT = CONFIG.httpx_timeout
 KEY_SENDING_LOCK = "sending_lock"
 
 
@@ -35,7 +36,7 @@ async def chat_send(lock: asyncio.Lock, result: str, event: Event):
             await asyncio.sleep(min(0.12 * len(text), 8))
 
 
-ASYNC_CLIENT = httpx.AsyncClient(timeout=30)
+ASYNC_CLIENT = httpx.AsyncClient(timeout=HTTPX_TIMEOUT)
 AGENT = ChatAgent("CLOVERS_AGENT", ASYNC_CLIENT, scheduler)
 AGENT.on_shutdown(lambda agent: ASYNC_CLIENT.aclose())
 
