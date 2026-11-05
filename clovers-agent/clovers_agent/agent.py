@@ -628,7 +628,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             session.extra["nicknames"] = {}
         nicknames = cast(dict[str, str], session.extra["nicknames"])
         nicknames[event.user_id] = event.nickname
-        mention_prefix = "".join(f"@{name} " for user_id in event.at if (name := nicknames.get(user_id))) if event.at else ""
+        mention_prefix = "".join(f"@{nicknames.get(user_id, user_id)} " for user_id in event.at) if event.at else ""
         if event.to_me:
             message = f"@ME {mention_prefix}{event.message}"
         elif "extra_context" in event.properties:
