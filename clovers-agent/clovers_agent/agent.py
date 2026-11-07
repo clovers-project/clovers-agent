@@ -40,8 +40,15 @@ from .constants import (
 )
 
 from typing import cast, override, TypedDict
-from .typing import ToolMessage, ToolCallInfo
+from .typing import ToolMessage, ToolCallInfo, AssistantMessage
 from .typing.json_schema import BaseJSONSchemaType
+
+
+def assistant_content(message: AssistantMessage):
+    content = message.get("content")
+    if content:
+        return content.strip()
+    return ""
 
 
 class ToolCallError(TypedDict):
@@ -319,7 +326,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             for _ in range(self.max_call_depth):
                 message = await turn.call_api()
                 turn.payload["messages"].append(message)
-                content = (message["content"] or "").strip()
+                content = assistant_content(message)
                 if tool_calls := message.get("tool_calls"):
                     messages = await asyncio.gather(*(self.invoke_tool(x, turn, event) for x in tool_calls))
                     turn.payload["messages"].extend(messages)
@@ -482,7 +489,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         turn.activate()
         try:
             message = await turn.call_api()
-            reply = (message["content"] or "").strip()
+            reply = assistant_content(message)
             logger.info("[%s][CHIME IN]", self.name)
             return reply
         except Exception as e:
@@ -520,7 +527,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
                 await self.invoke_tool(tool_calls[0], turn, event)
                 reply = None
             else:
-                reply = (message["content"] or "").strip()
+                reply = assistant_content(message)
             logger.info("[%s][ASIDE]", self.name)
             return reply
         except Exception as e:
