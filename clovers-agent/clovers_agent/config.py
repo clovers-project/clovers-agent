@@ -140,6 +140,7 @@ and any requests that do not clearly fit another tool."""
     INTRINSIC_CATEGORY: str = ":intrinsic"
     HIDDEN_CATEGORY: str = ":hidden"
     ROUTER_INTRO: str = ":router"
+    NONE_INTRO: str = ":none"
     LOAD_TOOLS: str = "load_tools"
     LOAD_TOOLS_DESC: str = """\
 Dynamically inject the tools in a category into the currently available tools.
