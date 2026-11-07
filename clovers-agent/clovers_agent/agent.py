@@ -28,7 +28,6 @@ from .constants import (
     BUILTIN_CATEGORY,
     INTRINSIC_CATEGORY,
     ROUTER_INTRO,
-    NONE_INTRO,
     READ_IMAGE_BY_ID_INFO,
     INJECT_PROMPT_INFO,
     COMPACT_CONTEXT,
@@ -649,7 +648,7 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
             message = f"{mention_prefix}{event.message}"
             session.record_history(event.nickname, message, timestamp)
             if event.at or (timestamp - session.last_active_time) < self.chime_in_cooldown:
-                return await self._activate_intro(NONE_INTRO, session, event)
+                return
             if session.execute_lock.locked() or session.aside_lock.locked():
                 return
             async with session.execute_lock, session.aside_lock:
