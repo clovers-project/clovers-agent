@@ -136,9 +136,10 @@ class ConstantConfig(BaseModel):
 Use this tool for general-purpose interactions, including casual conversation, \
 open-ended discussions, information-seeking, lightweight tool-assisted requests, \
 and any requests that do not clearly fit another tool."""
-    HIDDEN_CATEGORY: str = ":hidden"
     BUILTIN_CATEGORY: str = ":builtin"
     INTRINSIC_CATEGORY: str = ":intrinsic"
+    HIDDEN_CATEGORY: str = ":hidden"
+    ROUTER_INTRO: str = ":router"
     LOAD_TOOLS: str = "load_tools"
     LOAD_TOOLS_DESC: str = """\
 Dynamically inject the tools in a category into the currently available tools.

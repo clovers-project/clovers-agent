@@ -27,6 +27,7 @@ from .constants import (
     LOAD_TOOLS_DESC,
     BUILTIN_CATEGORY,
     INTRINSIC_CATEGORY,
+    ROUTER_INTRO,
     READ_IMAGE_BY_ID_INFO,
     INJECT_PROMPT_INFO,
     COMPACT_CONTEXT,
@@ -443,6 +444,9 @@ class CloversAgent(AgentSkills, ModuleLoader[AgentTools]):
         Returns:
             str: Intro
         """
+        if session.unit_prompts:
+            session.unit_prompts.clear()
+        await self._activate_intro(ROUTER_INTRO, session, event)
         if len(self.intro_manifest) < 2:
             return await on_chat(self, session, event)
         turn = session.create_turn()
