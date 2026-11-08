@@ -44,7 +44,9 @@ class OpenAIAPI:
         try:
             if url_info := parse_b64uri(url):
                 _, subtype, size = url_info
-                if subtype not in allowed_subtype or size > max_size:
+                if size > max_size:
+                    return
+                if allowed_subtype and subtype not in allowed_subtype:
                     return
                 return url
             if url.startswith(("https://", "http://")):
