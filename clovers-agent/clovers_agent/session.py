@@ -13,6 +13,7 @@ from .constants import (
     USER_TAG,
     ASSISTANT_TAG,
     HISTORY_TAG,
+    TIPS_TAG,
     READ_IMAGE_BY_ID_INFO,
     EXECUTE_SCRIPT,
     EXECUTE_SCRIPT_DESC,
@@ -194,6 +195,7 @@ class InputTag(Enum):
     USER = 1
     ASSISTANT = 2
     HISTORY = 3
+    TIPS = 4
 
 
 def format_message(tag: InputTag | str, content: str):
@@ -206,6 +208,8 @@ def format_message(tag: InputTag | str, content: str):
             return ASSISTANT_TAG.format(content)
         case InputTag.HISTORY:
             return HISTORY_TAG.format(content)
+        case InputTag.TIPS:
+            return TIPS_TAG.format(content)
         case str() as tag:
             return USER_TAG.format(tag, content)
         case _:

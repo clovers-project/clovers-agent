@@ -128,6 +128,8 @@ class ConstantConfig(BaseModel):
     ASSISTANT_TAG: str = "<assistant>\n{}\n</assistant>"
     # 历史总结标签
     HISTORY_TAG: str = "<history-summary>\n{}\n</history-summary>"
+    # 提示消息
+    TIPS_TAG: str = "<tips>\n{}\n</tips>"
     # 调用工具提示词
     TOOLCALL_PROMPT: str = "You must call the `{}` tool now. Output only the tool call."
     # 内置工具
