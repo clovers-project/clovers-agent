@@ -98,22 +98,22 @@ async def enter_workspace(agent: CloversAgent, turn: Turn):
     return "\n\n".join(prompts)
 
 
-@TOOLS.register("on_task", "Call this only when the user explicitly requests a concrete task that requires tool execution.")
-async def on_task(agent: CloversAgent, turn: Turn, event: Event):
-    turn.create_payload(agent.api("on_task"), agent.style_prompt)
-    workspace = session_workspace(turn.session_id)
-    if not workspace.exists():
-        workspace.mkdir(parents=True, exist_ok=True)
-    if (readme := workspace / "README.md").exists():
-        turn.unit_prompts.append(decode_bytes(readme.read_bytes()))
-    elif (readme := WORKSPACE_PATH / "README.md").exists():
-        turn.unit_prompts.append(decode_bytes(readme.read_bytes()))
-    turn.payload["tools"] = [
-        *agent.select_tools(CATEGORIES.WORKSPACE),
-        *agent.select_tools(CATEGORIES.NETWORK),
-    ]
-    turn.unit_prompts.append(await enter_workspace(agent, turn))
-    return ""
+# @TOOLS.register("on_task", "Call this only when the user explicitly requests a concrete task that requires tool execution.")
+# async def on_task(agent: CloversAgent, turn: Turn, event: Event):
+#     turn.create_payload(agent.api("on_task"), agent.style_prompt)
+#     workspace = session_workspace(turn.session_id)
+#     if not workspace.exists():
+#         workspace.mkdir(parents=True, exist_ok=True)
+#     if (readme := workspace / "README.md").exists():
+#         turn.unit_prompts.append(decode_bytes(readme.read_bytes()))
+#     elif (readme := WORKSPACE_PATH / "README.md").exists():
+#         turn.unit_prompts.append(decode_bytes(readme.read_bytes()))
+#     turn.payload["tools"] = [
+#         *agent.select_tools(CATEGORIES.WORKSPACE),
+#         *agent.select_tools(CATEGORIES.NETWORK),
+#     ]
+#     turn.unit_prompts.append(await enter_workspace(agent, turn))
+#     return ""
 
 
 @TOOLS.create_category(WORKSPACE, "Tools for workspace file and command operations.")

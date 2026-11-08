@@ -9,5 +9,5 @@ if CATEGORIES.WORKSPACE in USE_CATEGORIES:
 if CATEGORIES.DEBUG_UTILS in USE_CATEGORIES:
     from . import t_debug as _
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
 __all__ = ["TOOLS"]
