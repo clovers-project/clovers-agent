@@ -1,181 +1,115 @@
 # clovers-agent-toolkit
 
-**`clovers-agent` 的官方工具集。**
-Official tool bundle for [clovers-agent](../clovers-agent/README.md): a Docker workspace, web search / extraction, and debugging utilities.
+Clovers Agent 的可选工具集，当前源码版本 `0.3.6`。提供工作区、联网搜索与网页正文提取、开发调试。
 
-`clovers-agent` 本身只提供「聊天 + 工具循环 + Skill」的骨架，具体能力由工具包补齐。本包提供三组可按需启用的工具：
+## 启用
 
-| 分类          | 作用                                                                 | 默认 |
-| ------------- | -------------------------------------------------------------------- | ---- |
-| `workspace`   | 每个会话独立的 Docker 沙箱、文件读写、命令执行、文件上传、异步子代理 | 启用 |
-| `network`     | DeepSeek 网页搜索、网页正文提取（trafilatura）                       | 启用 |
-| `debug_utils` | 工具失败排查、源码查看、模块热重载                                   | 关闭 |
+先安装到核心所在的 Python 环境，再在核心 `clovers_agent` 配置中加入：
 
-## 安装
-
-```bash
-pip install clovers-agent-toolkit
+```json
+{ "plugins": ["clovers_agent_toolkit"] }
 ```
 
-需要 `clovers-agent >= 0.3.3`。从本工作区安装时，`uv sync --all-packages` 会以 editable 方式同时装上两者。
+工具集独立使用 `Config.sync_config("clovers_agent_toolkit")` 同步配置，字段定义见 [config.py](clovers_agent_toolkit/config.py)。安装包不等于加载插件。
 
-`workspace` 分类中的 `execute_command` / `subagent` 依赖 **Docker**：宿主进程需要能访问 Docker daemon（本包通过 `docker.from_env()` 连接）。仅使用文件工具时不需要 Docker。
+默认启用 `workspace`、`network`；`debug_utils` 默认关闭。`use_categories` 是模块加载开关，不代表所有同名分类都能用 `load_tools` 加载：network 工具实际注册在 `:intrinsic`。
 
-## 启用与配置
+## 配置
 
-配置由 `Config.sync_config("clovers_agent_toolkit")` 托管，字段名即配置键。
+| 字段                                 | 默认值                                       | 说明                                           |
+| ------------------------------------ | -------------------------------------------- | ---------------------------------------------- |
+| `use_categories`                     | `["workspace", "network"]`                   | 需要导入的模块，可选加 `debug_utils`           |
+| `network.deepseek_search_key`        | `sk-xxx`                                     | 搜索鉴权，使用前填写有效密钥                   |
+| `network.deepseek_search_url`        | `https://api.deepseek.com/v1/tools/search`   | 搜索接口                                       |
+| `workspace.use_shell`                | `false`                                      | 尝试启用 Docker shell，失败时回退文件工具      |
+| `workspace.max_subagent_count`       | `8`                                          | 当前唤醒上下文可登记的后台任务数量上限         |
+| `workspace.max_download_return_size` | `4096`                                       | `fetch_url` 直接返回内容的字节上限，超出则落盘 |
+| `workspace.docker_image`             | `nikolaik/python-nodejs:python3.12-nodejs20` | 容器镜像                                       |
+| `workspace.shared_workspace`         | `false`                                      | 是否让会话共用 `workspace/shared` 和 shell     |
+| `workspace.exec_default_timeout`     | `120`                                        | 命令默认超时秒数                               |
+| `workspace.exec_max_timeout`         | `1800`                                       | 命令超时上限；实际请求值至少 5 秒              |
 
-| 键               | 默认值                     | 说明                                   |
-| ---------------- | -------------------------- | -------------------------------------- |
-| `use_categories` | `["workspace", "network"]` | 启用的分类；不在列表里的模块不会被导入 |
-| `network`        | 见下                       | 网络工具配置                           |
-| `workspace`      | 见下                       | 沙箱与文件工具配置                     |
+Docker 仅在启用 shell 时需要。需让宿主进程能连接 Docker daemon，并能获得所配置镜像；代码从环境构造 Docker 客户端。默认文件模式不需要 Docker。
 
-`use_categories` 的合法值：`workspace`、`network`、`debug_utils`。`debug_utils` 会在导入时打印警告，仅建议开发环境启用。
+## 工具如何进入轮次
 
-### network
+- `on_workspace` 是路由入口。被选中时使用核心 `apis.on_task`（缺失则回退默认模型），准备工作区并注入工具。
+- 普通聊天也可调用 `load_tools(category="workspace")` 激活工作区分类。
+- `read_image`、`web_search`、`web_extractor` 注册在 `:intrinsic`，在正常正式轮次中自动可用，前提是启用了对应模块。
+- `:hidden` 只是不出现在分类菜单，不是权限隔离；工作区初始化按模式显式注入其中的工具。
 
-| 键                    | 默认值                                     | 说明                                  |
-| --------------------- | ------------------------------------------ | ------------------------------------- |
-| `deepseek_search_key` | `sk-xxx`                                   | DeepSeek Search API Key，**必须替换** |
-| `deepseek_search_url` | `https://api.deepseek.com/v1/tools/search` | 搜索接口地址                          |
+| 模式                                    | 工作区额外注入的工具                         |
+| --------------------------------------- | -------------------------------------------- |
+| `use_shell=false`，或 Docker 初始化失败 | `fetch_url`、`ls`、`read_file`、`write_file` |
+| `use_shell=true` 且初始化成功           | `execute_command`、`subagent`                |
 
-### workspace
+两种模式均有工作区分类的 `upload_file`。shell 模式下可用命令完成文件操作，但不会自动同时注入上述四个回退工具。
 
-| 键                         | 默认值                                       | 说明                                                    |
-| -------------------------- | -------------------------------------------- | ------------------------------------------------------- |
-| `use_shell`                | `false`                                      | 是否启用 Docker shell（`execute_command` / `subagent`） |
-| `max_subagent_count`       | `8`                                          | 单条调用链最多创建的子代理数                            |
-| `max_download_return_size` | `4096`                                       | 超过该字节数的下载会落盘，只把路径返回给模型            |
-| `docker_image`             | `nikolaik/python-nodejs:python3.12-nodejs20` | 沙箱镜像，需自带 `bash` / `python` / `node`             |
-| `shared_workspace`         | `false`                                      | 所有会话共用一个工作区与容器                            |
+## 工作区与文件
 
-> `use_shell=false` 时仍可使用 `ls` / `read_file` / `write_file` / `fetch_url` / `upload_file` / `read_image`，只是不能执行命令或派生子代理。
+宿主目录是核心配置 `{path}/workspace/<session_id>/`；共享模式使用 `{path}/workspace/shared/`。Docker 将该目录以读写方式挂载为 `/workspace`，命令也在此目录执行。
 
-## 工具清单
+`on_workspace` 优先读取会话工作区的 `README.md` 作为提示，缺失时读取 `{path}/workspace/README.md`。这一步属于场景入口，单纯 `load_tools("workspace")` 不执行 README 读取。
 
-### workspace
+文件工具接受相对路径或 `/workspace/...` 形式。当前路径处理只转换前缀并用 `is_relative_to()` 做词法检查，没有完整解析 `..` 或符号链接，不能把它当作严格的宿主文件沙箱。
 
-| 工具              | 参数                                               | 说明                                                                                                    |
-| ----------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `on_task`         | —                                                  | 任务场景入口（intro）。初始化工作区，注入 workspace / network 工具，加载工作区 `README.md` 作为环境说明 |
-| `read_image`      | `path`                                             | 读取 URL 或工作区内的图片，加入下一轮请求（配合 `api.vision` 或原生多模态模型）                         |
-| `upload_file`     | `file_path`                                        | 把工作区文件发送给用户；依赖宿主支持文件消息                                                            |
-| `execute_command` | `command`                                          | 在沙箱内执行 shell 命令（`bash -c`，工作目录 `/workspace`）                                             |
-| `subagent`        | `prompt`                                           | 异步子代理，结果在下一条调用链后通过唤醒消息返回                                                        |
-| `fetch_url`       | `method`、`url`、`headers?`、`data?`、`file_path?` | GET / POST；可把响应直接写入工作区；大响应自动落盘                                                      |
-| `ls`              | `path?`、`depth?`                                  | 列出工作区目录，默认深度 1，最多返回 200 项                                                             |
-| `read_file`       | `file_path`                                        | 读取工作区文本文件（自动检测编码，二进制文件会被拒绝）                                                  |
-| `write_file`      | `file_path`、`content`                             | 写入文本文件；路径越界时会改用随机文件名写入工作区                                                      |
+| 工具          | 参数                                                 | 行为                                                                                                           |
+| ------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `ls`          | 可选 `path="./"`、`depth=1`                          | 列直接子项或递归列表，目录优先，显示类型 / 大小 / 时间；输出最多 200 项，不递归跟随符号链接和 Windows junction |
+| `read_file`   | `file_path`                                          | 读取文本并探测编码；包含 NUL 或无法解码时返回不支持；没有文本长度截断                                          |
+| `write_file`  | `file_path`、`content`                               | UTF-8 写入完整文本，覆盖同名文件，创建父目录                                                                   |
+| `fetch_url`   | `method`、`url`；可选 `headers`、`data`、`save_path` | GET 的 `data` 为查询参数，POST 为 JSON；注意参数名是 `save_path`                                               |
+| `upload_file` | `file_path`                                          | 通过 `event.send("file", Path)` 把文件发送给用户，依赖平台适配器支持                                           |
+| `read_image`  | `path`                                               | 从 HTTP(S) 或工作区读取图片，追加到 `pending_content`，下次模型请求时查看                                      |
 
-`execute_command`、`subagent`、`fetch_url`、`ls`、`read_file`、`write_file` 注册在 `:hidden` 分类：不出现在 `load_tools` 的菜单中，由 `on_task` / `enter_workspace` 根据 shell 是否可用显式注入。
+`fetch_url` 有 `save_path` 时保存原始字节；未指定且大于字节阈值时自动保存为内容 MD5 命名的 `.bin`，否则解码后直接返回。它不会把所有非 2xx 响应都判为工具失败，错误响应体也可能返回或落盘，应结合返回的 HTTP 状态判断。
 
-### network
+写文件或下载时，若词法检查判定目标不在工作区，程序会改为工作区内带 UUID 的文件名；读取、列目录、上传和本地读图则返回错误。该处理不弥补前述路径校验限制。
 
-| 工具            | 参数                                                                                                                                  | 说明                                                                         |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `web_search`    | `query`（必填）、`question?`、`sites?`、`exclude_sites?`、`exclude_terms?`、`exact_phrases?`、`exclude_phrases?`、`after?`、`before?` | 调用 DeepSeek 搜索接口，把站点 / 时间 / 短语过滤拼进查询，返回前几条结果摘要 |
-| `web_extractor` | `url`                                                                                                                                 | 用 trafilatura 把网页正文提取为 Markdown                                     |
+## Docker 命令与子代理
 
-两者注册在 `:intrinsic` 分类，每一轮都可用。
+### execute_command
 
-### debug_utils
+参数为必填 `command`、可选 `timeout`。使用容器内 `bash -c` 执行，外层套 `timeout -k 5`，标准输入重定向自 `/dev/null`。
 
-| 工具                 | 参数           | 说明                                                 |
-| -------------------- | -------------- | ---------------------------------------------------- |
-| `list_tool_failures` | —              | 把尚未编号的工具失败记录编号并列出（最多保留 10 条） |
-| `get_tool_failure`   | `failure_id`   | 查看某次失败的参数、源码与完整 traceback             |
-| `get_tool_source`    | `tool_name`    | 读取已注册工具的源码                                 |
-| `reload_module`      | `module_name?` | 卸载并重新导入指定工具模块，见下                     |
+命令之间保留工作区文件，但每次是新的 shell，不应依赖上一次 `cd` 或环境变量。返回命令输出文本，当前没有输出长度截断，也没有单独返回结构化退出码。容器名为 `CloversAgentSandbox-<session_id>`，已有同名容器会被复用或启动。
 
-分类钩子还会把「当前调试目标」与调试守则注入上下文，提醒模型：工具报错时先如实告知用户，不要擅自重载。
+### subagent
 
-## workspace 详解
+参数 `prompt` 应包含完整任务、文件路径、约束及预期结果。子代理使用独立上下文，继承调用者 API，与父代理共享会话工作区；初始化时提供自动工具、工作区工具及对应 shell / 文件能力，再移除子代理工具，避免直接递归委派。
 
-### 目录与容器
+调用立即返回 `OK`，结果不在本次工具返回值中。核心在主调用链空闲且已登记任务完成后启动唤醒轮次。数量限制按当前唤醒上下文的任务列表计算，不是全局并发池，也不是每完成一个子任务就立即归还名额。
 
-```text
-{clovers_agent.path}/workspace/
-├── <session_id>/          # 每个会话一个目录，挂载到容器 /workspace
-└── shared/                # shared_workspace=true 时共用
-```
+过期会话清理会调用已登记的 shell 清理协程删除容器，工作区文件保留。共享模式使用同一目录和 shell，各会话可以看到相同文件；某个相关会话触发清理也可能移除共享容器。
 
-- 容器名：`CloversAgentSandbox-<session_id>`；容器启动命令为 `sleep infinity`，空闲时不占 CPU
-- 镜像内的 `/workspace` 绑定到上面的会话目录（读写）
-- 命令通过 Docker exec 执行，`workdir=/workspace`，并用 `< /dev/null` 避免命令等待 stdin
-- 会话被每日清理时，注册的 `cleanup` 协程会删除容器；共享模式下清理协程会挂在多个会话上，需避免重复删除（见 TODO）
-
-### 进入任务场景
-
-`on_task` 会：
-
-1. 创建会话工作区，并优先读取其中的 `README.md`（否则用工作区根目录的 `README.md`）作为环境说明
-2. 注入 `workspace` 与 `network` 两个分类的工具
-3. 调用 `enter_workspace`：shell 可用时注入 `execute_command` / `subagent`，否则回退到文件工具，并提示当前目录 `/workspace`
-
-`load_tools("workspace")` 也会触发同一个钩子，因此模型也可以从普通聊天里按需进入工作区。
-
-### 路径规则
-
-- 绝对路径 `/workspace/...` 会映射为工作区内的相对路径
-- `../` 越界访问：`read_file` / `upload_file` / `ls` 会直接拒绝；`write_file` 会改用 `<原名>.<随机后缀>` 写入工作区
-- 读取大文件没有截断，`fetch_url` 默认把超过 `max_download_return_size` 的响应落盘，避免把大段二进制塞进上下文
-
-### 子代理与唤醒
-
-`subagent` 会创建独立 `Turn`，继承 `:intrinsic`、`workspace`、`network` 工具，并移除 `subagent` 自身防止递归。任务通过 `agent.submit_turn_for_wakeup` 异步执行；当前调用链结束后，结果以唤醒消息回到会话，因此**不要在派生子代理后原地等待**。
-
-同一调用链内的子代理数量受 `max_subagent_count` 限制；名额只在当前调用链结束后释放。
-
-### 文件上传
-
-`upload_file` 调用 `event.send("file", file)`。部分平台适配器不支持文件消息，此时会返回「File upload is not available in this environment.」。
-
-## network 详解
+## 联网工具
 
 ### web_search
 
-- 把 `sites` / `exclude_sites` / `exclude_terms` / `exact_phrases` / `exclude_phrases` / `after` / `before` 拼成搜索操作符
-- 固定请求 10 条，按 `rerank_score` 排序；前 3 条必返，第 4 条起低于均值则截断
-- 返回 Markdown 摘要（标题、来源、日期、摘要），不返回完整网页
-- 需要有效的 `deepseek_search_key`，否则接口会返回鉴权错误
+必填 `query`，可选 `question`、`sites`、`exclude_sites`、`exclude_terms`、`exact_phrases`、`exclude_phrases`、`after`、`before`。过滤项拼成搜索操作符，`question` 缺省使用当前事件文本。
+
+向配置的搜索接口请求 10 条，按 `rerank_score` 降序，最多展示 6 条；结果足够时前 3 条保留，第 4 条起低于全部结果均分则截断。返回标题、来源、日期及摘要，不是完整网页正文。
 
 ### web_extractor
 
-- 带浏览器 UA 请求页面，由 trafilatura 提取正文
-- 输出 Markdown（含链接、图片、评论），失败时返回 `none`
-- 不处理需要登录或 JS 渲染的页面
+参数 `url`。HTTP 下载后由 trafilatura 提取 Markdown，保留链接、图片和评论，提取不到正文返回 `none`。没有浏览器 JS 渲染或登录流程。两个网络工具均设置 30 秒请求超时；工具集请求重试最多 5 次，针对网络异常、429 和 5xx。
 
-## debug_utils 详解
+## 调试工具
 
-工具失败时，`clovers-agent` 会把 `{name, args, traceback}` 放进 `agent.tool_failures`（长度 5 的 deque）。本分类把它搬进独立的失败日志（最多 10 条，带自增编号）：
+在工具集 `use_categories` 中加入 `debug_utils`，再由模型加载该分类。源码会在启用时输出开发调试警告。
 
-1. `list_tool_failures` 收集并编号，返回按时间从新到旧的列表
-2. `get_tool_failure(id)` 返回参数、源码与完整 traceback
-3. `get_tool_source(name)` 直接读源码，便于对照修改
-4. `reload_module(name)` 卸载旧模块、清理 `sys.modules`、重新导入并 `merge` 新 `TOOLS`，最后 `sync_menu()`
+| 工具                 | 参数               | 用途                                                        |
+| -------------------- | ------------------ | ----------------------------------------------------------- |
+| `list_tool_failures` | 无                 | 收集核心最近的工具异常、分配编号、按新到旧列出              |
+| `get_tool_failure`   | `failure_id`       | 展示调用参数、当前工具源码及 traceback                      |
+| `get_tool_source`    | `tool_name`        | 读取当前已注册普通工具的源码                                |
+| `reload_module`      | 可选 `module_name` | detach 旧注册表、移除模块缓存、重新导入并合并，最后同步菜单 |
 
-`reload_module` 的约束：
+核心异常队列最多 5 条，收集后清空；调试记录最多 10 条，仅存内存。读取失败详情前先列出编号，展示的源码是当前版本，不是失败时快照。
 
-- 第一次调用必须提供模块名（例如 `clovers_agent_toolkit.t_workspace.main`），后续可省略
-- 失败时会恢复旧的 `sys.modules` 条目并重新合并旧工具，但源码改动不会生效，需要修复后再次重载
-- 提示词要求它单独成轮：同一轮里不要和其他工具并行调用
+首次重载需提供目标模块名，后续可沿用；选择实际加载并拥有工具注册表的插件入口，如 `AgentTools.test` 或 `clovers_agent_toolkit`。工具集子模块共享同一 `TOOLS`，不适合把某个内部 `main` 模块当成完整插件独立重载。导入失败会恢复旧模块缓存并合并旧工具，但不保证回滚任意模块顶层副作用。重载应单独成轮、避开并行调用。
 
-> `reload_module` 只重载 Python 模块，不会重载 Markdown Skill。Skill 请用 `agent.reload_skills()`（示例见 `AgentTools/test.py` 的 `test_reload_skill`）。
-
-## 安全
-
-- **Docker 权限**：能访问 daemon 的人等价于 root。请把本包运行在受控宿主上，不要暴露 Docker socket
-- **命令执行**：`execute_command` 让模型在容器内执行任意命令；容器内仍挂载了会话工作区，不要在其中放宿主密钥
-- **SSRF**：`fetch_url` / `web_extractor` / `web_search` 可访问任意 URL 或内网地址，请按部署环境加网络隔离
-- **数据外带**：`upload_file` 能把工作区文件发回聊天，注意工作区内容与权限
-- **共享工作区**：`shared_workspace=true` 会让不同会话看到同一批文件，多租户场景不要开启
-- **密钥**：`deepseek_search_key` 明文存在配置中，注意文件权限
-
-## 已知限制
-
-- 文件工具面向文本；二进制请用 `fetch_url` 落盘或 `upload_file` 传出
-- 子代理结果只在主调用链结束后送达，不适合需要即时答案的场景
+Markdown Skill 重载使用核心 `agent.reload_skills()`，随后 `agent.sync_menu()`，不由 `reload_module` 完成。
 
 ## License
 

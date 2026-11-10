@@ -1,27 +1,16 @@
-# AgentTools
+# Python 工具插件
 
-**用 Python 给 `clovers-agent` 写工具插件。**
-Python plugin guide and examples for clovers-agent.
+本目录是核心默认扫描的本地插件目录。插件通过导出的 `TOOLS = AgentTools()` 注册工具、场景入口、分类及生命周期钩子。
 
-`AgentTools` 是 `clovers-agent` 的 Python 工具注册表。相比 [Skill](../AgentSkills/README.md)（Markdown + 提示词驱动），Python 插件更适合需要**访问宿主对象、复用第三方库、做结构化处理**的能力。
+默认 `plugin_dirs=["./AgentTools"]`，也可通过核心 `plugins` 加载已安装模块。模块由宿主导入，不要直接执行 `test.py`；它开头的包检查会阻止直接运行。
 
-本目录的 [`test.py`](test.py) 是自包含示例：四个测试工具分别覆盖每日维护、上下文压缩、异常记录与 Skill 热重载。
-
-## 加载机制
-
-- 默认扫描 `plugin_dirs`（`./AgentTools`）下的每个 `.py` 文件
-- 也可以通过 `plugins` 配置加载已安装的模块，例如 `clovers_agent_toolkit`
-- 模块必须导出 `TOOLS = AgentTools()`；Agent 启动时导入模块并 `merge` 其中的工具
-- 模块在 `AgentTools` 命名空间下被导入（例如 `AgentTools.test`），因此**不要直接运行文件**；示例开头的 `if not __package__` 就是这道保护
-- 工具名、intro 名、分类名冲突会在合并时抛 `ValueError`
-
-## 最小示例
+## 最小工具
 
 ```python
 from clovers_agent import AgentTools, CloversAgent, Turn, Event
 
 TOOLS = AgentTools()
-TOOLS.create_category("demo", "演示工具组")
+TOOLS.create_category("demo", "需要原样回显文本时加载")
 
 @TOOLS.register(
     "echo",
@@ -29,143 +18,112 @@ TOOLS.create_category("demo", "演示工具组")
     {"text": {"type": "string", "description": "要回显的文本"}},
     category="demo",
 )
-async def _(agent: CloversAgent, turn: Turn, event: Event, text: str) -> str:
+async def echo(agent: CloversAgent, turn: Turn, event: Event, text: str) -> str:
     return text
 ```
 
-## API
+模型先调用 `load_tools(category="demo")`，才会在本轮工具列表中获得 `echo`。
 
-### `TOOLS.register`
+## 注册接口
 
 ```python
-register(
-    name: str,
-    description: str,
-    parameters: dict[str, JSONSchema] | None = None,
-    category: str | Iterable[str] | None = None,
-    required: list[str] | None = None,
+TOOLS.register(
+    name,
+    description,
+    parameters=None,
+    category=None,
+    required=None,
 )
 ```
 
-| 参数 | 说明 |
-| --- | --- |
-| `name` | 工具名，需全局唯一 |
-| `description` | 给模型看的描述，决定它会不会调用 |
-| `parameters` | 参数名 → JSON Schema 片段（`type` / `description` / `enum` / `items` 等） |
-| `category` | 分类名；`None` 表示注册为 intro（场景入口） |
-| `required` | 必填参数；缺省等于 `parameters` 的全部键，`[]` 表示无必填 |
+| 参数          | 规则                                                                |
+| ------------- | ------------------------------------------------------------------- |
+| `name`        | 工具名，Python 注册不会自动把连字符转为下划线                       |
+| `description` | 给模型看的工具说明，写清何时调用及输出                              |
+| `parameters`  | 参数名到 JSON Schema 片段的映射，不是完整 object schema             |
+| `category`    | 字符串或字符串集合；`None` 注册为 intro 场景入口                    |
+| `required`    | 缺省为全部参数；显式 `[]` 表示无必填，Python 函数也应提供对应默认值 |
 
-工具函数必须是 `async def`，第一个参数固定为 `agent`、`turn`、`event`，其余参数按 JSON Schema 从模型调用中注入：
+普通工具是 `async def`，接收 `agent, turn, event` 和模型生成的关键字参数，返回字符串。框架不会完整验证参数值类型；签名错误、执行异常、非字符串返回值分别转为工具错误信息。执行异常还会存入 `agent.tool_failures`，最多保留 5 条。
+
+intro 与普通工具分别检查重名，分类描述也不能重复声明。合并冲突会失败；实际使用仍应避免跨入口和普通工具重名。多个插件可以向同一已有分类添加工具和钩子，但不要重复 `create_category()`。
+
+## 分类与钩子
+
+| 分类           | 用法                                                                 |
+| -------------- | -------------------------------------------------------------------- |
+| 普通分类       | 用 `create_category(name, description)` 声明，进入 `load_tools` 菜单 |
+| `:intrinsic`   | 正常正式轮次自动注入                                                 |
+| `:builtin`     | 核心按流程注入，例如图片回读与旁路补充                               |
+| `:hidden`      | 不声明菜单描述，由实现显式注入；不是权限控制                         |
+| intro 同名分类 | 对应场景被选中后自动注入                                             |
+
+`create_category()` 返回分类钩子装饰器，也可以用 `@TOOLS.on_category(name)` 向已有分类挂钩子。钩子接收 `agent, turn, event`，返回需要注入的提示文本：
 
 ```python
-async def _(agent, turn, event, city: str, days: int = 1) -> str: ...
+@TOOLS.on_category("demo")
+async def demo_prompt(agent, turn, event):
+    return "输出保持与输入一致。"
+
+@TOOLS.on_intro("on_chat")
+async def chat_prompt(agent, turn, event):
+    return "当前会话附加提示。"
 ```
 
-### 分类
+同一入口或分类的多个钩子并发执行。intro 钩子结果进入本轮提示；分类钩子结果进入 `load_tools` 工具结果。仅创建描述而没有工具或钩子的空分类会在清单验证时被移除。
 
-| 写法 | 效果 |
-| --- | --- |
-| `category=None` | intro 工具，进入路由菜单 |
-| `category="demo"` + `create_category("demo", "...")` | 普通分类，进入 `load_tools` 菜单，按需加载 |
-| `category=":intrinsic"` | 每轮自动注入 |
-| `category=":hidden"` | 随分类整体注入，但不出现在 `load_tools` 菜单 |
+### 自定义场景
 
-`create_category(name, description)` 会登记分类描述并返回一个钩子装饰器：
+不指定 `category` 时注册为路由入口。路由不使用模型生成的入口参数，因此入口应能只用三个上下文参数执行。入口必须准备 payload，并返回实际场景名：
 
 ```python
-register = TOOLS.create_category("demo", "演示工具组")
-
-@register
-async def _(agent, turn, event):
-    return "进入 demo 工具组时的提示词"
+@TOOLS.register("on_demo", "用户要求执行演示任务时使用")
+async def on_demo(agent, turn, event):
+    turn.create_payload(agent.api("on_demo"), agent.style_prompt)
+    return "on_demo"
 ```
 
-分类只有登记了描述，模型才能在 `load_tools` 的枚举里看到它。
+在 `apis.on_demo` 配置专用模型，未配置时使用默认模型。返回名用于选择场景分类工具和 intro 钩子，不一定必须与路由入口名相同。
 
-### 钩子
-
-| 钩子 | 触发时机 | 返回 |
-| --- | --- | --- |
-| `@TOOLS.on_intro(name)` | 该 intro 被路由选中 | 追加到系统提示的文本 |
-| `@TOOLS.on_category(name)` | `load_tools` 加载该分类 | 追加到工具结果的文本 |
-
-多个插件可以给同一个 intro / 分类挂多个钩子，执行结果会合并。
-
-### 生命周期
+## 生命周期与运行对象
 
 ```python
 @TOOLS.on_startup
-async def _(agent: CloversAgent):
+async def startup(agent):
     ...
 
 @TOOLS.on_shutdown
-async def _(agent: CloversAgent):
+async def shutdown(agent):
     ...
 ```
 
-- 启动钩子在 `agent.startup()` 中并发执行，协程以外的返回值会被忽略
-- 关闭钩子最多等待 30 秒
-- 每日维护：在启动钩子里 `agent.daily_tasks.append(func)`，`func(agent)` 会在每天 02:00 的维护任务中执行
+启动钩子返回的协程会被创建为后台任务，核心不会等它们全部完成再处理消息。关闭时取消未完成的启动任务，与关闭钩子一起最多等待 30 秒。
 
-### 可访问对象
+每日维护可向 `agent.daily_tasks` 添加接受 `agent` 的函数；在调度器时区每天 02:00 的核心清理之后运行，协程合计最多等待 30 秒。会话资源清理协程可登记在 `session.extra["cleanup"]`，参照工具集工作区实现。
 
-| 对象 | 常用成员 |
-| --- | --- |
-| `agent` | `api(key)`、`current_session(id)`、`sessions`、`send`、`usage_counter`、`tool_failures`、`extra` |
-| `turn` | `payload`、`extend_tools`、`upsert_tool`、`extend_scripts`、`extend_references`、`pending_content`、`unit_prompts`、`session_id` |
-| `event` | `send(type, data)`、`call("flat_context")`、`image_list`、`at`、`to_me`、`user_id`、`group_id` |
+| 对象    | 常用成员                                                                                                                                                  |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent` | `api(key)`、`current_session(id)`、`sessions`、`send()`、`tool_failures`、`extra`、`reload_skills()`、`sync_menu()`                                       |
+| `turn`  | `payload`、`extend_tools()`、`upsert_tool()`、`extend_scripts()`、`extend_references()`、`pending_content`、`unit_prompts`、`session_id`、`create_turn()` |
+| `event` | `send(type, data)`、`call("flat_context")`、`image_list`、`at`、`to_me`、`user_id`、`group_id`                                                            |
 
-### 返回值与异常
+`pending_content` 用于工具返回后补入用户上下文；`unit_prompts` 用于轮次激活时的提示。后台调用链可通过 `submit_turn_for_wakeup()` 登记，详见 [核心文档](../clovers-agent/README.md)。
 
-- 返回 `str`；内容会作为 tool message 回灌给模型
-- 参数签名不匹配会被捕获为 `` `name`: invalid args ``，不会中断调用链
-- 工具内部抛出的异常会记录到 `agent.tool_failures`，模型只看到 `` `name` failed ``
-- 不要返回 `None` 或复杂对象；序列化由工具自己负责
+## 本目录的手动测试工具
 
-## 示例：test.py
+[test.py](test.py) 的四个工具全部注册为 `:intrinsic`，加载本目录后会直接进入正式轮次的工具列表：
 
-| 工具 | 作用 | 验证点 |
-| --- | --- | --- |
-| `test_daily_tasks` | 把当前会话的 `last_active_time` 置 0，然后执行 `_daily_task` | 会话清理、插件 `cleanup` 协程、用量结算 |
-| `test_compact_context` | 对当前会话执行一次上下文压缩 | 摘要生成、`histories/*.md` 落盘、「下一轮生效」 |
-| `test_raise_exception` | 故意触发 `TypeError` | 失败提示、`tool_failures` 记录、调用链不中断 |
-| `test_reload_skill` | 打印重载前后的 manifest，再 `reload_skills()` + `sync_menu()` | 分类 / 工具 / 脚本映射是否正确重建 |
+| 工具                   | 实际行为                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `test_daily_tasks`     | 将当前会话活动时间置零并执行全局 `_daily_task()`，影响过期会话、清理钩子和用量计数 |
+| `test_compact_context` | 对当前会话尝试摘要压缩，返回“下一轮生效”                                           |
+| `test_raise_exception` | 故意用字符串加整数触发 TypeError，验证失败记录                                     |
+| `test_reload_skill`    | 打印重载前后清单，执行 `reload_skills()` 和 `sync_menu()`                          |
 
-四个工具都注册在 `:intrinsic`，启动后直接在对话里调用即可。`test_reload_skill` 的打印输出在宿主终端，适合开发时对照 manifest。
+这些是开发工具，不是自动化测试。部署不需要时从 `plugin_dirs` 移除本目录，避免模型调用维护操作。
 
-> `test_daily_tasks` 会把当前会话从缓存中清除，下一次消息会重新创建会话；这是预期行为。
+## 调试与开发约定
 
-## 调试与热重载
+工具集 `debug_utils` 提供源码查看、失败详情与 Python 模块重载，默认关闭，见 [工具集文档](../clovers-agent-toolkit/README.md)。Skill 热重载后还需同步分类菜单；修改插件后可重启宿主。
 
-- 失败记录：`agent.tool_failures`（最多 5 条）保存工具名、参数与 traceback；官方工具集的 `debug_utils` 可以把它们编号、展开并查看源码
-- Python 模块热重载：官方工具集的 `reload_module` 会 detach 旧工具、重新导入模块、`merge` 新工具
-- Skill 热重载：`agent.reload_skills()`（示例见 `test_reload_skill`）
-- 修改插件文件后，若不使用 `reload_module`，需要重启宿主
-
-## 最佳实践
-
-- **异步**：不要阻塞事件循环；网络与磁盘 IO 用 `await`
-- **超时**：外部请求自己设置超时，工具调用链没有单独的每工具超时
-- **返回值可控**：长输出截断，二进制不要直接塞进上下文
-- **路径安全**：涉及文件时校验在工作区内，拒绝 `..`
-- **幂等**：模型可能重复调用，副作用要可重复执行
-- **密钥**：不要从工具结果里回显密钥
-- **错误信息**：模型只看到 `failed`，需要可诊断的细节请写日志
-
-## 常见问题
-
-| 现象 | 排查 |
-| --- | --- |
-| 工具没出现在列表 | 模块是否被加载、是否导出 `TOOLS`、分类是否登记了描述 |
-| 启动报重名 | 工具 / intro / 分类与已加载插件冲突 |
-| 改了代码不生效 | 没有热重载；使用 `reload_module` 或重启 |
-| 模型不调用 | `description` 太模糊，或参数 schema 缺失 |
-| 调用报 invalid args | 参数名 / 类型与函数签名不一致 |
-
-## 安全
-
-插件代码在宿主进程内执行，权限与宿主相同：文件、网络、Docker 都可达。只安装可信插件；不要在插件里硬编码密钥；对模型生成的路径、URL、命令做校验。
-
-## License
-
-MIT，见工作区根目录的说明。
+工具在宿主进程内运行，与宿主共享权限。同一次模型响应中的工具会并发执行，共享状态应自行加锁。外部请求设置超时，阻塞任务放到线程，控制返回内容长度；框架没有独立的每工具超时，也不保证外部副作用回滚。

@@ -1,209 +1,154 @@
-# AgentSkills
+# Skill 编写与示例
 
-**用 Markdown 给 `clovers-agent` 写工具。**
-Authoring guide and examples for clovers-agent skills.
+Skill 把场景提示、工具正文、Python 实现、脚本和参考资料组织到一起，由核心按需加载。加载器实现见 [core.py](../clovers-agent/clovers_agent/core.py)。需要直接使用宿主对象注册工具时，也可采用 [Python 插件](../AgentTools/README.md)。
 
-Skill 是「渐进披露」的工具包：分类只暴露一段描述，模型真正需要时才加载整个工具组、提示词、脚本与参考资料。相比 Python 工具插件，Skill 更适合**以提示词和脚本为主**、需要频繁调整文案的任务。
+## 发现与加载
 
-本目录下的 [`weather/`](weather/) 是可运行的模板，演示了分类、Markdown 工具、`skill.py`、脚本与引用文件的完整组合。
+核心默认 `skill_dirs=["./AgentSkills", "~/.agents/skills"]`。每个路径是 Skill 根目录，加载器遍历它的直接子项，子项可以是 `.md` 文件或带 `SKILL.md` 的目录；不是任意层级递归寻找 Skill。`~` 会展开，相对路径按宿主工作目录解释。
 
-## 目录结构
+| 形式                                                                   | 注册结果                                               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------ |
+| 根目录下单个有效 `.md`                                                 | intro 场景入口，没有配套 Python 自动匹配               |
+| 子目录只有有效 `SKILL.md`，无其他有效工具 Markdown、脚本文件和引用文件 | intro，可绑定该目录 `skill.py` 中的同名函数            |
+| 子目录还有有效工具 Markdown，或 `scripts/`、`references/` 内有文件     | 分类，`SKILL.md` 定义分类，其他有效顶层 `.md` 定义工具 |
 
-```text
-AgentSkills/
-└── weather/
-    ├── SKILL.md                 # 必需：分类定义与分类提示词
-    ├── 1-weather-report.md      # 工具定义：front matter + 正文
-    ├── 2-this-is-a-test.md      # 工具定义：正文是一段工作流
-    ├── skill.py                 # 可选：同名函数实现工具
-    ├── scripts/
-    │   └── random_number.py     # 由 execute_script 执行
-    └── references/
-        └── task*.md             # 由 read_reference 读取
-```
+是否存在附加资源按实际文件判断：空的 `scripts/` / `references/` 目录不会使 intro 变成分类。工具 Markdown 只扫描 Skill 目录顶层；脚本和引用文件递归扫描。
 
-一个 Skill 是 `skill_dirs`（默认 `./AgentSkills`、`~/.agents/skills`）下的一个子目录；也可以直接是一个 `.md` 文件。
+分类描述进入 `load_tools` 菜单，加载后注入工具、分类提示，以及脚本 / 引用参数枚举。intro 则进入场景路由菜单，不通过 `load_tools` 激活。
 
-## SKILL.md 规范
+## Markdown 格式
+
+文件使用 UTF-8 和 YAML front matter。`name`、`description` 必须是非空字符串，名称中的 `-` 转为 `_`。缺字段、解析失败的文件通常静默跳过；正文或 Python 实现均为空的工具不会注册。
+
+### 分类定义 `SKILL.md`
 
 ```markdown
 ---
-name: weather
-description: 包含天气相关的工具。如查询天气等
+name: demo
+description: 用户需要演示工具时加载
 ---
 
-此工具包为 Clovers Agent SKILL 模板，非生产环境使用。
-若确认当前为测试场景，你应该调用 `this_is_a_test` 而非 `weather_report`。
+先确认用户需要的输出，再调用本分类工具。
 ```
 
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `name` | 是 | 分类名 / intro 名；`-` 会转成 `_` |
-| `description` | 是 | 分类描述，会出现在 `load_tools` 的菜单里 |
-| 正文 | 否 | 分类钩子的提示词；在 `load_tools` 加载该分类时注入 |
+每个 Skill 分类需要独占名称。目录作为分类时，正文成为分类钩子的返回文本；若 `skill.py` 有与分类名匹配的函数，正文作为 `content` 传入该函数。空正文且没有函数的分类仍需有效工具等内容支撑，不应只创建空分类。
 
-加载规则：
+### 分类工具
 
-1. 目录里**只有** `SKILL.md`（没有其他 `.md`、`scripts/`、`references/`）：注册为 intro 工具；没有同名 `skill.py` 函数时，正文在该 intro 被选中时作为系统提醒（`<system-reminder>`）注入
-2. 目录里还有 `.md` / `scripts/` / `references/`：`SKILL.md` 的 `name` 成为分类名，正文成为分类钩子的返回值（有同名函数时作为 `content` 传入），其他 `.md` 注册为分类工具
-3. 单个 `.md` 文件：注册为 intro 工具；没有同名 `skill.py` 函数时，正文在该 intro 被选中时作为系统提醒注入
-4. 一个 Skill 独占一个分类，不能与其他 Skill 共用
-
-## 工具 Markdown 规范
+在同目录创建 `echo.md`：
 
 ```markdown
 ---
-name: weather-report
-description: 查询天气预报信息
+name: demo-echo
+description: 将文本交给示例处理函数
 parameters:
   type: object
   properties:
-    city:
+    text:
       type: string
-      description: 需要查询的城市
+      description: 输入文本
   required:
-    - city
+    - text
 ---
 
-## {city}城市天气信息
-
-时间: {now}
-天气: {weather}
+收到的文本：{text}
 ```
 
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `name` | 是 | 工具名；`-` 会转成 `_` |
-| `description` | 是 | 给模型看的工具描述 |
-| `parameters` | 否 | JSON Schema；读取 `properties` 与 `required` |
-| 正文 | 否 | 传给 `skill.py` 同名函数的 `content`；没有同名函数时直接作为工具结果返回 |
+`parameters` 是完整 object schema，加载器读取其中的 `properties` 和 `required`。这与 Python `TOOLS.register()` 直接接收 properties 映射不同。省略 `required` 时所有参数被标为必填；`required: []` 表示无必填，函数也要有相应默认值。
 
-要点：
+正文不会自动格式化。没有 Python 实现的分类工具直接返回正文，且包装函数不接收工具参数；这类纯文本工作流工具应省略 `parameters`。需要参数或模板替换时提供同名 Python 函数。
 
-- 正文不是「说明」，而是**工具的输出或模板**。分类内没有 `skill.py` 时，模型拿到的就是正文原文（占位符不会被替换）
-- 工具名会归一化：`weather-report` 注册为 `weather_report`，正文里引用工具时建议写归一化后的名字
-- `parameters.required` 缺省时，`register` 会把所有参数都标为必填；不需要参数的工具请省略 `parameters`
-- 同一个目录内的工具名不能重复
+### `skill.py`
 
-## skill.py
-
-`skill.py` 中与 Markdown 工具同名的函数会被接到该工具上。名称按归一化后的形式匹配：
-
-| Markdown `name` | `skill.py` 函数 |
-| --- | --- |
-| `weather-report` | `weather_report` |
-| `this-is-a-test` | `this_is_a_test` |
-
-函数签名固定（`content` 必须是关键字参数）：
+为上面的 `demo-echo` 配置归一化后的 `demo_echo` 函数：
 
 ```python
 from clovers_agent import cast_invoker, CloversAgent, Turn, Event
 
 @cast_invoker
-async def weather_report(
+async def demo_echo(
     agent: CloversAgent,
     turn: Turn,
     event: Event,
     content: str,
-    city: str,
+    text: str,
 ) -> str:
-    ...
-    return content.format(city=city, now=..., weather=...)
+    return content.format(text=text)
 ```
 
-- 必须是 `async`，返回值会被包装成工具消息
-- `content` 是该 Markdown 的正文（已 `strip()`），通常用它做模板
-- 其他参数来自 `parameters`，类型由模型按 schema 生成
-- `skill.py` 在加载 Skill 时被 `importlib` 执行；导入失败不会中断加载，工具会退回「直接返回正文」
-- 没有同名函数时无需 `skill.py`
+加载器通过关键字 `content=正文` 传入模板，因此形参不能设为 positional-only，也不要求语法上必须为 keyword-only。`cast_invoker` 是类型标注辅助，运行时直接返回原函数，不负责参数验证或格式化。
 
-## scripts
+Markdown 正文为空时，函数直接作为实现，不会注入 `content`。`skill.py` 在发现目录时执行；导入异常被吞掉，可能退回正文实现，应结合工具实际返回值排查，不能只凭“加载成功”认定 Python 已生效。
 
-`scripts/` 下的所有文件会被映射为 `<skill_name>/<相对路径>`，并在分类加载时作为 `execute_script` 的参数枚举注入：
+### intro 的特殊要求
+
+纯 Markdown intro 会建立使用 `agent.api(归一化名称)` 和 `agent.style_prompt` 的 payload，将正文加入本轮提示，返回自身名称。可以使用 `apis.<名称>` 配置模型。
+
+自定义 Python intro 则负责 `turn.create_payload()`，返回实际场景名，参照 [on-erotic/skill.py](on-erotic/skill.py)。路由忽略模型产生的入口参数，入口函数应能仅凭上下文及可选注入的 `content` 执行，不能要求用户参数。
+
+## 脚本与引用
 
 ```text
-scripts/random_number.py  →  weather/random_number.py
+AgentSkills/
+└── demo/
+    ├── SKILL.md
+    ├── echo.md
+    ├── skill.py
+    ├── scripts/
+    │   └── calculate.py
+    └── references/
+        └── guide.md
 ```
 
-模型调用：
+脚本映射为 `demo/calculate.py`，引用映射为 `demo/guide.md`；映射名不含 `scripts/`、`references/` 前缀。分类加载后才会在本轮枚举中显示。
+
+脚本调用示意：
 
 ```json
-{"path": "weather/random_number.py", "interpreter": "python", "args": ["1", "50"], "timeout": 30}
+{ "path": "demo/calculate.py", "interpreter": "python", "args": ["1", "10"], "timeout": 30 }
 ```
 
-- `interpreter` 为 `python` / `python3` 时使用宿主解释器；留空表示直接执行文件；其他值按命令名查找
-- `timeout` 默认 120 秒，最大 1800 秒；超时会终止进程
-- 只保留输出末尾约 1600 字符；回车覆盖的进度条会被清理
+- `execute_script` 在宿主运行，不在工具集 Docker 容器中。`python` / `python3` 使用宿主当前解释器，空字符串表示直接执行文件，其他值作为解释器命令。
+- 不设置脚本工作目录，脚本需要自行按自身路径定位资源。
+- 默认超时 120 秒，上限 1800 秒，超时尝试终止进程。
+- 返回退出码以及 stdout / stderr，各保留末尾约 1600 字符，并处理回车覆盖的进度输出。
+- `read_reference(path)` 读取完整文件并探测编码，没有内置长度截断。
 
-脚本适合做确定性、可复现的脏活（抓数据、转格式、跑计算），不要把需要模型判断的逻辑写进脚本。
+Skill Python 与脚本拥有宿主权限，只应加载可信内容。参数枚举是给模型的路径提示，不是独立的执行权限边界。
 
-## references
+## 仓库示例的实际状态
 
-`references/` 下的文件同样映射为 `<skill_name>/<相对路径>`，由 `read_reference` 读取：
+| 目录         | 注册名称与状态                                                                    |
+| ------------ | --------------------------------------------------------------------------------- |
+| `weather/`   | 分类 `weather`，包含真实天气请求、测试工作流、脚本和 10 个参考任务                |
+| `on-erotic/` | intro `on_erotic`，由 Python 实现设置场景风格与模型，并返回普通聊天场景 `on_chat` |
 
-```text
-references/task1.md  →  weather/task1.md
-```
+`weather` 文件对应关系：
 
-- 读取完整文件，编码由 chardet 探测
-- 适合放长文档、检查清单、任务模板；不要让模型一次读入大量无关资料
-- 引用文件只在对应分类被加载后可用
+| 文件                                | 作用                                                            |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `SKILL.md`                          | 分类定义，提示测试场景选择测试工作流                            |
+| `1-weather-report.md`               | 工具 `weather_report`，参数 `city`，正文为天气模板              |
+| `skill.py`                          | 请求 `wttr.in`，解析 JSON 并格式化天气模板，依赖外网            |
+| `2-this-is-a-test.md`               | 工具 `this_is_a_test`，返回查天气、运行脚本、读取任务的流程正文 |
+| `scripts/random_number.py`          | 随机数与进度输出演示                                            |
+| `references/task1.md` … `task10.md` | 测试任务资料                                                    |
 
-## 加载与重载
+调用顺序示意：`load_tools(category="weather")` → `weather_report(city="北京")`，或调用 `this_is_a_test` 后按工作流执行脚本与引用读取。脚本路径为 `weather/random_number.py`，参考路径如 `weather/task1.md`。
 
-- `startup()` 时扫描 `skill_dirs`，逐个调用 `load_skill`
-- `reload_skills()` 会清空已加载的 intro / 分类 / 脚本 / 引用映射，然后重新扫描
-- 没有内置的聊天命令触发热重载；示例插件 [`AgentTools/test.py`](../AgentTools/test.py) 提供了 `test_reload_skill` 便于验证
-- 加载失败通常**静默跳过**（例如 front matter 缺字段），排查时看启动日志里的 `[LOAD SKILL]`
-- 重载时分类名 / 工具名冲突会抛 `ValueError`
+示例工作流正文仍使用部分原始连字符名称和相对文件名，实际模型工具名与路径应以上述归一化名称和枚举为准。天气与动画脚本用于演示，不应把示例当作经过生产验证的业务功能。
 
-## weather 示例
+## 重载与排查
 
-| 文件 | 作用 |
-| --- | --- |
-| `SKILL.md` | 定义分类 `weather`；正文说明这是模板，测试场景应走 `this_is_a_test` |
-| `1-weather-report.md` | 工具 `weather_report`，参数 `city`；正文是带 `{city}` 等占位符的天气模板 |
-| `2-this-is-a-test.md` | 工具 `this_is_a_test`；正文是一段工作流：查天气 → 跑脚本 → 读引用 → 汇总 |
-| `skill.py` | `weather_report` 请求 `wttr.in` 的 JSON 接口，把实时数据渲染进模板 |
-| `scripts/random_number.py` | 模拟带进度条 / 转圈动画的随机数脚本，演示回车覆盖输出的处理 |
-| `references/task1.md` … | 10 个纯文本任务，供测试流程随机抽取 |
+启动时加载 Skill。开发中可调用 `agent.reload_skills()`，随后 `agent.sync_menu()` 更新分类菜单；本目录没有内置聊天重载命令，开发插件 [test.py](../AgentTools/test.py) 提供 `test_reload_skill`。
 
-一次典型的测试流程：
+重载会移除追踪到的 Skill 入口和分类，清空脚本 / 引用映射，再重新扫描；这不是原子事务，重名或加载异常可能中断过程。应避免在活动调用链依赖旧工具时进行重载。
 
-1. 用户询问天气，模型调用 `load_tools("weather")`
-2. 分类钩子注入 `SKILL.md` 正文，`weather_report` / `this_is_a_test` 变得可用
-3. 模型调用 `weather_report(city="北京")`，`skill.py` 拉取数据并渲染模板
-4. 若走测试分支：`this_is_a_test` 指示模型执行 `execute_script` 跑 `random_number.py`，再用 `read_reference` 读取随机任务并完成
-
-注意事项：
-
-- 示例依赖外网 `wttr.in`，离线环境会失败
-- 脚本故意包含耗时动画（约 20 秒），用于验证输出清洗与超时设置，不是生产代码
-- 正文里的工具名建议与注册名一致（`weather_report` / `this_is_a_test`），否则模型可能调用不存在的名字
-
-## 编写建议
-
-- **一个分类一件事**：分类描述写清楚「什么时候该加载」，比堆工具更重要
-- **控制加载体积**：`SKILL.md` 正文会随 `load_tools` 进入工具消息，工具正文会进入工具结果，长文本请放 `references/`
-- **工具名用下划线**：归一化规则容易让正文与注册名不一致
-- **确定性逻辑放脚本**：返回结构化结果，让模型负责解释
-- **路径不要写死**：脚本与引用都用映射路径，不要依赖宿主的当前目录
-- **可重入**：脚本可能被重复执行，避免不可逆的副作用
-
-## 常见问题
-
-| 现象 | 原因 |
-| --- | --- |
-| Skill 没加载 | 缺 `SKILL.md`、front matter 缺 `name` / `description`、目录不在 `skill_dirs` |
-| 分类不在菜单 | `SKILL.md` 缺 `description`，或加载时被静默跳过 |
-| 工具调不到 | 工具名被归一化（`-` → `_`），或分类还没 `load_tools` |
-| 脚本找不到 | `execute_script` 的 `path` 要写完整映射路径（`weather/random_number.py`） |
-| 重载后重复 | 同名分类 / 工具已存在；检查是否手工复制了 Skill 目录 |
-
-## 安全
-
-`skill.py` 会在加载时执行，`scripts/` 会被模型按需执行。Skill 目录等价于可执行代码目录，只放可信内容；不要把密钥写进 Skill 或脚本，模型与日志都可能看到。
-
-## License
-
-MIT，见工作区根目录的说明。
+| 现象                       | 排查                                                    |
+| -------------------------- | ------------------------------------------------------- |
+| Skill 不出现               | 根目录配置、直接子项布局、UTF-8、front matter 必填字段  |
+| 名称看起来正确但调不到     | `-` 已转成 `_`，或分类尚未加载                          |
+| 只返回模板、占位符原样保留 | `skill.py` 导入失败、函数名不匹配，或没有实现模板格式化 |
+| 参数报 invalid args        | 纯正文工具配置了参数，或函数签名与 schema 不一致        |
+| 脚本 / 引用找不到          | 使用完整枚举路径，且先加载对应分类                      |
+| 重载冲突                   | 分类独占要求、归一化后名称重复、加载目录重叠            |

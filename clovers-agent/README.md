@@ -1,376 +1,186 @@
 # clovers-agent
 
-**Clovers 的异步群聊 Agent 插件。**
-An async, tool-using chat agent for [clovers](https://clovers-project.github.io/), built on OpenAI-compatible APIs.
+Clovers 异步 Agent 核心插件，负责消息准入、会话、路由、模型请求、工具循环、Skill 加载和记忆压缩。当前源码版本 `0.3.9`。
 
-`clovers-agent` 负责「一个群聊里的 AI 群友」这件事：维护每个会话的记忆，判断消息是在跟它说话还是群友闲聊，按场景加载工具，执行工具调用链，并把结果拆成多条消息发出去。工具与技能都可以在不改核心代码的情况下扩展。
-
-## 特性
-
-- **会话级状态**：按群 / 私聊隔离，JSONL 持久化，进程内缓存，闲置超时清理
-- **语义路由**：多个场景（intro）时用轻量模型选场景，避免把所有工具塞进同一次请求
-- **工具循环**：单轮最多 `max_call_depth` 步；工具可并行；支持中途注入补充说明
-- **Skill 系统**：Markdown 定义工具与分类，`skill.py` 补实现，`scripts/` / `references/` 提供可执行资源
-- **记忆压缩**：长度 / 时间 / 话题切换触发，摘要落盘为 Markdown，可继续检索
-- **主动插话**：未点名时按冷却时间决定是否接话；执行中收到消息走旁路修正
-- **多模型**：默认 / `router` / `chime_in` / `summary` / `on_task` 可分别配置
-- **视觉**：`api.vision` 配置后，图片先转写为文字再交给主模型
-- **可运维**：token 用量按日统计、失败现场快照、每日会话清理、插件启动 / 关闭钩子
-
-## 工作原理
-
-```mermaid
-flowchart TD
-    A[平台事件] --> B{准入规则 check}
-    B -- 拒绝 --> Z[忽略]
-    B --> C[定位 Session]
-    C --> D{to_me?}
-    D -- 否 --> E{可插话?}
-    E -- 是 --> F[chime-in 主动回复]
-    E -- 否 --> G[仅记录历史]
-    D -- 是 --> H{execute_lock}
-    H -- 执行中 --> I[aside 旁路修正]
-    H -- 空闲 --> J[必要时压缩上下文]
-    J --> K[Router 选择 intro]
-    K --> L[注入 intrinsic / intro 工具]
-    L --> M[工具调用循环]
-    M --> N[分片发送 + 记录]
-```
-
-一次点名对话大致是：
-
-1. 事件通过准入规则，按 `group_id`（群）或 `private-<user_id>`（私聊）找到 `Session`
-2. 记录这条消息；若开启了旁路且主任务正在执行，走 `aside` 分支
-3. 获取 `execute_lock`，必要时先压缩历史
-4. `Router` 在多个 intro 中选择一个（只有一个时直接 `on_chat`）
-5. 注入 `:intrinsic` 工具、当前 intro 的工具，以及引用的消息 / 图片
-6. 执行 intro 钩子，拼装本轮提示词，进入工具循环
-7. 每产出文本就交给 `send`，轮末把输入与最终回复写入 `recorder.jsonl`
-
-## 安装
-
-```bash
-pip install clovers-agent
-```
-
-或从本工作区安装：
-
-```bash
-uv sync --all-packages
-```
-
-`clovers-agent` 不是独立进程，需要由 clovers 宿主加载。安装后让宿主启用 `clovers_agent` 插件即可；包内导出 `PLUGIN` 与 `AGENT`。
+安装与宿主接入见 [仓库首页](../README.md)。本包导出 `PLUGIN`、`AGENT`、`CloversAgent`、`AgentTools`、`Turn`、`Event`、`cast_invoker`。
 
 ## 配置
 
-配置由 `clovers_client.Config.sync_config("clovers_agent")` 托管，首次运行生成默认值，字段名即配置键。
+配置模型见 [config.py](clovers_agent/config.py)，通过 `Config.sync_config("clovers_agent")` 接入宿主配置。`api` 没有默认值，使用前必须填写。
 
-### 最小配置
+### 顶层字段
 
-| 键                   | 类型   | 说明                                                      |
-| -------------------- | ------ | --------------------------------------------------------- |
-| `api.url`            | `str`  | OpenAI 兼容接入点根地址，例如 `https://api.openai.com/v1` |
-| `api.model`          | `str`  | 模型名                                                    |
-| `api.api_key`        | `str`  | API Key                                                   |
-| `check.console_mode` | `bool` | 本地联调时设为 `true`，放行所有事件                       |
+| 字段                   | 默认值                                     | 含义                                          |
+| ---------------------- | ------------------------------------------ | --------------------------------------------- |
+| `path`                 | `./data/CloversAgent/`                     | 会话、用量、提示词等数据根目录                |
+| `plugins`              | `[]`                                       | Python 工具模块名，如 `clovers_agent_toolkit` |
+| `plugin_dirs`          | `["./AgentTools"]`                         | 本地 Python 工具目录                          |
+| `skill_dirs`           | `["./AgentSkills", "~/.agents/skills"]`    | Skill 根目录，扫描直接子项，此处展开 `~`      |
+| `api`                  | 必填                                       | 默认模型配置                                  |
+| `apis`                 | `{}`                                       | 命名模型配置，缺失的用途回退 `api`            |
+| `sentence_model`       | `BAAI/bge-small-zh-v1.5`                   | 话题检测使用的句向量模型                      |
+| `sentence_model_cache` | `./data/CloversAgent/sentence_model_cache` | 句向量缓存，修改 `path` 不会连带修改它        |
+| `max_call_depth`       | `40`                                       | 一条调用链最多请求模型的次数，不是工具总数    |
+| `chime_in_cooldown`    | `3600`                                     | 主动插话冷却秒数                              |
+| `httpx_timeout`        | `300`                                      | 共享 HTTP 客户端默认超时秒数，部分请求会覆盖  |
+| `session`              | 见下表                                     | 记忆与短期窗口配置                            |
+| `prompts`              | 见下文                                     | 默认提示词                                    |
+| `constant`             | 见源码                                     | 标签、内置工具名称、描述与脚本限制等常量      |
+| `check`                | 关闭 / 空列表                              | 消息准入                                      |
 
-### 完整配置
+相对路径按宿主当前工作目录解释。启动依次加载句向量模型、提示词、Python 插件和 Skill，再同步菜单、验证清单并调度启动钩子。
 
-| 键                     | 默认值                                     | 说明                                       |
-| ---------------------- | ------------------------------------------ | ------------------------------------------ |
-| `path`                 | `./data/CloversAgent/`                     | 数据根目录（会话、用量、提示词、模型缓存） |
-| `plugins`              | `[]`                                       | 额外加载的工具插件模块名                   |
-| `plugin_dirs`          | `["./AgentTools"]`                         | 本地 Python 工具插件目录                   |
-| `skill_dirs`           | `["./AgentSkills", "~/.agents/skills"]`    | Skill 目录，每个子项是一个 skill           |
-| `api`                  | 必填                                       | 默认模型接入点                             |
-| `apis`                 | `{}`                                       | 命名模型接入点，见下节                     |
-| `sentence_model`       | `BAAI/bge-small-zh-v1.5`                   | 句向量模型（话题解耦）                     |
-| `sentence_model_cache` | `./data/CloversAgent/sentence_model_cache` | 向量模型缓存目录                           |
-| `max_call_depth`       | `40`                                       | 单轮工具调用链上限，超出后按异常处理       |
-| `chime_in_cooldown`    | `3600`                                     | 主动插话冷却，单位秒                       |
-| `session`              | 见下表                                     | 会话与记忆参数                             |
-| `prompts`              | 见「提示词」                               | 默认提示词                                 |
-| `constant`             | 见 `constants.py`                          | 内置标签、工具描述等，通常不用改           |
-| `check`                | 见「准入规则」                             | 插件级准入控制                             |
+### 模型接入点
 
-#### 模型接入点
+`api` 与 `apis.<用途>` 均使用如下结构：
 
-`api` 与 `apis.*` 的结构相同：
-
-| 键           | 说明                                                              |
-| ------------ | ----------------------------------------------------------------- |
-| `url`        | 接入点根地址，请求发往 `{url}/chat/completions`                   |
-| `model`      | 模型名（同时作为用量统计的分组键）                                |
-| `api_key`    | 鉴权 Key，以 `Authorization: Bearer` 发送                         |
-| `extra_body` | 额外请求体，会合并进每个请求（注意不要覆盖 `model` / `messages`） |
-| `vision`     | 可选，另一个 `OpenAIConfig`；纯文本模型用它转写图片               |
-
-`apis` 的内置键：
-
-| 键           | 用途                                                                 |
-| ------------ | -------------------------------------------------------------------- |
-| `router`     | 语义路由；建议用便宜、快的模型                                       |
-| `chime_in`   | 主动插话与闲聊回复                                                   |
-| `summary`    | 上下文压缩                                                           |
-| `on_chat`    | 普通聊天场景                                                         |
-| `on_task`    | 官方工具集的任务场景                                                 |
-| `<intro 名>` | 任意 intro 也可以单独指定模型，例如 `on_chat` 或自定义的单文件 skill |
-
-未配置的键自动回退到默认 `api`。
-
-#### 会话参数
-
-| 键                | 默认值  | 说明                               |
-| ----------------- | ------- | ---------------------------------- |
-| `memory_timeout`  | `86400` | 记忆超时（秒），也是图片保留时长   |
-| `memory_size`     | `240`   | 触发压缩的对话条数                 |
-| `silence_timeout` | `3600`  | 静默窗口（秒），用于拼装当前话题   |
-| `silence_size`    | `10`    | 静默窗口最多保留的消息条数         |
-| `decouple_length` | `3000`  | 累计字符数超过后才启用话题解耦判断 |
-| `decoupler_alpha` | `0.8`   | 话题向量的指数衰减系数             |
-| `router_size`     | `3`     | 路由模型参考的历史对话条数         |
-
-#### 准入规则
-
-`check` 的四种模式按优先级生效：
-
-1. `whitelist` 非空：只处理 `group_id` 在白名单内的群消息
-2. `blacklist` 非空：只处理 `group_id` 不在黑名单内的群消息
-3. `console_mode = true`：处理所有事件
-4. 以上都不满足：插件关闭
-
-白 / 黑名单只作用于群聊（`group_id` 为空的消息会被拒绝）；私聊联调请用 `console_mode`。
-
-## 会话与记忆
-
-### 会话 ID
-
-| 事件 | 会话 ID             |
-| ---- | ------------------- |
-| 群聊 | `group_id`          |
-| 私聊 | `private-<user_id>` |
-
-会话按需创建，进程内保存在 `CloversAgent.sessions`，并落在 `{path}/sessions/<session_id>/`。
-
-### 记录与窗口
-
-- `recorder.jsonl` 保存完整对话（用户文本 + 助手回复 + 时间戳），图片以 `[image:<id>]` 占位，原图 URL 存在内存的 `image_recorder`
-- `message_history` 是「当前话题」的短窗口，`prompt_text` 由它拼成 `<user name="...">` 格式
-- 未点名的消息也会先记录，供插话与后续上下文使用
-- 每轮结束后才把整轮写入 `recorder`，因此中途失败不会污染长期记忆
-
-### 压缩
-
-满足任一条件时，在下一次点名对话前触发压缩：
-
-- `recorder` 条数超过 `memory_size`
-- 最早一条记录早于 `memory_timeout`
-- 累计字符数超过 `decouple_length` 且话题解耦器检测到话题切换
-
-压缩由 `summary` 模型生成 `overview` / `keywords` / `summary`，写入 `{path}/sessions/<id>/histories/<时间> <随机>.md`，并清空 `recorder.jsonl`。历史文件不会被自动删除。
-
-### 并发与旁路
-
-- 每个会话有 `execute_lock`：同一会话的正式轮次串行执行
-- `aside_lock`：主任务执行期间收到消息时，`aside` 用独立轮次判断「补充 / 纠正 / 询问进度 / 闲聊」，必要时通过 `inject_prompt` 把内容注入主任务
-- `chime_in` 只在未点名、无 @、冷却已过且会话空闲时触发
-
-### 唤醒（wakeup）
-
-`submit_turn_for_wakeup(turn, event)` 把一条独立调用链挂到当前会话的唤醒上下文。当前调用链结束后，Agent 会把这些任务的结果拼成一条唤醒消息，恢复会话继续执行。官方工具集的 `subagent` 就建立在这套机制上。
-
-## 工具系统
-
-### 注册工具
-
-```python
-from clovers_agent import AgentTools, CloversAgent, Turn, Event
-
-TOOLS = AgentTools()
-TOOLS.create_category("demo", "演示工具组")   # 让分类出现在 load_tools 菜单
-
-@TOOLS.register(
-    "echo",
-    "原样返回输入文本",
-    {"text": {"type": "string", "description": "要回显的文本"}},
-    category="demo",
-)
-async def _(agent: CloversAgent, turn: Turn, event: Event, text: str) -> str:
-    return text
+```json
+{
+  "url": "https://your-provider.example/v1",
+  "model": "your-model",
+  "api_key": "your-api-key",
+  "extra_body": {}
+}
 ```
 
-注册签名：
+请求地址是去除末尾 `/` 后的 `url` 加 `/chat/completions`，使用 Bearer 鉴权。`extra_body` 在构建请求时合并，能覆盖 `model`、`messages` 等字段。当前按完整 JSON 响应解析，不支持流式响应。
 
-```python
-register(
-    name: str,
-    description: str,
-    parameters: dict[str, JSONSchema] | None = None,
-    category: str | Iterable[str] | None = None,
-    required: list[str] | None = None,
-)
+网络请求异常、HTTP 429 和 5xx 会重试；模型请求最多尝试 3 次，并非所有 HTTP 错误都会重试。
+
+可选 `vision` 使用相同四个字段，指向独立视觉模型，不支持继续嵌套 `vision`。有此配置时先将图片转写为文字，再交给主模型。
+
+| `apis` 键  | 实际用途                                                                       |
+| ---------- | ------------------------------------------------------------------------------ |
+| `router`   | 选择场景入口                                                                   |
+| `on_chat`  | 内置普通聊天                                                                   |
+| `chime_in` | 主动插话                                                                       |
+| `summary`  | 历史摘要                                                                       |
+| `on_task`  | 官方工具集工作区场景；路由入口名实际为 `on_workspace`                          |
+| 自定义键   | intro 实现通过 `agent.api(key)` 选择；纯 Markdown intro 默认使用自身归一化名称 |
+
+旁路使用当前主任务的 API，子代理默认继承创建它的轮次 API。配置一个键不会自动创建对应场景。
+
+### 会话参数 `session`
+
+| 字段              | 默认值  | 含义                                                         |
+| ----------------- | ------- | ------------------------------------------------------------ |
+| `memory_timeout`  | `86400` | 完成轮次的记忆超时、图片映射保留时间、每日过期清理判断的秒数 |
+| `memory_size`     | `240`   | 完成轮次数阈值，严格大于才触发压缩；一轮含输入和最终回复     |
+| `silence_timeout` | `3600`  | 短期窗口保留秒数，记录新消息时淘汰旧项                       |
+| `silence_size`    | `10`    | 短期消息窗口容量                                             |
+| `decouple_length` | `3000`  | 累计字符达到该值后才尝试话题检测，不是 token 上限            |
+| `decoupler_alpha` | `0.8`   | 话题向量指数衰减系数                                         |
+| `router_size`     | `3`     | 路由参考的最近完成轮次数，窗口仅存于内存                     |
+
+### 准入 `check`
+
+按顺序选择第一个满足的模式：
+
+1. `whitelist` 非空：只接收列表中的群。
+2. `blacklist` 非空：接收不在列表中的群。
+3. `console_mode=true`：接收所有事件，包括私聊。
+4. 否则不接收消息。
+
+两个名单都是字符串列表，白 / 黑名单模式要求 `group_id` 非空。`console_mode` 是放行规则，不会创建独立控制台。
+
+### 提示词覆盖
+
+`reload_prompts()` 优先读取 `{path}/prompts/` 下的非空文件，缺失或为空时使用 `prompts` 对应配置：
+
+| 文件          | 回退字段          | 用途                                         |
+| ------------- | ----------------- | -------------------------------------------- |
+| `BASE.md`     | `base_prompt`     | 消息标签等基础约定                           |
+| `STYLE.md`    | `style_prompt`    | 人设与风格                                   |
+| `CHAT.md`     | `chat_prompt`     | 聊天回复规则                                 |
+| `ROUTER.md`   | `router_prompt`   | 场景路由                                     |
+| `ASIDE.md`    | `aside_prompt`    | 旁路处理，保留用于任务输出的 `{}` 格式占位符 |
+| `CHIME_IN.md` | `chime_in_prompt` | 主动插话                                     |
+
+普通聊天系统提示由 STYLE、BASE、CHAT 依次组合；任务场景通常使用 STYLE + BASE。覆盖文件不会自动创建。修改后重启或在宿主代码中调用 `AGENT.reload_prompts()`，没有内置聊天命令。
+
+## 消息与调用链
+
+```mermaid
+flowchart TD
+    A[宿主事件] --> B{check 放行}
+    B -- 否 --> Z[忽略]
+    B -- 是 --> C[定位会话并记录短期消息]
+    C --> D{定向消息或 extra_context}
+    D -- 否 --> E{空闲且满足插话条件}
+    E -- 否 --> Z
+    E -- 是 --> F[主动插话]
+    D -- 是 --> G{主任务运行中}
+    G -- 是 --> H[旁路回复或注入提示]
+    G -- 否 --> I[摘要检查与场景路由]
+    I --> J[注入工具、引用、图片和提示]
+    J --> K[模型与工具循环]
+    K --> L[发送回复并保存完成轮次]
 ```
 
-- `category=None` 注册为 **intro 工具**（场景入口），会出现在路由菜单
-- 指定 `category` 注册为分类内的普通工具
-- `required` 缺省等于 `parameters` 的全部键；显式传 `[]` 表示无必填
-- 工具函数必须是 `async`，返回 `str`
+群会话 ID 为 `group_id`，私聊为 `private-<user_id>`。输入按昵称包装为 `<user name="...">`，定向消息加 `@ME`。适配器提供的 `flat_context` 用于引用消息；可选事件属性 `extra_context` 提供额外上下文。
 
-### 分类与注入
+普通群聊先存入短期窗口，带其他 @、未过冷却或会话忙碌时不请求插话。条件满足后直接请求 `chime_in` 模型，没有额外的“是否插话”分类步骤。携带 `extra_context` 的事件会走正式处理路径。
 
-| 分类         | 行为                                                                     |
-| ------------ | ------------------------------------------------------------------------ |
-| `:intrinsic` | 每轮自动注入，例如 `load_tools`、官方工具集的网络工具                    |
-| `:builtin`   | 框架内置工具，由内部流程按需注入（读图、注入提示、压缩）                 |
-| `:hidden`    | 不出现在 `load_tools` 菜单；由插件按需显式注入（官方工具集的工作区工具） |
-| 普通分类     | 由 `create_category` 声明，进入 `load_tools` 菜单，模型按需加载          |
+每个 Session 有 `execute_lock`、`aside_lock`。主任务运行时，新定向消息通常走旁路，旁路可以回复或调用 `inject_prompt` 补充主任务，不会把每条消息都排队为新的正式任务。旁路忙碌或主轮次已空闲时，该分支可能仅保留短期记录。
 
-`load_tools(category)` 会把该分类的工具、分类钩子的提示词、以及 `scripts` / `references` 路径一次性注入当前轮。
+### 路由、工具与发送
 
-### 工具循环与错误
+路由前运行 `:router` intro 钩子。只有内置入口时直接普通聊天；多个入口时让路由模型选择。入口函数负责 `create_payload()` 并返回本轮使用的 intro 名，随后注入 `:intrinsic`、该 intro 同名分类的工具，执行 intro 钩子。路由异常回退 `on_chat`。
 
-每一轮：
+同一次模型响应内的 `tool_calls` 使用 `asyncio.gather` 并发执行，结果加入上下文后继续请求模型。响应即使同时含工具调用，非空文本也会发送；最终无工具调用的响应结束调用链。`pending_content` 在工具结果后作为新的 user 消息注入。
 
-1. 请求模型；若返回 `tool_calls`，并行执行所有工具
-2. 追加工具结果；若工具有 `turn.pending_content`，作为新的用户消息追加
-3. 继续下一轮，直到模型返回纯文本，或达到 `max_call_depth`
+| 情况             | 返回给模型的工具结果                                       |
+| ---------------- | ---------------------------------------------------------- |
+| 工具不存在       | `` `name`: not found ``                                    |
+| 参数 JSON 不合法 | `` `name`: bad JSON args: ... ``                           |
+| 调用签名不匹配   | `` `name`: invalid args: ... ``                            |
+| 工具执行异常     | `` `name` failed ``，最近 5 条异常存入内存 `tool_failures` |
+| 返回值非字符串   | `` `name` returned bad result ``                           |
 
-错误处理：
+框架按 Python 签名调用工具，不完整验证 JSON Schema 的值类型；工具应自行校验。调用链超限或发生异常时保存 `sessions/<id>/payload_*.json` 并停用本轮。
 
-| 情况              | 返回给模型                                        |
-| ----------------- | ------------------------------------------------- |
-| 工具不存在        | `` `name`: not found ``                           |
-| 参数不是合法 JSON | `` `name`: bad JSON args: ... ``                  |
-| 参数签名不匹配    | `` `name`: invalid args: ... ``                   |
-| 工具抛异常        | `` `name` failed ``，并记入 `agent.tool_failures` |
+宿主内的 `ChatAgent.send()` 按会话串行发送：不超过 4 个非空行时逐行发送，更多行整段发送，按文本长度等待，单次最多 8 秒。这是完整响应后的分片发送，不是 token 流式输出。
 
-异常详情只进日志与失败队列，不直接回灌给模型；官方工具集的 `debug_utils` 可以读取这些记录。
+## 记忆与持久化
 
-### 内置工具
+| 数据                                       | 位置 / 生命周期                                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| 完成轮次                                   | `sessions/<id>/recorder.jsonl`，每行是输入、最终回复、时间戳组成的记录                            |
+| 历史摘要                                   | `sessions/<id>/histories/<时间> <随机值>.md`，front matter 含 `overview`、`keywords`、`timestamp` |
+| 失败现场                                   | `sessions/<id>/payload_*.json`，包含当次请求上下文                                                |
+| 用量                                       | `usages/<日期>.json`，按请求中的模型名累计 API 返回的整数 usage 字段                              |
+| 短期消息、图片映射、路由窗口、锁、扩展状态 | 仅存内存                                                                                          |
 
-| 工具               | 说明                                   |
-| ------------------ | -------------------------------------- |
-| `on_chat`          | 默认聊天场景，加载 `chat_prompt`       |
-| `load_tools`       | 按分类注入工具与资源                   |
-| `read_image_by_id` | 读取上下文里 `[image:<id>]` 对应的原图 |
-| `inject_prompt`    | 旁路修正时向主任务注入文本             |
-| `compact_context`  | 生成并落盘上下文摘要                   |
-| `execute_script`   | 执行已加载 skill 的脚本，路径来自枚举  |
-| `read_reference`   | 读取已加载 skill 的引用文件            |
+正式轮次只有最终回复非空才写入完成记录，工具过程和中途文本不作为独立历史轮次保存。普通群聊会在后续回复时并入该轮输入，JSONL 不是完整原始事件日志。
 
-### 脚本与引用
+正式输入开始时，已有记录非空且没有待唤醒任务，满足任一条件会尝试摘要：完成轮数 `> memory_size`；最旧记录早于 `memory_timeout`；累计字符达到阈值且检测到话题切换。摘要与路由可并行准备，执行正式轮次前等待摘要完成。
 
-Skill 的 `scripts/` 与 `references/` 会映射为 `<skill_name>/<相对路径>`，随后作为 `execute_script` / `read_reference` 的参数枚举注入。脚本执行：
+压缩清空完成记录、图片映射、路由窗口、字符计数，删除 `recorder.jsonl`，把摘要插入短期窗口，并写入历史 Markdown。历史文件不会在启动时自动读回上下文，核心没有内置历史检索工具。
 
-- `interpreter` 为 `python` / `python3` 时使用当前解释器；留空表示直接执行文件；其他值按命令名执行
-- `timeout` 默认 120 秒，最大 1800 秒
-- 输出只保留末尾约 1600 字符，超时会被强制终止
+每日维护在调度器时区的 02:00 执行：按 `last_active_time` 和 `memory_timeout` 清理缓存会话，删除其 `recorder.jsonl`，取消待唤醒任务，执行会话 `extra["cleanup"]` 协程及插件 `daily_tasks`。摘要目录和工具集工作区文件不会因此自动删除。用量日期及内存累计也在维护时切换，不是零点切换。
 
-## Skill 系统
+图片下载入口支持 PNG、JPEG、WebP、GIF，默认限制 10 MiB，接受 HTTP(S)、支持的 base64 data URI 和本地 `file://`。历史图片改为 `[image:<id>]`，数据映射只在内存保留；重启后无法凭旧标签恢复。
 
-Skill 是「用 Markdown 描述工具」的扩展方式，细节与示例拆解见 [AgentSkills/README.md](../AgentSkills/README.md)。
+## 扩展与唤醒
 
-### 目录结构
+- [Python 插件开发](../AgentTools/README.md)：工具、场景、分类和生命周期钩子。
+- [Skill 编写](../AgentSkills/README.md)：Markdown 工作流、可选 Python 实现、宿主脚本与资料。
+- [官方工具集](../clovers-agent-toolkit/README.md)：文件工作区、搜索、网页提取与调试。
 
-```text
-AgentSkills/
-└── weather/
-    ├── SKILL.md                 # 必需，front matter 定义分类
-    ├── 1-weather-report.md      # 工具定义（front matter + 正文）
-    ├── skill.py                 # 可选，同名函数负责实现
-    ├── scripts/                 # 可选，由 execute_script 执行
-    └── references/              # 可选，由 read_reference 读取
-```
+`Turn` 代表一次调用链，`Session` 继承它并增加记忆和锁。`turn.create_turn()` 创建共享会话 ID、扩展状态和用量计数的独立轮次，调用者仍需创建 payload 和输入。
 
-### 加载规则
+`agent.submit_turn_for_wakeup(turn, event)` 在活动会话上提交后台调用链。系统保留主轮次快照，等待会话空闲及已登记任务完成，再恢复上下文处理结果。该机制只在当前进程内有效，不是持久化任务队列。
 
-- 目录里只有 `SKILL.md`（没有其他 `.md` / `scripts` / `references`）：注册为 **intro 工具**
-- 目录里还有内容：`SKILL.md` 的 `name` 作为分类名，正文作为该分类的钩子提示词，其余 `.md` 全部注册为分类工具
-- 单独一个 `.md` 文件也可以作为 intro 工具加载
-- 名称中的 `-` 会转成 `_`；分类名、工具名、intro 名冲突会直接报错
-- 加载失败多数会静默跳过；排查时看启动日志里的 `[LOAD SKILL]`，以及 manifest 中是否出现目标分类 / 工具
+## 排查
 
-### `skill.py`
-
-与 Markdown 工具同名的函数会接到该工具上，签名固定为：
-
-```python
-async def weather_report(
-    agent: CloversAgent,
-    turn: Turn,
-    event: Event,
-    content: str,      # Markdown 正文，由框架传入
-    city: str,         # 前端 parameters 声明的参数
-) -> str:
-    ...
-```
-
-`content` 总是以关键字传入；可以用它做模板渲染（`weather` 示例就是 `content.format(**kwargs)`）。没有同名函数时，工具直接返回 Markdown 正文。
-
-## 提示词
-
-启动时读取 `{path}/prompts/` 下的文件，存在则覆盖 `config.prompts` 中的默认值：
-
-| 文件          | 用途                                   |
-| ------------- | -------------------------------------- |
-| `BASE.md`     | 基础系统提示（消息格式、@ME 语义）     |
-| `STYLE.md`    | 人设与口吻，追加到 intro 与聊天提示    |
-| `CHAT.md`     | 聊天回复准则                           |
-| `CHIME_IN.md` | 主动插话                               |
-| `ROUTER.md`   | 路由模型                               |
-| `ASIDE.md`    | 旁路修正（含 `{current_output}` 占位） |
-
-提示词只在启动时加载；没有内置的热重载命令，修改后需重启宿主。
-
-## 数据目录
-
-```text
-{path}/
-├── sessions/
-│   └── <session_id>/
-│       ├── recorder.jsonl              # 对话记录
-│       ├── histories/*.md              # 压缩后的摘要
-│       └── payload_*.json              # 失败现场（含完整请求体）
-├── usages/
-│   └── YYYY-MM-DD.json                 # 按模型的 token 用量
-├── prompts/                            # 自定义提示词
-└── sentence_model_cache/               # 向量模型缓存
-```
-
-- 每日 02:00 执行维护：清理 `last_active_time` 超过 `memory_timeout` 的会话，删除其 `recorder.jsonl`，执行插件注册的 `cleanup` 协程，并切换用量文件
-- `usage_counter` 以模型名为键累计 `total_tokens` 等字段；每轮对话结束后落盘
-- 失败快照会保留完整上下文，注意其中的用户隐私与磁盘占用
-
-## 扩展
-
-### Python 工具插件
-
-把模块放进 `plugin_dirs`（默认 `./AgentTools`），或通过 `plugins` 指定已安装模块。模块必须导出 `TOOLS = AgentTools()`，写法见 [AgentTools/README.md](../AgentTools/README.md)。
-
-### 生命周期与钩子
-
-| 钩子                | 用法                                                        |
-| ------------------- | ----------------------------------------------------------- |
-| `on_startup`        | 插件启动协程，`agent.startup()` 时并发执行                  |
-| `on_shutdown`       | 关闭协程，`agent.shutdown()` 时最多等待 30 秒               |
-| `on_intro(name)`    | intro 被选中时的钩子，返回的文本加入系统提示                |
-| `on_category(name)` | 分类被 `load_tools` 加载时的钩子                            |
-| `daily_tasks`       | 在启动钩子里 `agent.daily_tasks.append(fn)`，每日维护时执行 |
-
-### 可访问的运行时对象
-
-| 对象    | 常用成员                                                                                                                          |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `agent` | `api(key)`、`current_session(id)`、`sessions`、`send`、`usage_counter`、`tool_failures`、`extra`、`submit_turn_for_wakeup`        |
-| `turn`  | `payload`、`extend_tools`、`upsert_tool`、`extend_scripts`、`extend_references`、`pending_content`、`unit_prompts`、`create_turn` |
-| `event` | `send(type, data)`、`call("flat_context")`、`image_list`、`at`、`to_me`、`properties`                                             |
-
-## 安全
-
-- **Skill 即代码**：加载 skill 时会执行 `skill.py`（`importlib`），`execute_script` 会运行任意已映射脚本；只放行可信来源
-- **提示注入**：工具结果与用户消息都会进入模型上下文，注意工具输出中的指令性文本
-- **密钥**：`api_key` 以明文存在配置中，确保配置文件权限与版本控制忽略
-- **隐私**：失败快照与 `recorder.jsonl` 可能包含完整用户内容与图片 URL
+| 现象                 | 优先核对                                                      |
+| -------------------- | ------------------------------------------------------------- |
+| 不回复               | 模型必填配置、准入、群号字符串类型、事件 `to_me`              |
+| 启动停留在模型加载   | 句向量模型路径、网络与缓存                                    |
+| 已安装工具集但没工具 | 核心 `plugins` 是否加入 `clovers_agent_toolkit`               |
+| 分类不可见           | 是否声明分类描述、加载插件并调用 `sync_menu()`                |
+| 重启后记忆减少       | 是否已摘要或被每日清理；短期窗口本就不落盘                    |
+| 模型调用失败         | 宿主日志与 `payload_*.json`；现场文件可能含完整对话和工具内容 |
 
 ## License
 
