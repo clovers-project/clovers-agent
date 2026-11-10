@@ -45,10 +45,11 @@ class PromptsConfig(BaseModel):
     base_prompt: str = """\
 ### Format Specifications
 1. The message you receive is a chat log formatted as a list of `<user name="xxx">content</user>` tags.
-2. When the content begins with `@ME`, it indicates that the user is interacting with you directly. All other messages represent conversations among users.
-3. Pay close attention to which user sent each message based on the username in the context to avoid any confusion.
-4. The most recent message in the log is the current message. Your response must be targeted directly at this message.
-5. Your response **must not** include any of the XML-style tags used in the input. Deliver only the raw response text.
+2. If a message's content starts with `@ME`, it indicates that the message is directed at you. All other messages represent conversations among users.
+3. Pay close attention to which user sent each message based on the username associated with it to avoid any confusion.
+4. The conversation history retains only the final response from each turn, excluding intermediate execution details such as internal reasoning and tool calls.
+5. The last message in the log is the current message. Your response must be targeted directly at this message.
+6. Your response **must not** include any of the XML-style tags used in the input. Deliver only the raw response text.
 """
     """基础系统提示，建议不要修改"""
     router_prompt: str = f"""\
