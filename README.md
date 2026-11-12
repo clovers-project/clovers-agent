@@ -6,13 +6,12 @@ Clovers 的异步群聊 Agent 插件，使用 OpenAI 兼容的 Chat Completions 
 
 ## 项目组成
 
-| 目录                     | 内容                                        | 文档                                                |
-| ------------------------ | ------------------------------------------- | --------------------------------------------------- |
-| `clovers-agent/`         | 核心插件，导入名 `clovers_agent`            | [配置与运行机制](clovers-agent/README.md)           |
-| `clovers-agent-toolkit/` | 可选工具集，导入名 `clovers_agent_toolkit`  | [工具清单与工作区](clovers-agent-toolkit/README.md) |
-| `AgentTools/`            | 本地 Python 插件及开发测试工具              | [Python 插件开发](AgentTools/README.md)             |
-| `AgentSkills/`           | Markdown Skill、脚本与参考资料示例          | [Skill 编写与示例状态](AgentSkills/README.md)       |
-| `prompt-generator/`      | 独立提示词生成实验脚本，不属于 workspace 包 | [使用说明](prompt-generator/README.md)              |
+| 目录                     | 内容                                       | 文档                                                |
+| ------------------------ | ------------------------------------------ | --------------------------------------------------- |
+| `clovers-agent/`         | 核心插件，导入名 `clovers_agent`           | [配置与运行机制](clovers-agent/README.md)           |
+| `clovers-agent-toolkit/` | 可选工具集，导入名 `clovers_agent_toolkit` | [工具清单与工作区](clovers-agent-toolkit/README.md) |
+| `AgentTools/`            | 本地 Python 插件及开发测试工具             | [Python 插件开发](AgentTools/README.md)             |
+| `AgentSkills/`           | Markdown Skill、脚本与参考资料示例         | [Skill 编写与示例状态](AgentSkills/README.md)       |
 
 ## 从源码接入
 
@@ -35,7 +34,7 @@ python -m pip install ./clovers-agent-toolkit
 
 ### 2. 配置
 
-核心通过 `Config.sync_config("clovers_agent")` 接入宿主配置系统，配置存放位置由宿主决定。以下是配置内容的 TOML 示意，不是独立启动文件：
+核心通过 `Config.sync_config("clovers_agent")` 接入宿主配置系统，配置存放位置由宿主决定。以下是配置内容的 TOML 示意：
 
 ```toml
 [clovers_agent]
@@ -87,8 +86,6 @@ whitelist = ["your-group-id"]
 ```bash
 uv build --all
 ```
-
-根目录 `build.bat` 执行同一命令。`AgentTools/test.py` 是需要宿主和模型参与的手动测试工具，不是可直接运行的自动化测试套件。
 
 ## License
 
